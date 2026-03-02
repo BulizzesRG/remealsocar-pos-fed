@@ -1,0 +1,12 @@
+#!/bin/sh
+
+APP_HOME=$(cd "${0%/*}" >/dev/null 2>&1; pwd -P)
+CLASSPATH="$APP_HOME/gradle/wrapper/gradle-wrapper.jar"
+
+if [ -n "$JAVA_HOME" ] ; then
+    JAVA_CMD="$JAVA_HOME/bin/java"
+else
+    JAVA_CMD="java"
+fi
+
+exec "$JAVA_CMD" -Dorg.gradle.appname=gradlew -classpath "$CLASSPATH" org.gradle.wrapper.GradleWrapperMain "$@"
