@@ -9,6 +9,10 @@ Modules:
 - `:shared:auth` - auth/session domain, repository, startup restore, logout, 401 refresh executor
 - `:shared:features:login` - login state/viewmodel/screen
 - `:shared:features:shell` - post-login shell, role/terminal-aware route guard, placeholder screens
+- `:shared:features:sale` - cashier SALE draft flow (add/edit/remove/validate/resolve/checkout)
+- `:shared:features:cash` - cash session and reconciliation flow
+- `:shared:features:catalog` - catalog management for admin/manager
+- `:shared:features:reports` - daily history + manager dashboard/integrity
 - `:shared:ui` - shared Compose theme and base components
 
 Layering enforced:
@@ -63,6 +67,26 @@ Useful focused tests:
   - `Reports` for manager/admin
   - `Admin` only for admin role and `ADMIN` terminal
 
+## Cashier SALE flow
+- POS cashier screen for desktop terminal operation
+- Product lookup by search (`q + limit`) and barcode endpoint
+- SALE draft lifecycle: open/create current draft by terminal, add/edit/remove lines, running totals
+- Pre-checkout actions: validate draft and resolve lots
+- Checkout with `CASH` and `ON_CREDIT` modes, `Idempotency-Key`, and double-submit lock
+- Conflict handling (`409`): auto-refetch latest draft and notify cashier
+- Friendly user messages for `401/403/409/422/429/network` failures
+
+### Manual validation checklist
+1. Login with a `CASHIER` user in terminal `POS1` or `POS2`
+2. Open POS route and verify current SALE draft loads (or is created)
+3. Add a product by search and add another by barcode
+4. Edit line qty/unit/price/lot and remove one line
+5. Run `Validar` and verify issue list appears when lot is missing
+6. Run `Resolver lotes` and verify lot-related issues clear
+7. Checkout with `Cobrar efectivo` and verify folio is shown
+8. Retry checkout click while request is in-flight and verify no duplicate finalize call is triggered
+9. Start `Nueva venta` and verify a new operable draft can continue
+
 ## Next implementation steps
 1. POS draft screen and line-item state machine (draft create/edit/resume)
 2. Checkout flow (totals, payment intent orchestration, idempotency key support)
@@ -74,3 +98,59 @@ Useful focused tests:
 ## Notes
 - This is a skeleton for LAN terminals (POS1, POS2, ADMIN), not full sales UI.
 - Printer/payment integrations are intentionally left as extension points.
+
+
+## Cash Session Flow
+- Cash session screen scoped to current terminal
+- Open session with `opening_cash` and duplicate-open conflict refresh handling
+- Current session panel with opening info, movement summary (in/out), expected close, running cash
+- Close session with `counted_cash` and reconciliation (`expected_close`, `counted_close`, `delta`)
+- Daily report by date + terminal scope
+- Explicit handling for `401/403/409/422/429/network` failures with operator-friendly messages
+
+### Manual checklist (Cash Session)
+1. Login as `CASHIER` in terminal `POS1`
+2. Open cash session with opening cash amount
+3. Verify current session movement and expected close values
+4. Close session with counted cash
+5. Verify reconciliation values shown
+6. Fetch daily report for the date and verify terminal-scoped totals
+
+## Daily History & Manager Panel
+- `History` route:
+  - Daily sales list by `date + terminal_id`
+  - Cash daily summary by `date + terminal_id`
+  - Cashier terminal scope enforced in UI state (`CASHIER` cannot switch terminal)
+- `Reports` route (Manager panel):
+  - Daily totals dashboard (terminal/business unit)
+  - Top debtors
+  - Waste totals by range
+  - Integrity check (`/admin/integrity-check`) with manual refresh, severity, issue counts and up to 5 samples
+  - Last checked timestamp shown in UI
+
+### Manual checklist (History & Manager)
+1. Login as `CASHIER` on `POS1` and verify only Daily History (no manager panel access)
+2. In `History`, change date and verify sales/cash summary refresh
+3. Login as `MANAGER` and open `Reports`
+4. Verify daily totals, debtors, waste sections render
+5. Run integrity manual refresh and verify status + issues/samples
+6. Simulate backend integrity issue and verify it appears in UI with critical styling
+
+## Catalog Management
+- `Catalog` route available only for `MANAGER` and `ADMIN`
+- Product list with search (`q`), active filter, limit, and pagination by offset
+- Product create/edit with active toggle, base unit, lot tracking, and barcode
+- UOM conversion assignment via `/products/{id}/uoms` with client validation (`factor_to_base > 0`)
+- Price updates via `/price-history` with current and recent history display
+- Barcode quick check using `/products/by-barcode`
+- Clear operator messages for `403/409/422/429/network` errors
+
+### Manual checklist (Catalog)
+1. Login as `MANAGER` or `ADMIN`
+2. Open `Catalog` and search/filter products
+3. Create a product and verify it appears in the list
+4. Edit the product and toggle active state
+5. Add a UOM conversion and verify it appears in product detail
+6. Add a price history entry and verify current/latest price updates
+7. Run barcode quick check for the product
+8. Verify the product appears in POS lookup

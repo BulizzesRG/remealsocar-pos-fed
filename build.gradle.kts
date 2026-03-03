@@ -12,6 +12,10 @@ val includedModules = listOf(
     ":shared:auth",
     ":shared:features:login",
     ":shared:features:shell",
+    ":shared:features:sale",
+    ":shared:features:cash",
+    ":shared:features:catalog",
+    ":shared:features:reports",
     ":shared:ui",
     ":shared:config",
 )

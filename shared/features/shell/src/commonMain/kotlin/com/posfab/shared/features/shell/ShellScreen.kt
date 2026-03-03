@@ -19,6 +19,11 @@ import androidx.compose.ui.unit.dp
 fun ShellScreen(
     viewModel: ShellViewModel,
     onLoggedOut: () -> Unit,
+    posContent: @Composable () -> Unit,
+    cashContent: @Composable () -> Unit,
+    historyContent: @Composable () -> Unit,
+    catalogContent: @Composable () -> Unit,
+    reportsContent: @Composable () -> Unit,
 ) {
     val state by viewModel.state.collectAsState()
 
@@ -46,8 +51,17 @@ fun ShellScreen(
         }
 
         Column(modifier = Modifier.fillMaxSize().padding(start = 24.dp)) {
-            Text(text = "${state.selectedRoute.title} Screen")
-            Text(text = "Placeholder. Feature implementation pending.")
+            when (state.selectedRoute) {
+                ShellRoute.POS -> posContent()
+                ShellRoute.CASH -> cashContent()
+                ShellRoute.HISTORY -> historyContent()
+                ShellRoute.CATALOG -> catalogContent()
+                ShellRoute.REPORTS -> reportsContent()
+                else -> {
+                    Text(text = "${state.selectedRoute.title} Screen")
+                    Text(text = "Placeholder. Feature implementation pending.")
+                }
+            }
         }
     }
 }

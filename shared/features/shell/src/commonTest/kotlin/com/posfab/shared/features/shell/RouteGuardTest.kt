@@ -21,4 +21,30 @@ class RouteGuardTest {
 
         assertFalse(allowed)
     }
+
+    @Test
+    fun denies_reports_route_for_cashier() {
+        val session = UserSession(
+            tokens = AuthTokens("a", "r"),
+            user = AuthUser("1", "cashier", setOf(UserRole.CASHIER)),
+            terminal = TerminalCode.POS1,
+        )
+
+        val allowed = RouteGuard.canAccess(session, ShellRoute.REPORTS)
+
+        assertFalse(allowed)
+    }
+
+    @Test
+    fun denies_catalog_route_for_cashier() {
+        val session = UserSession(
+            tokens = AuthTokens("a", "r"),
+            user = AuthUser("1", "cashier", setOf(UserRole.CASHIER)),
+            terminal = TerminalCode.POS1,
+        )
+
+        val allowed = RouteGuard.canAccess(session, ShellRoute.CATALOG)
+
+        assertFalse(allowed)
+    }
 }
