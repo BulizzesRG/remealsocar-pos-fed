@@ -23,6 +23,7 @@ fun ShellScreen(
     cashContent: @Composable () -> Unit,
     historyContent: @Composable () -> Unit,
     catalogContent: @Composable () -> Unit,
+    operationsContent: @Composable () -> Unit,
     reportsContent: @Composable () -> Unit,
 ) {
     val state by viewModel.state.collectAsState()
@@ -56,6 +57,7 @@ fun ShellScreen(
                 ShellRoute.CASH -> cashContent()
                 ShellRoute.HISTORY -> historyContent()
                 ShellRoute.CATALOG -> catalogContent()
+                ShellRoute.OPERATIONS -> operationsContent()
                 ShellRoute.REPORTS -> reportsContent()
                 else -> {
                     Text(text = "${state.selectedRoute.title} Screen")

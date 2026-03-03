@@ -12,6 +12,7 @@ Modules:
 - `:shared:features:sale` - cashier SALE draft flow (add/edit/remove/validate/resolve/checkout)
 - `:shared:features:cash` - cash session and reconciliation flow
 - `:shared:features:catalog` - catalog management for admin/manager
+- `:shared:features:operations` - purchases, internal requisitions, on-hand/lots, waste, adjustments
 - `:shared:features:reports` - daily history + manager dashboard/integrity
 - `:shared:ui` - shared Compose theme and base components
 
@@ -154,3 +155,30 @@ Useful focused tests:
 6. Add a price history entry and verify current/latest price updates
 7. Run barcode quick check for the product
 8. Verify the product appears in POS lookup
+
+## Operations (Purchases, Internal Req, Inventory)
+- `Operations` route available only for `ADMIN` and `MANAGER`
+- Purchases:
+  - purchase form (`supplier`, `terminal`, `business_unit`, `paid_cash`, `paid_from_terminal_id`)
+  - line capture (`product_id`, `unit`, `qty`, `unit_cost`, optional lot fields)
+  - submit with `Idempotency-Key` and duplicate-submit protection
+- Internal requisitions:
+  - source `TIENDA` to target `FONDA`/`TORTERIA`
+  - line capture with optional `lot_id`
+  - practical client-side validation before submit
+- Inventory views:
+  - on-hand with filters (`product_id`, `business_unit`) and quick search table
+  - lots lookup by `product_id` (`lot_code`, `expiry`, `on_hand`)
+- Waste and adjustments:
+  - manager-only actions in UI (`qty > 0` for waste, `qtyDelta != 0` for adjustments)
+  - submit with idempotency keys and clear error mapping
+
+### Manual checklist (Operations)
+1. Login as `ADMIN` or `MANAGER` and open `Operations`
+2. Create a purchase with `paid_cash=true` and verify success id/folio message
+3. Create another purchase with `paid_cash=false` and `paid_from_terminal_id` if applicable
+4. Create an internal requisition from `TIENDA` to `FONDA` or `TORTERIA`
+5. Open on-hand and verify filtered inventory rows
+6. Open lots view and verify lots for selected product
+7. Login as `MANAGER` and register waste + adjustment
+8. Login as `CASHIER` and verify catalog/operations/manager actions are blocked

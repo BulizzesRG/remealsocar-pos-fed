@@ -28,6 +28,7 @@ include(
     ":shared:features:sale",
     ":shared:features:cash",
     ":shared:features:catalog",
+    ":shared:features:operations",
     ":shared:features:reports",
     ":shared:ui",
     ":shared:config"

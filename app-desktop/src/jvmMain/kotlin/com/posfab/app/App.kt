@@ -20,6 +20,9 @@ import com.posfab.shared.features.cash.ui.CashSessionViewModel
 import com.posfab.shared.features.cash.usecase.CashUseCases
 import com.posfab.shared.features.login.LoginScreen
 import com.posfab.shared.features.login.LoginViewModel
+import com.posfab.shared.features.operations.common.OperationsUseCases
+import com.posfab.shared.features.operations.ui.OperationsScreen
+import com.posfab.shared.features.operations.ui.OperationsViewModel
 import com.posfab.shared.features.reports.common.ReportsUseCases
 import com.posfab.shared.features.reports.daily.DailyHistoryScreen
 import com.posfab.shared.features.reports.daily.DailyHistoryViewModel
@@ -78,6 +81,9 @@ fun PosApp(controller: AppStateController) {
                 val catalogViewModel = remember {
                     CatalogViewModel(koin.get<CatalogUseCases>())
                 }
+                val operationsViewModel = remember(screen.session) {
+                    OperationsViewModel(screen.session, koin.get<OperationsUseCases>())
+                }
                 ShellScreen(
                     viewModel = shellViewModel,
                     onLoggedOut = controller::onLoggedOut,
@@ -85,6 +91,7 @@ fun PosApp(controller: AppStateController) {
                     cashContent = { CashSessionScreen(cashViewModel) },
                     historyContent = { DailyHistoryScreen(historyViewModel) },
                     catalogContent = { CatalogScreen(catalogViewModel) },
+                    operationsContent = { OperationsScreen(operationsViewModel) },
                     reportsContent = { ManagerPanelScreen(managerViewModel) },
                 )
             }

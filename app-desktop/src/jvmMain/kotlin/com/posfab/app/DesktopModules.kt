@@ -15,6 +15,9 @@ import com.posfab.shared.features.catalog.repository.CatalogRepositoryImpl
 import com.posfab.shared.features.cash.repository.CashRepository
 import com.posfab.shared.features.cash.repository.CashRepositoryImpl
 import com.posfab.shared.features.cash.usecase.CashUseCases
+import com.posfab.shared.features.operations.common.OperationsUseCases
+import com.posfab.shared.features.operations.repository.OperationsRepository
+import com.posfab.shared.features.operations.repository.OperationsRepositoryImpl
 import com.posfab.shared.features.reports.common.ReportsRepositoryImpl
 import com.posfab.shared.features.reports.common.ReportsUseCases
 import com.posfab.shared.features.reports.daily.DailyHistoryRepository
@@ -29,6 +32,8 @@ import com.posfab.shared.network.catalog.CatalogApiClient
 import com.posfab.shared.network.cash.CashApi
 import com.posfab.shared.network.cash.CashApiClient
 import com.posfab.shared.network.http.HttpClientFactory
+import com.posfab.shared.network.operations.OperationsApi
+import com.posfab.shared.network.operations.OperationsApiClient
 import com.posfab.shared.network.pos.PosApi
 import com.posfab.shared.network.pos.PosApiClient
 import com.posfab.shared.network.reports.ReportsApi
@@ -49,11 +54,13 @@ fun desktopModule(config: PosConfig): Module = module {
     single<AuthApi> { AuthApiClient(get(), get()) }
     single<CatalogApi> { CatalogApiClient(get(), get()) }
     single<PosApi> { PosApiClient(get(), get()) }
+    single<OperationsApi> { OperationsApiClient(get(), get()) }
     single<CashApi> { CashApiClient(get(), get()) }
     single<ReportsApi> { ReportsApiClient(get(), get()) }
     single<AuthRepository> { AuthRepositoryImpl(get(), get()) }
     single<SaleRepository> { SaleRepositoryImpl(get(), get(), get()) }
     single<CatalogRepository> { CatalogRepositoryImpl(get(), get()) }
+    single<OperationsRepository> { OperationsRepositoryImpl(get(), get()) }
     single<CashRepository> { CashRepositoryImpl(get(), get()) }
     single<ReportsRepositoryImpl> { ReportsRepositoryImpl(get(), get(), get()) }
     single<DailyHistoryRepository> { get<ReportsRepositoryImpl>() }
@@ -63,6 +70,7 @@ fun desktopModule(config: PosConfig): Module = module {
     single { LogoutUseCase(get()) }
     single { SaleUseCases(get()) }
     single { CatalogUseCases(get()) }
+    single { OperationsUseCases(get()) }
     single { CashUseCases(get()) }
     single { ReportsUseCases(get(), get()) }
     single { AuthorizedApiExecutor(get(), get()) }
