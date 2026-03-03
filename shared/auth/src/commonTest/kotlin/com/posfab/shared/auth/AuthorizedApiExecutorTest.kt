@@ -15,6 +15,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 
 class AuthorizedApiExecutorTest {
     @Test
@@ -49,6 +50,36 @@ class AuthorizedApiExecutorTest {
 
         assertEquals(2, callCount)
         assertIs<AppResult.Success<String>>(result)
+    }
+
+    @Test
+    fun clears_session_when_refresh_fails_with_unauthorized() = runTest {
+        val storage = InMemorySessionStorage()
+        val manager = SessionManager(storage)
+        manager.set(
+            UserSession(
+                tokens = AuthTokens("old-access", "refresh-1"),
+                user = AuthUser("u1", "cashier", setOf(UserRole.CASHIER)),
+                terminal = TerminalCode.POS1,
+            )
+        )
+
+        val repo = object : AuthRepository {
+            override suspend fun login(username: String, password: String, terminal: TerminalCode) =
+                AppResult.Failure(AppError.Unknown("n/a"))
+
+            override suspend fun refresh(refreshTokenOverride: String?) =
+                AppResult.Failure(AppError.Unauthorized)
+
+            override suspend fun restoreSession() = AppResult.Success(manager.current())
+            override suspend fun logout() = AppResult.Success(Unit)
+        }
+        val executor = AuthorizedApiExecutor(repo, manager)
+
+        val result = executor.execute<String> { AppResult.Failure(AppError.Unauthorized) }
+
+        assertIs<AppResult.Failure>(result)
+        assertNull(manager.current())
     }
 
     private class FakeAuthRepository(

@@ -54,11 +54,12 @@ class OperationsRepositoryImpl(
         }
     }
 
-    override suspend fun createInternalRequisition(input: InternalRequisitionInput): AppResult<InternalRequisitionResult> {
+    override suspend fun createInternalRequisition(input: InternalRequisitionInput, idempotencyKey: String): AppResult<InternalRequisitionResult> {
         return when (
             val result = authorized {
                 operationsApi.createInternalRequisition(
                     accessToken = it,
+                    idempotencyKey = idempotencyKey,
                     request = InternalRequisitionRequestDto(
                         sourceBusinessUnit = input.sourceBusinessUnit,
                         targetBusinessUnit = input.targetBusinessUnit,

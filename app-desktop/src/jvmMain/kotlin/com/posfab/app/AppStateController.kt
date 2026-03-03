@@ -1,12 +1,14 @@
 package com.posfab.app
 
 import com.posfab.shared.auth.domain.UserSession
+import com.posfab.shared.auth.session.SessionManager
 import com.posfab.shared.auth.usecase.RestoreSessionUseCase
 import com.posfab.shared.core.BaseViewModel
 import com.posfab.shared.core.result.AppResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
 sealed interface AppScreen {
@@ -17,11 +19,13 @@ sealed interface AppScreen {
 
 class AppStateController(
     private val restoreSessionUseCase: RestoreSessionUseCase,
+    private val sessionManager: SessionManager,
 ) : BaseViewModel() {
     private val _screen = MutableStateFlow<AppScreen>(AppScreen.Loading)
     val screen: StateFlow<AppScreen> = _screen.asStateFlow()
 
     init {
+        observeSession()
         restoreSession()
     }
 
@@ -38,6 +42,16 @@ class AppStateController(
             _screen.value = when (val restored = restoreSessionUseCase()) {
                 is AppResult.Success -> restored.value?.let { AppScreen.Shell(it) } ?: AppScreen.Login
                 is AppResult.Failure -> AppScreen.Login
+            }
+        }
+    }
+
+    private fun observeSession() {
+        scope.launch {
+            sessionManager.session.collect { session ->
+                if (session == null && _screen.value is AppScreen.Shell) {
+                    _screen.value = AppScreen.Login
+                }
             }
         }
     }

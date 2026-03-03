@@ -23,6 +23,8 @@ import com.posfab.shared.features.login.LoginViewModel
 import com.posfab.shared.features.operations.common.OperationsUseCases
 import com.posfab.shared.features.operations.ui.OperationsScreen
 import com.posfab.shared.features.operations.ui.OperationsViewModel
+import com.posfab.shared.features.reports.diagnostics.DiagnosticsScreen
+import com.posfab.shared.features.reports.diagnostics.DiagnosticsViewModel
 import com.posfab.shared.features.reports.common.ReportsUseCases
 import com.posfab.shared.features.reports.daily.DailyHistoryScreen
 import com.posfab.shared.features.reports.daily.DailyHistoryViewModel
@@ -30,6 +32,8 @@ import com.posfab.shared.features.reports.manager.ManagerPanelScreen
 import com.posfab.shared.features.reports.manager.ManagerPanelViewModel
 import com.posfab.shared.features.sale.ui.CashierSaleScreen
 import com.posfab.shared.features.sale.ui.CashierSaleViewModel
+import com.posfab.shared.features.sale.ui.CardPaymentAdapter
+import com.posfab.shared.features.sale.ui.ReceiptPrinterAdapter
 import com.posfab.shared.features.sale.usecase.SaleUseCases
 import com.posfab.shared.features.shell.ShellScreen
 import com.posfab.shared.features.shell.ShellViewModel
@@ -67,7 +71,12 @@ fun PosApp(controller: AppStateController) {
                     ShellViewModel(screen.session, logoutUseCase)
                 }
                 val saleViewModel = remember(screen.session) {
-                    CashierSaleViewModel(koin.get<SaleUseCases>())
+                    CashierSaleViewModel(
+                        saleUseCases = koin.get<SaleUseCases>(),
+                        saleUiStateStore = koin.get(),
+                        cardPaymentAdapter = koin.get<CardPaymentAdapter>(),
+                        receiptPrinterAdapter = koin.get<ReceiptPrinterAdapter>(),
+                    )
                 }
                 val cashViewModel = remember(screen.session) {
                     CashSessionViewModel(screen.session, koin.get<CashUseCases>())
@@ -77,6 +86,9 @@ fun PosApp(controller: AppStateController) {
                 }
                 val managerViewModel = remember {
                     ManagerPanelViewModel(koin.get<ReportsUseCases>())
+                }
+                val diagnosticsViewModel = remember(screen.session) {
+                    DiagnosticsViewModel(screen.session, koin.get(), koin.get())
                 }
                 val catalogViewModel = remember {
                     CatalogViewModel(koin.get<CatalogUseCases>())
@@ -93,6 +105,7 @@ fun PosApp(controller: AppStateController) {
                     catalogContent = { CatalogScreen(catalogViewModel) },
                     operationsContent = { OperationsScreen(operationsViewModel) },
                     reportsContent = { ManagerPanelScreen(managerViewModel) },
+                    diagnosticsContent = { DiagnosticsScreen(diagnosticsViewModel) },
                 )
             }
         }

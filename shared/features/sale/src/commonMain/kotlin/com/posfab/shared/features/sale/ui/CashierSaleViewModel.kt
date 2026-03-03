@@ -1,6 +1,7 @@
 package com.posfab.shared.features.sale.ui
 
 import com.posfab.shared.core.BaseViewModel
+import com.posfab.shared.core.logging.AppLogger
 import com.posfab.shared.core.result.AppResult
 import com.posfab.shared.features.sale.domain.CheckoutMode
 import com.posfab.shared.features.sale.domain.SaleDraft
@@ -18,13 +19,19 @@ import kotlin.random.Random
 
 class CashierSaleViewModel(
     private val saleUseCases: SaleUseCases,
+    private val saleUiStateStore: SaleUiStateStore = NoOpSaleUiStateStore,
+    private val cardPaymentAdapter: CardPaymentAdapter = NoOpCardPaymentAdapter,
+    private val receiptPrinterAdapter: ReceiptPrinterAdapter = NoOpReceiptPrinterAdapter,
     dispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : BaseViewModel(dispatcher) {
     private val _state = MutableStateFlow(CashierSaleState())
     val state: StateFlow<CashierSaleState> = _state.asStateFlow()
 
     init {
-        openOrCreateDraft()
+        scope.launch {
+            restoreUiState()
+            openOrCreateDraft()
+        }
     }
 
     fun openOrCreateDraft() {
@@ -32,7 +39,9 @@ class CashierSaleViewModel(
             _state.value = _state.value.copy(isInitializing = true, errorMessage = null, notice = null)
             when (val result = saleUseCases.openDraft()) {
                 is AppResult.Success -> {
-                    val firstLine = result.value.lines.firstOrNull()
+                    val recoveredSelectedId = _state.value.selectedLineId
+                    val firstLine = result.value.lines.firstOrNull { it.id == recoveredSelectedId }
+                        ?: result.value.lines.firstOrNull()
                     _state.value = _state.value.copy(
                         isInitializing = false,
                         draft = result.value,
@@ -58,10 +67,12 @@ class CashierSaleViewModel(
 
     fun onSearchQueryChange(value: String) {
         _state.value = _state.value.copy(searchQuery = value)
+        persistUiState()
     }
 
     fun onBarcodeChange(value: String) {
         _state.value = _state.value.copy(barcodeInput = value)
+        persistUiState()
     }
 
     fun searchProducts() {
@@ -123,6 +134,7 @@ class CashierSaleViewModel(
             editPriceInput = line.unitPrice.toString(),
             editLotInput = line.lotId.orEmpty(),
         )
+        persistUiState()
     }
 
     fun incrementSelectedLineQty() {
@@ -268,6 +280,8 @@ class CashierSaleViewModel(
                         validationIssues = emptyList(),
                         searchResults = emptyList(),
                     )
+                    persistUiState()
+                    runHardwareHooks(result.value, draft.lines)
                 }
                 is AppResult.Failure -> {
                     _state.value = _state.value.copy(
@@ -331,6 +345,7 @@ class CashierSaleViewModel(
                     editLotInput = selected?.lotId.orEmpty(),
                     notice = null,
                 )
+                persistUiState()
             }
             is SaleMutationResult.ConflictRefetched -> {
                 val selected = result.draft.lines.firstOrNull()
@@ -344,6 +359,7 @@ class CashierSaleViewModel(
                     editLotInput = selected?.lotId.orEmpty(),
                     notice = "Otro usuario modifico el borrador. Se recargo la ultima version.",
                 )
+                persistUiState()
             }
             is SaleMutationResult.Failure -> {
                 _state.value = _state.value.copy(
@@ -356,5 +372,38 @@ class CashierSaleViewModel(
 
     private fun buildCheckoutKey(draftId: String): String {
         return "sale-$draftId-${kotlinx.datetime.Clock.System.now().toEpochMilliseconds()}-${Random.nextInt(1_000, 9_999)}"
+    }
+
+    private suspend fun restoreUiState() {
+        val restored = saleUiStateStore.load() ?: return
+        _state.value = _state.value.copy(
+            searchQuery = restored.searchQuery,
+            barcodeInput = restored.barcodeInput,
+            selectedLineId = restored.selectedLineId,
+        )
+    }
+
+    private fun persistUiState() {
+        val snapshot = _state.value
+        scope.launch {
+            saleUiStateStore.save(
+                SaleUiRecoveryState(
+                    searchQuery = snapshot.searchQuery,
+                    barcodeInput = snapshot.barcodeInput,
+                    selectedLineId = snapshot.selectedLineId,
+                    draftId = snapshot.draft?.id,
+                    savedAtEpochMs = kotlinx.datetime.Clock.System.now().toEpochMilliseconds(),
+                )
+            )
+        }
+    }
+
+    private fun runHardwareHooks(checkout: com.posfab.shared.features.sale.domain.CheckoutResult, lines: List<SaleLine>) {
+        scope.launch {
+            runCatching { cardPaymentAdapter.onSaleCompleted(checkout) }
+                .onFailure { AppLogger.w("hardware.card_adapter_failed sale_id=${checkout.saleId}") }
+            runCatching { receiptPrinterAdapter.printSaleReceipt(checkout, lines) }
+                .onFailure { AppLogger.w("hardware.printer_adapter_failed sale_id=${checkout.saleId}") }
+        }
     }
 }

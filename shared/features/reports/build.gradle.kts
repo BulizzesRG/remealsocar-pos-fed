@@ -10,6 +10,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(project(":shared:core"))
+            implementation(project(":shared:config"))
             implementation(project(":shared:auth"))
             implementation(project(":shared:network"))
             implementation(project(":shared:features:cash"))

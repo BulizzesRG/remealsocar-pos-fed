@@ -14,8 +14,8 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
 
 interface CashApi {
-    suspend fun openSession(accessToken: String, request: OpenCashSessionRequestDto): AppResult<CashSessionDto>
-    suspend fun closeSession(accessToken: String, request: CloseCashSessionRequestDto): AppResult<CashSessionDto>
+    suspend fun openSession(accessToken: String, request: OpenCashSessionRequestDto, idempotencyKey: String): AppResult<CashSessionDto>
+    suspend fun closeSession(accessToken: String, request: CloseCashSessionRequestDto, idempotencyKey: String): AppResult<CashSessionDto>
     suspend fun currentSession(accessToken: String, terminalId: String): AppResult<CashSessionDto?>
     suspend fun dailyReport(accessToken: String, date: String, terminalId: String): AppResult<DailyCashReportDto>
 }
@@ -24,17 +24,19 @@ class CashApiClient(
     private val httpClient: HttpClient,
     private val config: PosConfig,
 ) : CashApi {
-    override suspend fun openSession(accessToken: String, request: OpenCashSessionRequestDto): AppResult<CashSessionDto> = safeCall {
+    override suspend fun openSession(accessToken: String, request: OpenCashSessionRequestDto, idempotencyKey: String): AppResult<CashSessionDto> = safeCall {
         httpClient.post("${config.apiBaseUrl}/cash/sessions/open") {
             bearer(accessToken)
+            header("Idempotency-Key", idempotencyKey)
             contentType(ContentType.Application.Json)
             setBody(request)
         }
     }
 
-    override suspend fun closeSession(accessToken: String, request: CloseCashSessionRequestDto): AppResult<CashSessionDto> = safeCall {
+    override suspend fun closeSession(accessToken: String, request: CloseCashSessionRequestDto, idempotencyKey: String): AppResult<CashSessionDto> = safeCall {
         httpClient.post("${config.apiBaseUrl}/cash/sessions/close") {
             bearer(accessToken)
+            header("Idempotency-Key", idempotencyKey)
             contentType(ContentType.Application.Json)
             setBody(request)
         }

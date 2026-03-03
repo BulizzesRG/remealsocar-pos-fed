@@ -43,6 +43,7 @@ data class OperationsState(
     val requisitionLineQtyInput: String = "1",
     val requisitionLineLotId: String = "",
     val requisitionLines: List<RequisitionLineInput> = emptyList(),
+    val requisitionIdempotencyKey: String? = null,
     val lastRequisitionResult: String? = null,
 
     val isLoadingOnHand: Boolean = false,

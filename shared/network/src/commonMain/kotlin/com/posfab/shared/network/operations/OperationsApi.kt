@@ -15,7 +15,7 @@ import io.ktor.http.contentType
 
 interface OperationsApi {
     suspend fun createPurchase(accessToken: String, idempotencyKey: String, request: PurchaseRequestDto): AppResult<PurchaseResponseDto>
-    suspend fun createInternalRequisition(accessToken: String, request: InternalRequisitionRequestDto): AppResult<InternalRequisitionResponseDto>
+    suspend fun createInternalRequisition(accessToken: String, request: InternalRequisitionRequestDto, idempotencyKey: String): AppResult<InternalRequisitionResponseDto>
     suspend fun inventoryOnHand(accessToken: String, productId: String?, businessUnit: String?): AppResult<List<OnHandItemDto>>
     suspend fun inventoryLots(accessToken: String, productId: String): AppResult<List<InventoryLotDto>>
     suspend fun createWaste(accessToken: String, idempotencyKey: String, request: WasteRequestDto): AppResult<WasteResponseDto>
@@ -35,9 +35,10 @@ class OperationsApiClient(
         }
     }
 
-    override suspend fun createInternalRequisition(accessToken: String, request: InternalRequisitionRequestDto): AppResult<InternalRequisitionResponseDto> = safeCall {
+    override suspend fun createInternalRequisition(accessToken: String, request: InternalRequisitionRequestDto, idempotencyKey: String): AppResult<InternalRequisitionResponseDto> = safeCall {
         httpClient.post("${config.apiBaseUrl}/internal-requisitions") {
             bearer(accessToken)
+            header("Idempotency-Key", idempotencyKey)
             contentType(ContentType.Application.Json)
             setBody(request)
         }

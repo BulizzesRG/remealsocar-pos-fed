@@ -30,7 +30,7 @@ class CashierSaleViewModelTest {
     @Test
     fun add_edit_remove_line_updates_state() = runTest(dispatcher) {
         val repo = FakeSaleRepository()
-        val vm = CashierSaleViewModel(SaleUseCases(repo), dispatcher)
+        val vm = CashierSaleViewModel(SaleUseCases(repo), dispatcher = dispatcher)
         advanceUntilIdle()
 
         vm.addProduct(repo.searchPool.first())
@@ -51,7 +51,7 @@ class CashierSaleViewModelTest {
     @Test
     fun conflict_update_triggers_refetch_notice() = runTest(dispatcher) {
         val repo = FakeSaleRepository()
-        val vm = CashierSaleViewModel(SaleUseCases(repo), dispatcher)
+        val vm = CashierSaleViewModel(SaleUseCases(repo), dispatcher = dispatcher)
         advanceUntilIdle()
 
         vm.addProduct(repo.searchPool.first())
@@ -69,7 +69,7 @@ class CashierSaleViewModelTest {
     @Test
     fun checkout_double_click_sends_one_effective_finalize() = runTest(dispatcher) {
         val repo = FakeSaleRepository(checkoutDelayMs = 50)
-        val vm = CashierSaleViewModel(SaleUseCases(repo), dispatcher)
+        val vm = CashierSaleViewModel(SaleUseCases(repo), dispatcher = dispatcher)
         advanceUntilIdle()
 
         vm.addProduct(repo.searchPool.first())
@@ -87,7 +87,7 @@ class CashierSaleViewModelTest {
     @Test
     fun barcode_lookup_populates_line() = runTest(dispatcher) {
         val repo = FakeSaleRepository()
-        val vm = CashierSaleViewModel(SaleUseCases(repo), dispatcher)
+        val vm = CashierSaleViewModel(SaleUseCases(repo), dispatcher = dispatcher)
         advanceUntilIdle()
 
         vm.onBarcodeChange("7501000100015")
@@ -101,7 +101,7 @@ class CashierSaleViewModelTest {
     @Test
     fun validate_and_resolve_lots_updates_issue_state() = runTest(dispatcher) {
         val repo = FakeSaleRepository()
-        val vm = CashierSaleViewModel(SaleUseCases(repo), dispatcher)
+        val vm = CashierSaleViewModel(SaleUseCases(repo), dispatcher = dispatcher)
         advanceUntilIdle()
 
         vm.addProduct(repo.searchPool.first())
@@ -115,6 +115,27 @@ class CashierSaleViewModelTest {
         advanceUntilIdle()
         assertEquals(0, vm.state.value.validationIssues.size)
         assertEquals("LOT-AUTO", vm.state.value.draft?.lines?.first()?.lotId)
+    }
+
+    @Test
+    fun checkout_retry_after_network_failure_reuses_idempotency_key() = runTest(dispatcher) {
+        val repo = FakeSaleRepository().apply { failFirstCheckoutWithNetwork = true }
+        val vm = CashierSaleViewModel(SaleUseCases(repo), dispatcher = dispatcher)
+        advanceUntilIdle()
+
+        vm.addProduct(repo.searchPool.first())
+        advanceUntilIdle()
+
+        vm.checkoutCash()
+        advanceUntilIdle()
+        assertTrue(vm.state.value.errorMessage?.contains("red", ignoreCase = true) == true)
+
+        vm.checkoutCash()
+        advanceUntilIdle()
+
+        assertEquals(2, repo.checkoutCalls)
+        assertEquals(1, repo.checkoutKeys.distinct().size)
+        assertNotNull(vm.state.value.checkoutResult)
     }
 }
 
@@ -146,6 +167,7 @@ private class FakeSaleRepository(
     var forceConflictOnNextUpdate = false
     var checkoutCalls = 0
     val checkoutKeys = mutableListOf<String>()
+    var failFirstCheckoutWithNetwork = false
 
     override suspend fun openOrCreateCurrentSaleDraft(): AppResult<SaleDraft> = AppResult.Success(draft)
 
@@ -235,6 +257,9 @@ private class FakeSaleRepository(
         checkoutCalls += 1
         checkoutKeys += idempotencyKey
         if (checkoutDelayMs > 0) delay(checkoutDelayMs)
+        if (failFirstCheckoutWithNetwork && checkoutCalls == 1) {
+            return AppResult.Failure(AppError.Network("network down"))
+        }
         draft = draft.copy(status = "COMPLETED")
         return AppResult.Success(
             CheckoutResult(

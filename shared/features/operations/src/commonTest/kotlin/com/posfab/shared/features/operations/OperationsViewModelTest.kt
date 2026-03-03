@@ -191,7 +191,7 @@ private class FakeOperationsRepository : OperationsRepository {
         }
     }
 
-    override suspend fun createInternalRequisition(input: InternalRequisitionInput): AppResult<InternalRequisitionResult> {
+    override suspend fun createInternalRequisition(input: InternalRequisitionInput, idempotencyKey: String): AppResult<InternalRequisitionResult> {
         lastRequisitionInput = input
         return AppResult.Success(InternalRequisitionResult(requisitionId = "req-1", folio = "R-001", message = null))
     }

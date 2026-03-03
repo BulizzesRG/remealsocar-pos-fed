@@ -14,7 +14,7 @@ import com.posfab.shared.features.operations.domain.WasteResult
 
 interface OperationsRepository {
     suspend fun createPurchase(input: PurchaseInput, idempotencyKey: String): AppResult<PurchaseResult>
-    suspend fun createInternalRequisition(input: InternalRequisitionInput): AppResult<InternalRequisitionResult>
+    suspend fun createInternalRequisition(input: InternalRequisitionInput, idempotencyKey: String): AppResult<InternalRequisitionResult>
     suspend fun fetchOnHand(productId: String?, businessUnit: String?): AppResult<List<InventoryOnHandItem>>
     suspend fun fetchLots(productId: String): AppResult<List<InventoryLotItem>>
     suspend fun createWaste(input: WasteInput, idempotencyKey: String): AppResult<WasteResult>

@@ -10,6 +10,7 @@ import com.posfab.shared.network.cash.CashSessionDto
 import com.posfab.shared.network.cash.CloseCashSessionRequestDto
 import com.posfab.shared.network.cash.DailyCashReportDto
 import com.posfab.shared.network.cash.OpenCashSessionRequestDto
+import kotlin.random.Random
 
 class CashRepositoryImpl(
     private val api: CashApi,
@@ -25,7 +26,11 @@ class CashRepositoryImpl(
     override suspend fun openSession(terminalId: String, openingCash: Double): AppResult<CashSession> {
         return when (
             val result = executor.execute {
-                api.openSession(it, OpenCashSessionRequestDto(terminalId = terminalId, openingCash = openingCash))
+                api.openSession(
+                    it,
+                    OpenCashSessionRequestDto(terminalId = terminalId, openingCash = openingCash),
+                    idempotencyKey = buildIdempotencyKey("cash-open", terminalId),
+                )
             }
         ) {
             is AppResult.Success -> AppResult.Success(result.value.toDomain())
@@ -36,7 +41,11 @@ class CashRepositoryImpl(
     override suspend fun closeSession(terminalId: String, countedCash: Double): AppResult<CashSession> {
         return when (
             val result = executor.execute {
-                api.closeSession(it, CloseCashSessionRequestDto(terminalId = terminalId, countedCash = countedCash))
+                api.closeSession(
+                    it,
+                    CloseCashSessionRequestDto(terminalId = terminalId, countedCash = countedCash),
+                    idempotencyKey = buildIdempotencyKey("cash-close", terminalId),
+                )
             }
         ) {
             is AppResult.Success -> AppResult.Success(result.value.toDomain())
@@ -83,4 +92,8 @@ class CashRepositoryImpl(
         countedClose = countedClose,
         delta = delta,
     )
+
+    private fun buildIdempotencyKey(prefix: String, terminalId: String): String {
+        return "$prefix-$terminalId-${kotlinx.datetime.Clock.System.now().toEpochMilliseconds()}-${Random.nextInt(1000, 9999)}"
+    }
 }

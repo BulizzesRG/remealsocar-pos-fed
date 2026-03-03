@@ -60,4 +60,17 @@ class RouteGuardTest {
 
         assertFalse(allowed)
     }
+
+    @Test
+    fun denies_diagnostics_route_for_cashier() {
+        val session = UserSession(
+            tokens = AuthTokens("a", "r"),
+            user = AuthUser("1", "cashier", setOf(UserRole.CASHIER)),
+            terminal = TerminalCode.POS1,
+        )
+
+        val allowed = RouteGuard.canAccess(session, ShellRoute.DIAGNOSTICS)
+
+        assertFalse(allowed)
+    }
 }

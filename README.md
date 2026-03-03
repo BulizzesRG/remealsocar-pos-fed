@@ -182,3 +182,45 @@ Useful focused tests:
 6. Open lots view and verify lots for selected product
 7. Login as `MANAGER` and register waste + adjustment
 8. Login as `CASHIER` and verify catalog/operations/manager actions are blocked
+
+## Operational Hardening
+- Network resilience:
+  - global retry policy for safe requests (`GET/HEAD/OPTIONS`)
+  - `POST` retries allowed only when `Idempotency-Key` is present
+  - request timeout configured globally from `POS_REQUEST_TIMEOUT_MS`
+  - shell-level offline indicator based on recent network failures
+- Mutation safety:
+  - critical mutations use submit locks to prevent accidental double-submit
+  - critical flows include idempotency keys (sale checkout, purchases, requisitions, waste, adjustments, cash open/close)
+- Session robustness:
+  - refresh remains single-flight
+  - unrecoverable refresh/auth failures clear session and force app back to login
+- Crash-safe recovery:
+  - desktop persists minimal sale UI recovery state (`search`, selected line/draft reference)
+  - in-flight flags are never restored after restart
+- Observability/supportability:
+  - structured client HTTP logs (`request_id`, endpoint, status, elapsed, error category)
+  - diagnostics screen for manager/admin with app/build/env/terminal/user context and last sync/failure
+  - sanitized support bundle generation from recent local logs (no secrets/tokens/passwords)
+- Hardware extension points (no-op adapters):
+  - `CardPaymentAdapter`
+  - `ReceiptPrinterAdapter`
+  - sale completion invokes adapters safely without blocking core sale completion
+
+## Troubleshooting Quick Guide
+1. If UI shows offline banner, open `Diagnostics` and check `last failure` timestamp/category.
+2. Verify `.env` values and API reachability for `POS_API_BASE_URL` from the terminal LAN.
+3. Use diagnostics support bundle to share sanitized client logs with support.
+4. If an action appears duplicated, confirm same idempotency key was reused and check backend idempotency records.
+5. If user is redirected to login during operation, treat as auth refresh failure and re-authenticate.
+6. After restart, open POS and confirm sale draft is restored from backend current draft endpoint.
+
+## Pilot Go-Live Checklist
+1. Run backup/restore drill for database and terminal session recovery.
+2. Run manager integrity-check and confirm all checks are green before opening shift.
+3. Validate cashier sale flow end-to-end on both `POS1` and `POS2`.
+4. Validate terminal permissions matrix (`CASHIER`, `MANAGER`, `ADMIN`) and route visibility.
+5. Execute recovery test after app restart and short network blip (no duplicate sale, draft/session recoverable).
+6. Validate cash session lifecycle (open/current/close) under real terminal context.
+7. Validate purchases/internal requisitions/inventory controls for manager/admin roles.
+8. Capture and archive one diagnostics support bundle from each pilot terminal.

@@ -16,6 +16,7 @@ kotlin {
             implementation(libs.ktor.client.logging)
             implementation(libs.serialization.json)
             implementation(libs.coroutines.core)
+            implementation(libs.datetime)
             implementation(libs.napier)
         }
         commonTest.dependencies {

@@ -37,7 +37,26 @@ class AuthorizedApiExecutor(
 
         return@withLock when (val refreshed = authRepository.refresh()) {
             is AppResult.Success -> AppResult.Success(Unit)
-            is AppResult.Failure -> refreshed
+            is AppResult.Failure -> {
+                if (isUnrecoverableAuthFailure(refreshed.error)) {
+                    sessionManager.clear()
+                    AppResult.Failure(AppError.Unauthorized)
+                } else {
+                    refreshed
+                }
+            }
         }
+    }
+
+    private fun isUnrecoverableAuthFailure(error: AppError): Boolean = when (error) {
+        AppError.Unauthorized,
+        AppError.Forbidden,
+        AppError.Conflict,
+        is AppError.Validation,
+        -> true
+        AppError.RateLimit,
+        is AppError.Network,
+        is AppError.Unknown,
+        -> false
     }
 }

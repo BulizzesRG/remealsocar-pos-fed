@@ -8,12 +8,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.posfab.shared.core.diagnostics.NetworkHealthTracker
 
 @Composable
 fun ShellScreen(
@@ -25,8 +27,10 @@ fun ShellScreen(
     catalogContent: @Composable () -> Unit,
     operationsContent: @Composable () -> Unit,
     reportsContent: @Composable () -> Unit,
+    diagnosticsContent: @Composable () -> Unit,
 ) {
     val state by viewModel.state.collectAsState()
+    val network by NetworkHealthTracker.state.collectAsState()
 
     Row(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Column(
@@ -35,6 +39,12 @@ fun ShellScreen(
         ) {
             Text("User: ${state.session.user.username}")
             Text("Terminal: ${state.session.terminal}")
+            if (network.isOffline) {
+                Text(
+                    text = "Offline mode. Last failure: ${network.lastFailureAt ?: "-"}",
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             state.allowedRoutes.forEach { route ->
                 Button(
                     modifier = Modifier.fillMaxWidth(),
@@ -59,6 +69,7 @@ fun ShellScreen(
                 ShellRoute.CATALOG -> catalogContent()
                 ShellRoute.OPERATIONS -> operationsContent()
                 ShellRoute.REPORTS -> reportsContent()
+                ShellRoute.DIAGNOSTICS -> diagnosticsContent()
                 else -> {
                     Text(text = "${state.selectedRoute.title} Screen")
                     Text(text = "Placeholder. Feature implementation pending.")

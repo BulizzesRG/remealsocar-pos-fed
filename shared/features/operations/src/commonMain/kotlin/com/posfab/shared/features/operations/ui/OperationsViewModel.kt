@@ -270,15 +270,22 @@ class OperationsViewModel(
             terminalId = snapshot.terminalId.trim(),
             lines = snapshot.requisitionLines,
         )
+        val key = snapshot.requisitionIdempotencyKey ?: generateIdempotencyKey("req")
 
         scope.launch {
-            _state.value = _state.value.copy(isSubmittingRequisition = true, errorMessage = null, notice = null)
-            when (val result = useCases.repository.createInternalRequisition(input)) {
+            _state.value = _state.value.copy(
+                isSubmittingRequisition = true,
+                requisitionIdempotencyKey = key,
+                errorMessage = null,
+                notice = null,
+            )
+            when (val result = useCases.repository.createInternalRequisition(input, key)) {
                 is AppResult.Success -> {
                     val label = result.value.folio ?: result.value.requisitionId ?: "requisicion generada"
                     _state.value = _state.value.copy(
                         isSubmittingRequisition = false,
                         requisitionLines = emptyList(),
+                        requisitionIdempotencyKey = null,
                         lastRequisitionResult = label,
                         notice = "Requisicion registrada: $label",
                     )
