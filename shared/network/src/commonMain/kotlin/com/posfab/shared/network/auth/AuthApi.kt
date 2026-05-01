@@ -22,21 +22,21 @@ class AuthApiClient(
     private val config: PosConfig,
 ) : AuthApi {
     override suspend fun login(request: LoginRequestDto): AppResult<AuthResponseDto> = safeCall {
-        httpClient.post("${config.apiBaseUrl}/api/v1/auth/login") {
+        httpClient.post("${config.apiBaseUrl}/auth/login") {
             contentType(ContentType.Application.Json)
             setBody(request)
         }
     }
 
     override suspend fun refresh(request: RefreshRequestDto): AppResult<AuthResponseDto> = safeCall {
-        httpClient.post("${config.apiBaseUrl}/api/v1/auth/refresh") {
+        httpClient.post("${config.apiBaseUrl}/auth/refresh") {
             contentType(ContentType.Application.Json)
             setBody(request)
         }
     }
 
     override suspend fun logout(request: LogoutRequestDto, accessToken: String?): AppResult<Unit> = safeCall {
-        httpClient.post("${config.apiBaseUrl}/api/v1/auth/logout") {
+        httpClient.post("${config.apiBaseUrl}/auth/logout") {
             contentType(ContentType.Application.Json)
             accessToken?.let { header(HttpHeaders.Authorization, "Bearer $it") }
             setBody(request)

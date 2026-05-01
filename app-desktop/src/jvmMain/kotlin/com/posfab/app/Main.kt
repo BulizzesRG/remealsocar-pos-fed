@@ -16,7 +16,7 @@ fun main() {
     }
 
     application {
-        Window(onCloseRequest = ::exitApplication, title = "POS FAB") {
+        Window(onCloseRequest = ::exitApplication, title = "REMEALSOCAR POS") {
             PosApp(controller = get(AppStateController::class.java))
         }
     }

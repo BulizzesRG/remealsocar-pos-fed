@@ -1,4 +1,4 @@
-# POS FAB Frontend Skeleton (Kotlin Multiplatform)
+# Remealsocar Frontend (Kotlin Multiplatform)
 
 ## Architecture overview
 Modules:
@@ -88,16 +88,14 @@ Useful focused tests:
 8. Retry checkout click while request is in-flight and verify no duplicate finalize call is triggered
 9. Start `Nueva venta` and verify a new operable draft can continue
 
-## Next implementation steps
-1. POS draft screen and line-item state machine (draft create/edit/resume)
-2. Checkout flow (totals, payment intent orchestration, idempotency key support)
-3. Cash open/close workflows linked to cashier terminal context
-4. Reports filtering and export placeholders to real endpoints
-5. Backend endpoint contract hardening (exact auth DTO fields/paths)
-6. Add Android app module if needed for handheld device support
+## Current focus
+1. Keep the desktop KMP terminal flow stable while the product is still moving toward MVP.
+2. Improve the visual quality and usability of the desktop experience before any first presentation to users.
+3. Continue hardening, diagnostics, and recovery testing before any real rollout.
+4. Add Android support only if a handheld workflow is actually required.
 
 ## Notes
-- This is a skeleton for LAN terminals (POS1, POS2, ADMIN), not full sales UI.
+- This is a desktop-first KMP frontend baseline for LAN terminals (POS1, POS2, ADMIN); the core cashier and operations flows are largely implemented, but the product is still in construction toward MVP.
 - Printer/payment integrations are intentionally left as extension points.
 
 
@@ -215,12 +213,12 @@ Useful focused tests:
 5. If user is redirected to login during operation, treat as auth refresh failure and re-authenticate.
 6. After restart, open POS and confirm sale draft is restored from backend current draft endpoint.
 
-## Pilot Go-Live Checklist
+## Pre-MVP Readiness Checklist
 1. Run backup/restore drill for database and terminal session recovery.
-2. Run manager integrity-check and confirm all checks are green before opening shift.
+2. Run manager integrity-check and confirm all checks are green in local/in-house validation.
 3. Validate cashier sale flow end-to-end on both `POS1` and `POS2`.
 4. Validate terminal permissions matrix (`CASHIER`, `MANAGER`, `ADMIN`) and route visibility.
 5. Execute recovery test after app restart and short network blip (no duplicate sale, draft/session recoverable).
-6. Validate cash session lifecycle (open/current/close) under real terminal context.
+6. Validate cash session lifecycle (open/current/close) under intended terminal context.
 7. Validate purchases/internal requisitions/inventory controls for manager/admin roles.
-8. Capture and archive one diagnostics support bundle from each pilot terminal.
+8. Capture and archive one diagnostics support bundle from local validation terminals.
