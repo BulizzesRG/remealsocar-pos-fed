@@ -126,6 +126,30 @@ class CashSessionViewModel(
         }
     }
 
+    fun requestCloseSession() {
+        val snapshot = _state.value
+        val counted = snapshot.countedCashInput.toDoubleOrNull()
+        if (counted == null || counted < 0.0) {
+            _state.value = snapshot.copy(errorMessage = "Monto contado invalido")
+            return
+        }
+        val session = snapshot.currentSession
+        if (session == null || session.status != com.posfab.shared.features.cash.domain.CashSessionStatus.OPEN) {
+            _state.value = snapshot.copy(notice = "No hay una sesion abierta para cerrar.")
+            return
+        }
+        _state.value = snapshot.copy(
+            errorMessage = null,
+            closeConfirmDialog = CashCloseConfirmState(
+                message = "Se registrara un cierre con efectivo contado de $counted para la terminal ${snapshot.terminalId}.",
+            ),
+        )
+    }
+
+    fun dismissCloseSessionDialog() {
+        _state.value = _state.value.copy(closeConfirmDialog = null)
+    }
+
     fun closeSession() {
         val snapshot = _state.value
         if (snapshot.isCloseSubmitting) return
@@ -136,7 +160,12 @@ class CashSessionViewModel(
             return
         }
 
-        _state.value = snapshot.copy(isCloseSubmitting = true, errorMessage = null, notice = null)
+        _state.value = snapshot.copy(
+            isCloseSubmitting = true,
+            errorMessage = null,
+            notice = null,
+            closeConfirmDialog = null,
+        )
         scope.launch {
             when (val result = cashUseCases.close(snapshot.terminalId, counted)) {
                 is AppResult.Success -> {
