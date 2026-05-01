@@ -5,6 +5,14 @@ import com.posfab.shared.features.sale.domain.DraftIssue
 import com.posfab.shared.features.sale.domain.SaleDraft
 import com.posfab.shared.features.sale.domain.SaleProduct
 
+data class SaleConfirmDialogState(
+    val title: String,
+    val message: String,
+    val confirmLabel: String = "Confirmar",
+    val cancelLabel: String = "Cancelar",
+    val isDestructive: Boolean = false,
+)
+
 data class CashierSaleState(
     val isInitializing: Boolean = true,
     val isBusy: Boolean = false,
@@ -21,6 +29,7 @@ data class CashierSaleState(
     val validationIssues: List<DraftIssue> = emptyList(),
     val checkoutResult: CheckoutResult? = null,
     val checkoutIdempotencyKey: String? = null,
+    val confirmDialog: SaleConfirmDialogState? = null,
     val notice: String? = null,
     val errorMessage: String? = null,
 )

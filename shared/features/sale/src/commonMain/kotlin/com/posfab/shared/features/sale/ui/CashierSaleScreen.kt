@@ -6,230 +6,539 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.Divider
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CreditCard
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Inventory
+import androidx.compose.material.icons.filled.Payments
+import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import kotlin.math.abs
-import kotlin.math.roundToLong
+import com.posfab.shared.ui.components.PosConfirmDialog
+import com.posfab.shared.ui.components.PosDestructiveButton
+import com.posfab.shared.ui.components.PosLoadingOverlay
+import com.posfab.shared.ui.components.PosMoneyText
+import com.posfab.shared.ui.components.PosNoticeRow
+import com.posfab.shared.ui.components.PosPrimaryButton
+import com.posfab.shared.ui.components.PosSecondaryButton
+import com.posfab.shared.ui.components.PosSectionCard
+import com.posfab.shared.ui.components.PosTextField
+import com.posfab.shared.ui.components.PosTotalDisplay
+import com.posfab.shared.ui.theme.PosLayout
+import com.posfab.shared.ui.theme.PosSpacing
 
 @Composable
 fun CashierSaleScreen(viewModel: CashierSaleViewModel) {
     val state by viewModel.state.collectAsState()
 
     if (state.isInitializing) {
-        Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-            Text("Cargando borrador...")
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(PosSpacing.md),
+            ) {
+                CircularProgressIndicator()
+                Text("Cargando venta...", style = MaterialTheme.typography.bodyMedium)
+            }
         }
         return
     }
 
-    Row(
-        modifier = Modifier.fillMaxSize().padding(12.dp).onPreviewKeyEvent { event ->
-            if (event.type != KeyEventType.KeyUp) return@onPreviewKeyEvent false
-            when (event.key) {
-                Key.Enter -> {
-                    if (state.barcodeInput.isNotBlank()) viewModel.addByBarcode() else viewModel.searchProducts()
-                    true
-                }
-                Key.F5 -> {
-                    viewModel.validateDraft()
-                    true
-                }
-                Key.F9 -> {
-                    viewModel.checkoutCash()
-                    true
-                }
-                else -> false
-            }
-        },
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(
-                value = state.searchQuery,
-                onValueChange = viewModel::onSearchQueryChange,
-                label = { Text("Buscar producto (Enter)") },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !state.isBusy,
-                singleLine = true,
-            )
-            Button(
-                onClick = viewModel::searchProducts,
-                modifier = Modifier.fillMaxWidth().height(48.dp),
-                enabled = !state.isBusy,
+    Box(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(PosLayout.contentPadding)
+                .onPreviewKeyEvent { event ->
+                    if (event.type != KeyEventType.KeyUp) return@onPreviewKeyEvent false
+                    if (state.confirmDialog != null) return@onPreviewKeyEvent false
+                    if (state.isCheckoutInFlight) return@onPreviewKeyEvent false
+                    when (event.key) {
+                        Key.Enter -> {
+                            if (state.barcodeInput.isNotBlank()) {
+                                viewModel.addByBarcode()
+                            } else {
+                                viewModel.searchProducts()
+                            }
+                            true
+                        }
+                        Key.F5 -> {
+                            viewModel.validateDraft()
+                            true
+                        }
+                        Key.F9 -> {
+                            viewModel.checkoutCash()
+                            true
+                        }
+                        else -> false
+                    }
+                },
+            horizontalArrangement = Arrangement.spacedBy(PosSpacing.lg),
+        ) {
+            Column(
+                modifier = Modifier
+                    .width(340.dp)
+                    .fillMaxHeight(),
+                verticalArrangement = Arrangement.spacedBy(PosSpacing.sm),
             ) {
-                Text("Buscar")
-            }
+                Text(
+                    "Buscar producto",
+                    style = MaterialTheme.typography.titleMedium,
+                )
 
-            OutlinedTextField(
-                value = state.barcodeInput,
-                onValueChange = viewModel::onBarcodeChange,
-                label = { Text("Codigo de barras") },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !state.isBusy,
-                singleLine = true,
-            )
-            Button(
-                onClick = viewModel::addByBarcode,
-                modifier = Modifier.fillMaxWidth().height(48.dp),
-                enabled = !state.isBusy,
-            ) {
-                Text("Agregar por codigo")
-            }
+                PosTextField(
+                    value = state.barcodeInput,
+                    onValueChange = viewModel::onBarcodeChange,
+                    label = "Codigo de barras (Enter)",
+                    enabled = !state.isBusy,
+                    leadingIcon = {
+                        androidx.compose.material3.Icon(
+                            Icons.Filled.QrCodeScanner,
+                            contentDescription = null,
+                        )
+                    },
+                )
 
-            Card {
-                Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
-                    Text("Resultados", fontWeight = FontWeight.Bold)
-                    Divider(modifier = Modifier.padding(vertical = 8.dp))
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        items(state.searchResults) { product ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth()
-                                    .clickable(enabled = !state.isBusy) { viewModel.addProduct(product) }
-                                    .padding(8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                            ) {
-                                Column {
-                                    Text(product.name)
-                                    Text("${product.sku ?: ""} ${product.barcode ?: ""}", style = MaterialTheme.typography.bodySmall)
+                PosTextField(
+                    value = state.searchQuery,
+                    onValueChange = viewModel::onSearchQueryChange,
+                    label = "Buscar por nombre",
+                    enabled = !state.isBusy,
+                    leadingIcon = {
+                        androidx.compose.material3.Icon(
+                            Icons.Filled.Search,
+                            contentDescription = null,
+                        )
+                    },
+                )
+
+                PosSectionCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    title = if (state.searchResults.isEmpty()) {
+                        "Resultados"
+                    } else {
+                        "Resultados (${state.searchResults.size})"
+                    },
+                ) {
+                    if (state.searchResults.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = PosSpacing.xl),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                "Sin resultados",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(PosSpacing.xs),
+                        ) {
+                            items(state.searchResults) { product ->
+                                Surface(
+                                    shape = MaterialTheme.shapes.small,
+                                    color = MaterialTheme.colorScheme.surface,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable(enabled = !state.isBusy) {
+                                            viewModel.addProduct(product)
+                                        },
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(PosSpacing.sm),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(
+                                                text = product.name,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Medium,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                            Text(
+                                                text = listOfNotNull(product.sku, product.barcode)
+                                                    .joinToString(" · "),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                        PosMoneyText(
+                                            amount = product.unitPrice,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                        )
+                                    }
                                 }
-                                Text("$${money(product.unitPrice)}")
                             }
                         }
                     }
                 }
+
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = MaterialTheme.shapes.small,
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = PosSpacing.md, vertical = PosSpacing.sm),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            "Enter: agregar",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            "F5: validar",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            "F9: cobrar",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+                verticalArrangement = Arrangement.spacedBy(PosSpacing.sm),
+            ) {
+                val canEditLine = !state.isBusy &&
+                    !state.isCheckoutInFlight &&
+                    state.selectedLineId != null
+                val canRunSecondary = !state.isBusy && !state.isCheckoutInFlight
+                val canCheckout = !state.isBusy && !state.isCheckoutInFlight
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "Venta en caja",
+                        style = MaterialTheme.typography.titleLarge,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(PosSpacing.sm)) {
+                        PosSecondaryButton(
+                            text = "+",
+                            onClick = viewModel::incrementSelectedLineQty,
+                            enabled = canEditLine,
+                            modifier = Modifier.width(56.dp),
+                        )
+                        PosSecondaryButton(
+                            text = "-",
+                            onClick = viewModel::decrementSelectedLineQty,
+                            enabled = canEditLine,
+                            modifier = Modifier.width(56.dp),
+                        )
+                        PosDestructiveButton(
+                            text = "Eliminar",
+                            onClick = viewModel::removeSelectedLine,
+                            enabled = canEditLine,
+                            icon = Icons.Filled.Delete,
+                        )
+                    }
+                }
+
+                PosSectionCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                ) {
+                    val lines = state.draft?.lines.orEmpty()
+                    if (lines.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = PosSpacing.xl),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                "Venta vacia. Busca o escanea un producto.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
+                            )
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(PosSpacing.xs),
+                        ) {
+                            items(lines) { line ->
+                                val isSelected = line.id == state.selectedLineId
+                                val background = if (isSelected) {
+                                    MaterialTheme.colorScheme.primaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.surface
+                                }
+                                val contentColor = if (isSelected) {
+                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                }
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(background, MaterialTheme.shapes.small)
+                                        .clickable { viewModel.selectLine(line.id) }
+                                        .padding(horizontal = PosSpacing.md, vertical = PosSpacing.sm),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            text = line.productName,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = contentColor,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Text(
+                                            text = if (line.lotTracked) {
+                                                "Lote: ${line.lotId ?: "pendiente"}"
+                                            } else {
+                                                "Sin lote"
+                                            },
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = if (line.lotTracked && line.lotId == null) {
+                                                MaterialTheme.colorScheme.error
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            },
+                                        )
+                                    }
+                                    Text(
+                                        text = formatDisplayQty(line.qty, line.unit),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontFamily = FontFamily.Monospace,
+                                        modifier = Modifier.padding(horizontal = PosSpacing.sm),
+                                        color = contentColor,
+                                    )
+                                    PosMoneyText(
+                                        amount = line.lineTotal,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = contentColor,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (state.selectedLineId != null) {
+                    PosSectionCard(
+                        title = "Editar linea seleccionada",
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(PosSpacing.sm),
+                            verticalAlignment = Alignment.Bottom,
+                        ) {
+                            PosTextField(
+                                value = state.editQtyInput,
+                                onValueChange = viewModel::onEditQtyChange,
+                                label = "Cantidad",
+                                modifier = Modifier.width(100.dp),
+                                enabled = canRunSecondary,
+                            )
+                            PosTextField(
+                                value = state.editUnitInput,
+                                onValueChange = viewModel::onEditUnitChange,
+                                label = "Unidad",
+                                modifier = Modifier.width(110.dp),
+                                enabled = canRunSecondary,
+                            )
+                            PosTextField(
+                                value = state.editPriceInput,
+                                onValueChange = viewModel::onEditPriceChange,
+                                label = "Precio",
+                                modifier = Modifier.width(120.dp),
+                                enabled = canRunSecondary,
+                            )
+                            PosTextField(
+                                value = state.editLotInput,
+                                onValueChange = viewModel::onEditLotChange,
+                                label = "Lote",
+                                modifier = Modifier.width(140.dp),
+                                enabled = canRunSecondary,
+                            )
+                            PosPrimaryButton(
+                                text = "Aplicar",
+                                onClick = viewModel::applySelectedLineEdits,
+                                enabled = canRunSecondary,
+                                modifier = Modifier.width(120.dp),
+                            )
+                        }
+                    }
+                }
+
+                PosTotalDisplay(
+                    subtotal = state.draft?.totals?.subtotal ?: 0.0,
+                    tax = state.draft?.totals?.tax ?: 0.0,
+                    total = state.draft?.totals?.total ?: 0.0,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                if (state.validationIssues.isNotEmpty()) {
+                    PosSectionCard(
+                        title = "Observaciones",
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        state.validationIssues.forEach { issue ->
+                            Text(
+                                text = "- ${issue.lineId ?: "General"}: ${issue.message}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(PosSpacing.sm),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    PosSecondaryButton(
+                        text = "Validar",
+                        onClick = viewModel::validateDraft,
+                        enabled = canRunSecondary,
+                        icon = Icons.Filled.CheckCircle,
+                        modifier = Modifier.weight(1f),
+                    )
+                    PosSecondaryButton(
+                        text = "Lotes",
+                        onClick = viewModel::resolveLots,
+                        enabled = canRunSecondary,
+                        icon = Icons.Filled.Inventory,
+                        modifier = Modifier.weight(1f),
+                    )
+                    PosSecondaryButton(
+                        text = "Nueva venta",
+                        onClick = viewModel::startNewSale,
+                        enabled = canRunSecondary,
+                        icon = Icons.Filled.Add,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(PosSpacing.lg))
+                    PosPrimaryButton(
+                        text = "Cobrar efectivo  F9",
+                        onClick = viewModel::checkoutCash,
+                        enabled = canCheckout,
+                        icon = Icons.Filled.Payments,
+                        isLoading = state.isCheckoutInFlight,
+                        modifier = Modifier.weight(1.5f),
+                    )
+                    PosPrimaryButton(
+                        text = "Cobrar credito",
+                        onClick = viewModel::checkoutCredit,
+                        enabled = canCheckout,
+                        icon = Icons.Filled.CreditCard,
+                        isLoading = state.isCheckoutInFlight,
+                        modifier = Modifier.weight(1.5f),
+                    )
+                }
+
+                state.checkoutResult?.let { result ->
+                    Surface(
+                        color = MaterialTheme.colorScheme.tertiaryContainer,
+                        shape = MaterialTheme.shapes.medium,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(PosSpacing.md),
+                            horizontalArrangement = Arrangement.spacedBy(PosSpacing.sm),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            androidx.compose.material3.Icon(
+                                Icons.Filled.CheckCircle,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                            )
+                            Text(
+                                text = "Venta completada. Folio: ${result.folio}",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                            )
+                        }
+                    }
+                }
+
+                PosNoticeRow(
+                    notice = state.notice,
+                    errorMessage = state.errorMessage,
+                )
             }
         }
 
-        Column(modifier = Modifier.weight(1.2f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Venta en caja", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-            Text("Draft: ${state.draft?.id ?: "-"} v${state.draft?.version ?: 0}")
+        PosLoadingOverlay(
+            isLoading = state.isCheckoutInFlight,
+            message = "Procesando cobro...",
+        )
 
-            Card(modifier = Modifier.fillMaxWidth().weight(1f)) {
-                Column(modifier = Modifier.fillMaxSize().padding(10.dp)) {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Lineas", fontWeight = FontWeight.Bold)
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Button(onClick = viewModel::incrementSelectedLineQty, enabled = !state.isBusy) { Text("+ Qty") }
-                            Button(onClick = viewModel::decrementSelectedLineQty, enabled = !state.isBusy) { Text("- Qty") }
-                            Button(onClick = viewModel::removeSelectedLine, enabled = !state.isBusy) { Text("Eliminar") }
-                        }
-                    }
-                    Divider(modifier = Modifier.padding(vertical = 8.dp))
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        items(state.draft?.lines.orEmpty()) { line ->
-                            val selected = line.id == state.selectedLineId
-                            val bg = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f) else MaterialTheme.colorScheme.surface
-                            Row(
-                                modifier = Modifier.fillMaxWidth().background(bg)
-                                    .clickable { viewModel.selectLine(line.id) }
-                                    .padding(8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                            ) {
-                                Column(Modifier.width(280.dp)) {
-                                    Text(line.productName, fontWeight = FontWeight.SemiBold)
-                                    Text("Lote: ${line.lotId ?: "(pendiente)"} | ${line.unit}")
-                                }
-                                Text("${line.qty} x ${money(line.unitPrice)}")
-                                Text("$${money(line.lineTotal)}")
-                            }
-                        }
-                    }
-                    Divider(modifier = Modifier.padding(vertical = 8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = state.editQtyInput,
-                            onValueChange = viewModel::onEditQtyChange,
-                            label = { Text("Qty") },
-                            modifier = Modifier.width(100.dp),
-                            singleLine = true,
-                        )
-                        OutlinedTextField(
-                            value = state.editUnitInput,
-                            onValueChange = viewModel::onEditUnitChange,
-                            label = { Text("Unidad") },
-                            modifier = Modifier.width(110.dp),
-                            singleLine = true,
-                        )
-                        OutlinedTextField(
-                            value = state.editPriceInput,
-                            onValueChange = viewModel::onEditPriceChange,
-                            label = { Text("Precio") },
-                            modifier = Modifier.width(120.dp),
-                            singleLine = true,
-                        )
-                        OutlinedTextField(
-                            value = state.editLotInput,
-                            onValueChange = viewModel::onEditLotChange,
-                            label = { Text("Lote") },
-                            modifier = Modifier.width(140.dp),
-                            singleLine = true,
-                        )
-                        Button(onClick = viewModel::applySelectedLineEdits, enabled = !state.isBusy) { Text("Aplicar") }
-                    }
-                }
-            }
-
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Subtotal: $${money(state.draft?.totals?.subtotal ?: 0.0)}")
-                    Text("Impuesto: $${money(state.draft?.totals?.tax ?: 0.0)}")
-                    Text("TOTAL: $${money(state.draft?.totals?.total ?: 0.0)}", fontSize = 28.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = viewModel::validateDraft, enabled = !state.isBusy) { Text("Validar") }
-                Button(onClick = viewModel::resolveLots, enabled = !state.isBusy) { Text("Resolver lotes") }
-                Button(onClick = viewModel::checkoutCash, enabled = !state.isCheckoutInFlight) { Text("Cobrar efectivo") }
-                Button(onClick = viewModel::checkoutCredit, enabled = !state.isCheckoutInFlight) { Text("Cobrar credito") }
-                Button(onClick = viewModel::startNewSale, enabled = !state.isBusy) { Text("Nueva venta") }
-            }
-
-            if (state.validationIssues.isNotEmpty()) {
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.fillMaxWidth().padding(10.dp)) {
-                        Text("Observaciones de validacion", fontWeight = FontWeight.Bold)
-                        state.validationIssues.forEach { issue ->
-                            Text("- ${issue.lineId ?: "GLOBAL"}: ${issue.message}")
-                        }
-                    }
-                }
-            }
-
-            state.notice?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
-            state.errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            state.checkoutResult?.let { Text("Folio: ${it.folio}", fontWeight = FontWeight.Bold) }
+        state.confirmDialog?.let { dialog ->
+            PosConfirmDialog(
+                title = dialog.title,
+                message = dialog.message,
+                confirmLabel = dialog.confirmLabel,
+                cancelLabel = dialog.cancelLabel,
+                isDestructive = dialog.isDestructive,
+                onConfirm = viewModel::confirmStartNewSale,
+                onDismiss = viewModel::dismissConfirmDialog,
+            )
         }
     }
 }
 
-private fun money(value: Double): String {
-    val cents = (value * 100.0).roundToLong()
-    val whole = cents / 100
-    val fraction = abs(cents % 100)
-    val suffix = if (fraction < 10) "0$fraction" else "$fraction"
-    return "$whole.$suffix"
+private fun formatDisplayQty(qty: Double, unit: String): String {
+    val normalized = if (qty % 1.0 == 0.0) qty.toInt().toString() else qty.toString()
+    return "$normalized $unit"
 }

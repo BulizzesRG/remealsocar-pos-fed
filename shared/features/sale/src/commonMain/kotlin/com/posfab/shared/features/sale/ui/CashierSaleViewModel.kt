@@ -253,7 +253,31 @@ class CashierSaleViewModel(
     fun checkoutCredit() = checkout(CheckoutMode.ON_CREDIT)
 
     fun startNewSale() {
+        val snapshot = _state.value
+        val shouldConfirm = snapshot.draft?.lines?.isNotEmpty() == true &&
+            snapshot.draft.status != "COMPLETED"
+        if (!shouldConfirm) {
+            openOrCreateDraft()
+            return
+        }
+        _state.value = snapshot.copy(
+            confirmDialog = SaleConfirmDialogState(
+                title = "Descartar venta actual",
+                message = "Hay lineas pendientes en la venta actual. Si continuas, se abrira una venta nueva.",
+                confirmLabel = "Nueva venta",
+                cancelLabel = "Seguir editando",
+                isDestructive = false,
+            )
+        )
+    }
+
+    fun confirmStartNewSale() {
+        _state.value = _state.value.copy(confirmDialog = null)
         openOrCreateDraft()
+    }
+
+    fun dismissConfirmDialog() {
+        _state.value = _state.value.copy(confirmDialog = null)
     }
 
     private fun checkout(mode: CheckoutMode) {
