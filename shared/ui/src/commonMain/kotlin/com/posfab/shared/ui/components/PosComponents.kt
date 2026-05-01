@@ -64,7 +64,7 @@ fun PosTextField(
         value = value,
         onValueChange = onValueChange,
         label = { Text(label) },
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier,
         enabled = enabled,
         isError = isError,
         supportingText = if (errorMessage != null && isError) {
@@ -92,7 +92,6 @@ fun PosPrimaryButton(
     Button(
         onClick = onClick,
         modifier = modifier
-            .fillMaxWidth()
             .height(PosLayout.touchTarget),
         enabled = enabled && !isLoading,
     ) {

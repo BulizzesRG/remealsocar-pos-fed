@@ -188,13 +188,19 @@ class OperationsViewModel(
     }
 
     fun requestSubmitPurchase() {
-        _state.value = _state.value.copy(
+        val snapshot = _state.value
+        val validationError = validatePurchaseBeforeSubmit(snapshot)
+        if (validationError != null) {
+            _state.value = snapshot.copy(errorMessage = validationError, confirmDialog = null)
+            return
+        }
+        _state.value = snapshot.copy(
             confirmDialog = OperationsConfirmDialogState(
                 action = OperationsConfirmAction.PURCHASE,
                 title = "Registrar compra",
-                message = "Se enviara la compra con ${_state.value.purchaseLines.size} lineas para ${_state.value.purchaseSupplier.ifBlank { "proveedor sin nombre" }}.",
+                message = "Se enviara la compra con ${snapshot.purchaseLines.size} lineas para ${snapshot.purchaseSupplier.ifBlank { "proveedor sin nombre" }}.",
                 confirmLabel = "Registrar compra",
-            )
+            ),
         )
     }
 
@@ -315,13 +321,19 @@ class OperationsViewModel(
     }
 
     fun requestSubmitRequisition() {
-        _state.value = _state.value.copy(
+        val snapshot = _state.value
+        val validationError = validateRequisitionBeforeSubmit(snapshot)
+        if (validationError != null) {
+            _state.value = snapshot.copy(errorMessage = validationError, confirmDialog = null)
+            return
+        }
+        _state.value = snapshot.copy(
             confirmDialog = OperationsConfirmDialogState(
                 action = OperationsConfirmAction.REQUISITION,
                 title = "Registrar requisicion",
-                message = "Se enviara la requisicion interna de ${_state.value.requisitionSourceBu} a ${_state.value.requisitionTargetBu} con ${_state.value.requisitionLines.size} lineas.",
+                message = "Se enviara la requisicion interna de ${snapshot.requisitionSourceBu} a ${snapshot.requisitionTargetBu} con ${snapshot.requisitionLines.size} lineas.",
                 confirmLabel = "Registrar requisicion",
-            )
+            ),
         )
     }
 
@@ -478,13 +490,19 @@ class OperationsViewModel(
     }
 
     fun requestSubmitWaste() {
-        _state.value = _state.value.copy(
+        val snapshot = _state.value
+        val validationError = validateWasteBeforeSubmit(snapshot)
+        if (validationError != null) {
+            _state.value = snapshot.copy(errorMessage = validationError, confirmDialog = null)
+            return
+        }
+        _state.value = snapshot.copy(
             confirmDialog = OperationsConfirmDialogState(
                 action = OperationsConfirmAction.WASTE,
                 title = "Registrar merma",
-                message = "Se registrara una merma para ${_state.value.wasteProductId.ifBlank { "producto sin capturar" }}.",
+                message = "Se registrara una merma para ${snapshot.wasteProductId.ifBlank { "producto sin capturar" }}.",
                 confirmLabel = "Registrar merma",
-            )
+            ),
         )
     }
 
@@ -569,13 +587,19 @@ class OperationsViewModel(
     }
 
     fun requestSubmitAdjustment() {
-        _state.value = _state.value.copy(
+        val snapshot = _state.value
+        val validationError = validateAdjustmentBeforeSubmit(snapshot)
+        if (validationError != null) {
+            _state.value = snapshot.copy(errorMessage = validationError, confirmDialog = null)
+            return
+        }
+        _state.value = snapshot.copy(
             confirmDialog = OperationsConfirmDialogState(
                 action = OperationsConfirmAction.ADJUSTMENT,
                 title = "Registrar ajuste",
-                message = "Se registrara un ajuste para ${_state.value.adjustmentProductId.ifBlank { "producto sin capturar" }}.",
+                message = "Se registrara un ajuste para ${snapshot.adjustmentProductId.ifBlank { "producto sin capturar" }}.",
                 confirmLabel = "Registrar ajuste",
-            )
+            ),
         )
     }
 
@@ -591,6 +615,55 @@ class OperationsViewModel(
 
     fun dismissConfirmDialog() {
         _state.value = _state.value.copy(confirmDialog = null)
+    }
+
+    private fun validatePurchaseBeforeSubmit(snapshot: OperationsState): String? {
+        if (!snapshot.canManageOperations) return "No autorizado para compras"
+        if (snapshot.isSubmittingPurchase) return "Ya se esta registrando una compra"
+        if (snapshot.purchaseSupplier.trim().isEmpty()) return "Proveedor requerido"
+        if (snapshot.purchaseLines.isEmpty()) return "Agrega al menos una linea de compra"
+        return null
+    }
+
+    private fun validateRequisitionBeforeSubmit(snapshot: OperationsState): String? {
+        if (!snapshot.canManageOperations) return "No autorizado para requisiciones internas"
+        if (snapshot.isSubmittingRequisition) return "Ya se esta registrando una requisicion"
+        if (snapshot.requisitionLines.isEmpty()) return "Agrega al menos una linea de requisicion"
+        val target = snapshot.requisitionTargetBu.trim().uppercase()
+        if (target != "FONDA" && target != "TORTERIA") {
+            return "Destino invalido. Usa FONDA o TORTERIA"
+        }
+        return null
+    }
+
+    private fun validateWasteBeforeSubmit(snapshot: OperationsState): String? {
+        if (!snapshot.canManageWasteAdjustments) return "Solo MANAGER puede registrar mermas"
+        if (snapshot.isSubmittingWaste) return "Ya se esta registrando una merma"
+        val qty = snapshot.wasteQtyInput.toDoubleOrNull()
+        if (snapshot.wasteProductId.trim().isEmpty() ||
+            snapshot.wasteUnit.trim().isEmpty() ||
+            snapshot.wasteReasonCode.trim().isEmpty()
+        ) {
+            return "Completa producto, unidad y motivo de merma"
+        }
+        if (qty == null || qty <= 0.0) return "La merma requiere qty > 0"
+        return null
+    }
+
+    private fun validateAdjustmentBeforeSubmit(snapshot: OperationsState): String? {
+        if (!snapshot.canManageWasteAdjustments) return "Solo MANAGER puede registrar ajustes"
+        if (snapshot.isSubmittingAdjustment) return "Ya se esta registrando un ajuste"
+        val qtyDelta = snapshot.adjustmentQtyDeltaInput.toDoubleOrNull()
+        if (snapshot.adjustmentProductId.trim().isEmpty() ||
+            snapshot.adjustmentUnit.trim().isEmpty() ||
+            snapshot.adjustmentReasonCode.trim().isEmpty()
+        ) {
+            return "Completa producto, unidad y motivo de ajuste"
+        }
+        if (qtyDelta == null || qtyDelta == 0.0) {
+            return "El ajuste requiere qtyDelta distinto de 0"
+        }
+        return null
     }
 
     private fun generateIdempotencyKey(prefix: String): String {
