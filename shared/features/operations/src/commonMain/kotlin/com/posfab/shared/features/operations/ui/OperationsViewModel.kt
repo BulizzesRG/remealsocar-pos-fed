@@ -161,6 +161,7 @@ class OperationsViewModel(
             _state.value = _state.value.copy(
                 isSubmittingPurchase = true,
                 purchaseIdempotencyKey = key,
+                confirmDialog = null,
                 errorMessage = null,
                 notice = null,
             )
@@ -184,6 +185,17 @@ class OperationsViewModel(
                 }
             }
         }
+    }
+
+    fun requestSubmitPurchase() {
+        _state.value = _state.value.copy(
+            confirmDialog = OperationsConfirmDialogState(
+                action = OperationsConfirmAction.PURCHASE,
+                title = "Registrar compra",
+                message = "Se enviara la compra con ${_state.value.purchaseLines.size} lineas para ${_state.value.purchaseSupplier.ifBlank { "proveedor sin nombre" }}.",
+                confirmLabel = "Registrar compra",
+            )
+        )
     }
 
     fun onReqSourceBuChange(value: String) {
@@ -276,6 +288,7 @@ class OperationsViewModel(
             _state.value = _state.value.copy(
                 isSubmittingRequisition = true,
                 requisitionIdempotencyKey = key,
+                confirmDialog = null,
                 errorMessage = null,
                 notice = null,
             )
@@ -299,6 +312,17 @@ class OperationsViewModel(
                 }
             }
         }
+    }
+
+    fun requestSubmitRequisition() {
+        _state.value = _state.value.copy(
+            confirmDialog = OperationsConfirmDialogState(
+                action = OperationsConfirmAction.REQUISITION,
+                title = "Registrar requisicion",
+                message = "Se enviara la requisicion interna de ${_state.value.requisitionSourceBu} a ${_state.value.requisitionTargetBu} con ${_state.value.requisitionLines.size} lineas.",
+                confirmLabel = "Registrar requisicion",
+            )
+        )
     }
 
     fun onOnHandProductFilterChange(value: String) {
@@ -425,7 +449,12 @@ class OperationsViewModel(
         )
 
         scope.launch {
-            _state.value = _state.value.copy(isSubmittingWaste = true, wasteIdempotencyKey = key, errorMessage = null)
+            _state.value = _state.value.copy(
+                isSubmittingWaste = true,
+                wasteIdempotencyKey = key,
+                confirmDialog = null,
+                errorMessage = null,
+            )
             when (val result = useCases.repository.createWaste(input, key)) {
                 is AppResult.Success -> {
                     val label = result.value.wasteId ?: result.value.message ?: "merma registrada"
@@ -446,6 +475,17 @@ class OperationsViewModel(
                 }
             }
         }
+    }
+
+    fun requestSubmitWaste() {
+        _state.value = _state.value.copy(
+            confirmDialog = OperationsConfirmDialogState(
+                action = OperationsConfirmAction.WASTE,
+                title = "Registrar merma",
+                message = "Se registrara una merma para ${_state.value.wasteProductId.ifBlank { "producto sin capturar" }}.",
+                confirmLabel = "Registrar merma",
+            )
+        )
     }
 
     fun onAdjustmentProductChange(value: String) {
@@ -500,7 +540,12 @@ class OperationsViewModel(
         )
 
         scope.launch {
-            _state.value = _state.value.copy(isSubmittingAdjustment = true, adjustmentIdempotencyKey = key, errorMessage = null)
+            _state.value = _state.value.copy(
+                isSubmittingAdjustment = true,
+                adjustmentIdempotencyKey = key,
+                confirmDialog = null,
+                errorMessage = null,
+            )
             when (val result = useCases.repository.createAdjustment(input, key)) {
                 is AppResult.Success -> {
                     val label = result.value.adjustmentId ?: result.value.message ?: "ajuste registrado"
@@ -521,6 +566,31 @@ class OperationsViewModel(
                 }
             }
         }
+    }
+
+    fun requestSubmitAdjustment() {
+        _state.value = _state.value.copy(
+            confirmDialog = OperationsConfirmDialogState(
+                action = OperationsConfirmAction.ADJUSTMENT,
+                title = "Registrar ajuste",
+                message = "Se registrara un ajuste para ${_state.value.adjustmentProductId.ifBlank { "producto sin capturar" }}.",
+                confirmLabel = "Registrar ajuste",
+            )
+        )
+    }
+
+    fun confirmDialogAction() {
+        when (_state.value.confirmDialog?.action) {
+            OperationsConfirmAction.PURCHASE -> submitPurchase()
+            OperationsConfirmAction.REQUISITION -> submitRequisition()
+            OperationsConfirmAction.WASTE -> submitWaste()
+            OperationsConfirmAction.ADJUSTMENT -> submitAdjustment()
+            null -> Unit
+        }
+    }
+
+    fun dismissConfirmDialog() {
+        _state.value = _state.value.copy(confirmDialog = null)
     }
 
     private fun generateIdempotencyKey(prefix: String): String {

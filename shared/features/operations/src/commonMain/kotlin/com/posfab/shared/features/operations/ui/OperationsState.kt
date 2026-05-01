@@ -14,6 +14,21 @@ enum class OperationsTab {
     ADJUSTMENTS,
 }
 
+enum class OperationsConfirmAction {
+    PURCHASE,
+    REQUISITION,
+    WASTE,
+    ADJUSTMENT,
+}
+
+data class OperationsConfirmDialogState(
+    val action: OperationsConfirmAction,
+    val title: String,
+    val message: String,
+    val confirmLabel: String = "Confirmar",
+    val cancelLabel: String = "Cancelar",
+)
+
 data class OperationsState(
     val selectedTab: OperationsTab = OperationsTab.PURCHASES,
     val canManageOperations: Boolean = false,
@@ -74,6 +89,7 @@ data class OperationsState(
     val adjustmentLotId: String = "",
     val adjustmentIdempotencyKey: String? = null,
 
+    val confirmDialog: OperationsConfirmDialogState? = null,
     val notice: String? = null,
     val errorMessage: String? = null,
 ) {
