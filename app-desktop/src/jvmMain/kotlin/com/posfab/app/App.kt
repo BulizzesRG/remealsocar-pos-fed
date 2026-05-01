@@ -1,8 +1,12 @@
 package com.posfab.app
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -37,6 +41,7 @@ import com.posfab.shared.features.sale.ui.ReceiptPrinterAdapter
 import com.posfab.shared.features.sale.usecase.SaleUseCases
 import com.posfab.shared.features.shell.ShellScreen
 import com.posfab.shared.features.shell.ShellViewModel
+import com.posfab.shared.ui.theme.PosSpacing
 import com.posfab.shared.ui.theme.PosTheme
 import kotlinx.coroutines.flow.collect
 import org.koin.core.context.GlobalContext
@@ -49,7 +54,17 @@ fun PosApp(controller: AppStateController) {
         when (val screen = current) {
             AppScreen.Loading -> {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(PosSpacing.md),
+                    ) {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                        Text(
+                            "Iniciando sistema...",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
             AppScreen.Login -> {
