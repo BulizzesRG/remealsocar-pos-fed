@@ -1,8 +1,9 @@
 package com.posfab.shared.features.reports.manager
 
 data class ManagerDailyTotal(
+    val saleDate: String,
     val terminalId: String,
-    val businessUnit: String?,
+    val businessUnitId: String,
     val salesCount: Int,
     val total: Double,
 )
@@ -10,26 +11,29 @@ data class ManagerDailyTotal(
 data class DebtorItem(
     val customerId: String,
     val customerName: String,
-    val debtTotal: Double,
+    val outstandingBalance: Double,
 )
 
 data class WasteItem(
+    val wasteDate: String,
     val productId: String,
-    val productName: String,
-    val wasteQty: Double,
-    val unit: String,
+    val totalWasteQtyBase: Double,
+)
+
+data class IntegrityIssueSample(
+    val entityType: String,
+    val entityId: String,
 )
 
 data class IntegrityIssue(
-    val key: String,
+    val code: String,
     val count: Int,
-    val samples: List<String>,
+    val samples: List<IntegrityIssueSample>,
 )
 
 data class IntegrityResult(
     val ok: Boolean,
     val issues: List<IntegrityIssue>,
-    val checkedAt: String?,
 )
 
 data class ManagerPanelState(

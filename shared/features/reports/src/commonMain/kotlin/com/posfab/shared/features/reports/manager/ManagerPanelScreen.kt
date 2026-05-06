@@ -86,7 +86,7 @@ fun ManagerPanelScreen(viewModel: ManagerPanelViewModel) {
                 state.dailyTotals.forEachIndexed { index, item ->
                     Column(verticalArrangement = Arrangement.spacedBy(PosSpacing.xxs)) {
                         Text(
-                            "${item.terminalId} · ${item.businessUnit ?: "-"}",
+                            "${item.saleDate} · T${item.terminalId} · BU${item.businessUnitId}",
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold,
                         )
@@ -134,7 +134,7 @@ fun ManagerPanelScreen(viewModel: ManagerPanelViewModel) {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        PosMoneyText(debtor.debtTotal)
+                        PosMoneyText(debtor.outstandingBalance)
                     }
                     if (index < state.debtors.lastIndex) {
                         HorizontalDivider()
@@ -158,18 +158,18 @@ fun ManagerPanelScreen(viewModel: ManagerPanelViewModel) {
                     ) {
                         Column {
                             Text(
-                                item.productName,
+                                "Producto #${item.productId}",
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.SemiBold,
                             )
                             Text(
-                                item.productId,
-                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                item.wasteDate,
+                                style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                         Text(
-                            "${item.wasteQty} ${item.unit}",
+                            "${item.totalWasteQtyBase}",
                             style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
                         )
                     }
@@ -225,13 +225,13 @@ fun ManagerPanelScreen(viewModel: ManagerPanelViewModel) {
                         items(integrity.issues) { issue ->
                             Column(verticalArrangement = Arrangement.spacedBy(PosSpacing.xxs)) {
                                 Text(
-                                    "${issue.key}: ${issue.count}",
+                                    "${issue.code}: ${issue.count}",
                                     style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = if (issue.count > 0) FontWeight.Bold else FontWeight.Normal,
                                 )
                                 issue.samples.take(5).forEach { sample ->
                                     Text(
-                                        sample,
+                                        "${sample.entityType}: ${sample.entityId}",
                                         style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )

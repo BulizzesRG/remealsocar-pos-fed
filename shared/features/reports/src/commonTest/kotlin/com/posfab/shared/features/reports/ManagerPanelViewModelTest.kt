@@ -6,6 +6,7 @@ import com.posfab.shared.features.reports.common.ReportsUseCases
 import com.posfab.shared.features.reports.daily.DailyHistoryRepository
 import com.posfab.shared.features.reports.manager.DebtorItem
 import com.posfab.shared.features.reports.manager.IntegrityIssue
+import com.posfab.shared.features.reports.manager.IntegrityIssueSample
 import com.posfab.shared.features.reports.manager.IntegrityResult
 import com.posfab.shared.features.reports.manager.ManagerDailyTotal
 import com.posfab.shared.features.reports.manager.ManagerPanelViewModel
@@ -58,13 +59,13 @@ private class FakeManagerRepository : ManagerRepository {
     var failIntegrity = false
 
     override suspend fun dailyTotals(dateFrom: String, dateTo: String): AppResult<List<ManagerDailyTotal>> =
-        AppResult.Success(listOf(ManagerDailyTotal("POS1", "Store-A", 4, 1234.0)))
+        AppResult.Success(listOf(ManagerDailyTotal("2026-05-05", "1", "1", 4, 1234.0)))
 
-    override suspend fun topDebtors(dateFrom: String, dateTo: String): AppResult<List<DebtorItem>> =
-        AppResult.Success(listOf(DebtorItem("c1", "Debtor 1", 500.0)))
+    override suspend fun topDebtors(limit: Int?): AppResult<List<DebtorItem>> =
+        AppResult.Success(listOf(DebtorItem("1", "Debtor 1", 500.0)))
 
     override suspend fun wasteTotals(dateFrom: String, dateTo: String): AppResult<List<WasteItem>> =
-        AppResult.Success(listOf(WasteItem("p1", "Tomate", 3.0, "kg")))
+        AppResult.Success(listOf(WasteItem("2026-05-05", "1", 3.0)))
 
     override suspend fun integrityCheck(): AppResult<IntegrityResult> {
         if (failIntegrity) return AppResult.Failure(AppError.Network("offline"))
@@ -73,12 +74,14 @@ private class FakeManagerRepository : ManagerRepository {
                 ok = false,
                 issues = listOf(
                     IntegrityIssue(
-                        key = "negative_stock",
+                        code = "negative_stock",
                         count = 2,
-                        samples = listOf("lotA -2", "lotB -1"),
+                        samples = listOf(
+                            IntegrityIssueSample("LOT", "lotA"),
+                            IntegrityIssueSample("LOT", "lotB"),
+                        ),
                     )
                 ),
-                checkedAt = "2026-03-02T10:00:00",
             )
         )
     }

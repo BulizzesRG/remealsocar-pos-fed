@@ -115,12 +115,24 @@ class CatalogViewModel(
         val defaultUnit = _state.value.units.firstOrNull()?.code ?: "EA"
         _state.value = _state.value.copy(
             selectedProduct = null,
+            formMode = CatalogFormMode.CREATING,
             form = ProductFormState(baseUnit = defaultUnit, active = true),
             hasUnsavedChanges = false,
             newUomUnit = defaultUnit,
             newUomFactorInput = "1",
             newPriceInput = "",
-            notice = "Capturando nuevo producto",
+            notice = null,
+            errorMessage = null,
+        )
+    }
+
+    fun cancelForm() {
+        _state.value = _state.value.copy(
+            formMode = CatalogFormMode.IDLE,
+            selectedProduct = null,
+            form = ProductFormState(),
+            hasUnsavedChanges = false,
+            notice = null,
             errorMessage = null,
         )
     }
@@ -344,6 +356,7 @@ class CatalogViewModel(
     private fun applySelectedProduct(detail: CatalogProductDetail) {
         _state.value = _state.value.copy(
             isLoadingDetail = false,
+            formMode = CatalogFormMode.EDITING,
             selectedProduct = detail,
             form = ProductFormState(
                 name = detail.name,

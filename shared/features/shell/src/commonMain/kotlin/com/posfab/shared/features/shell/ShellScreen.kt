@@ -186,7 +186,7 @@ internal fun routeDisplayName(route: ShellRoute): String = when (route) {
     ShellRoute.POS -> "POS"
     ShellRoute.CASH -> "Caja"
     ShellRoute.HISTORY -> "Historial"
-    ShellRoute.CATALOG -> "Catalogo"
+    ShellRoute.CATALOG -> "Productos"
     ShellRoute.OPERATIONS -> "Operaciones"
     ShellRoute.REPORTS -> "Reportes"
     ShellRoute.DIAGNOSTICS -> "Diagnosticos"

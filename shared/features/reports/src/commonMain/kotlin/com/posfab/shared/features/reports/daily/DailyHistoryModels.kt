@@ -6,8 +6,8 @@ data class DailySaleItem(
     val id: String,
     val folio: String,
     val total: Double,
-    val paymentStatus: String,
-    val createdAt: String,
+    val paymentType: String,
+    val soldAt: String,
     val terminalId: String,
 )
 

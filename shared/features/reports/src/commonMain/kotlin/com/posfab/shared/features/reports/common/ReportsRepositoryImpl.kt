@@ -7,6 +7,7 @@ import com.posfab.shared.features.reports.daily.DailyHistoryRepository
 import com.posfab.shared.features.reports.daily.DailySaleItem
 import com.posfab.shared.features.reports.manager.DebtorItem
 import com.posfab.shared.features.reports.manager.IntegrityIssue
+import com.posfab.shared.features.reports.manager.IntegrityIssueSample
 import com.posfab.shared.features.reports.manager.IntegrityResult
 import com.posfab.shared.features.reports.manager.ManagerDailyTotal
 import com.posfab.shared.features.reports.manager.ManagerRepository
@@ -24,12 +25,12 @@ class ReportsRepositoryImpl(
             is AppResult.Success -> AppResult.Success(
                 result.value.map {
                     DailySaleItem(
-                        id = it.id,
+                        id = it.id.toString(),
                         folio = it.folio,
-                        total = it.total,
-                        paymentStatus = it.paymentStatus,
-                        createdAt = it.createdAt,
-                        terminalId = it.terminalId,
+                        total = it.totalAmount.toDouble(),
+                        paymentType = it.paymentType,
+                        soldAt = it.soldAt,
+                        terminalId = it.terminalId.toString(),
                     )
                 }
             )
@@ -61,10 +62,11 @@ class ReportsRepositoryImpl(
             is AppResult.Success -> AppResult.Success(
                 result.value.map {
                     ManagerDailyTotal(
-                        terminalId = it.terminalId,
-                        businessUnit = it.businessUnit,
-                        salesCount = it.salesCount,
-                        total = it.total,
+                        saleDate = it.saleDate,
+                        terminalId = it.terminalId.toString(),
+                        businessUnitId = it.businessUnitId.toString(),
+                        salesCount = it.salesCount.toInt(),
+                        total = it.totalAmount.toDouble(),
                     )
                 }
             )
@@ -72,14 +74,14 @@ class ReportsRepositoryImpl(
         }
     }
 
-    override suspend fun topDebtors(dateFrom: String, dateTo: String): AppResult<List<DebtorItem>> {
-        return when (val result = executor.execute { reportsApi.topDebtors(it, dateFrom, dateTo) }) {
+    override suspend fun topDebtors(limit: Int?): AppResult<List<DebtorItem>> {
+        return when (val result = executor.execute { reportsApi.topDebtors(it, limit) }) {
             is AppResult.Success -> AppResult.Success(
                 result.value.map {
                     DebtorItem(
-                        customerId = it.customerId,
+                        customerId = it.customerId.toString(),
                         customerName = it.customerName,
-                        debtTotal = it.debtTotal,
+                        outstandingBalance = it.outstandingBalance.toDouble(),
                     )
                 }
             )
@@ -92,10 +94,9 @@ class ReportsRepositoryImpl(
             is AppResult.Success -> AppResult.Success(
                 result.value.map {
                     WasteItem(
-                        productId = it.productId,
-                        productName = it.productName,
-                        wasteQty = it.wasteQty,
-                        unit = it.unit,
+                        wasteDate = it.wasteDate,
+                        productId = it.productId.toString(),
+                        totalWasteQtyBase = it.totalWasteQtyBase.toDouble(),
                     )
                 }
             )
@@ -110,12 +111,16 @@ class ReportsRepositoryImpl(
                     ok = result.value.ok,
                     issues = result.value.issues.map {
                         IntegrityIssue(
-                            key = it.key,
+                            code = it.code,
                             count = it.count,
-                            samples = it.samples.take(5),
+                            samples = it.samples.map { s ->
+                                IntegrityIssueSample(
+                                    entityType = s.entityType,
+                                    entityId = s.entityId,
+                                )
+                            },
                         )
                     },
-                    checkedAt = result.value.checkedAt,
                 )
             )
             is AppResult.Failure -> result

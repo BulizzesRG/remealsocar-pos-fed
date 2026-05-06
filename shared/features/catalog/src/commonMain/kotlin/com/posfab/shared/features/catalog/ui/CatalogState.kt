@@ -10,6 +10,8 @@ enum class ActiveFilter {
     INACTIVE_ONLY,
 }
 
+enum class CatalogFormMode { IDLE, CREATING, EDITING }
+
 data class ProductFormState(
     val name: String = "",
     val sku: String = "",
@@ -24,6 +26,7 @@ data class CatalogState(
     val isLoadingDetail: Boolean = false,
     val isLoadingUnits: Boolean = false,
     val isSaving: Boolean = false,
+    val formMode: CatalogFormMode = CatalogFormMode.IDLE,
     val query: String = "",
     val limit: Int = 20,
     val offset: Int = 0,

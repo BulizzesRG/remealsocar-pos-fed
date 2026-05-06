@@ -51,7 +51,7 @@ class ManagerPanelViewModel(
             _state.value = snapshot.copy(isLoadingDashboard = true, errorMessage = null)
 
             val totals = useCases.managerRepository.dailyTotals(snapshot.dateFrom, snapshot.dateTo)
-            val debtors = useCases.managerRepository.topDebtors(snapshot.dateFrom, snapshot.dateTo)
+            val debtors = useCases.managerRepository.topDebtors()
             val waste = useCases.managerRepository.wasteTotals(snapshot.dateFrom, snapshot.dateTo)
 
             val failure = listOf(totals, debtors, waste).filterIsInstance<AppResult.Failure>().firstOrNull()

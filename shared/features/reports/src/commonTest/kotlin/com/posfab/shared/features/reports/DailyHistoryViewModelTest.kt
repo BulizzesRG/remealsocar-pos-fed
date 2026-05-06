@@ -71,8 +71,8 @@ private class FakeDailyHistoryRepo : DailyHistoryRepository {
                     id = "s1",
                     folio = "F-1",
                     total = 123.0,
-                    paymentStatus = "PAID",
-                    createdAt = "2026-03-01T10:00:00",
+                    paymentType = "CASH",
+                    soldAt = "2026-03-01T10:00:00",
                     terminalId = terminalId,
                 )
             )
@@ -98,7 +98,7 @@ private class FakeDailyHistoryRepo : DailyHistoryRepository {
 
 private class FakeManagerRepo : ManagerRepository {
     override suspend fun dailyTotals(dateFrom: String, dateTo: String) = AppResult.Success(emptyList<com.posfab.shared.features.reports.manager.ManagerDailyTotal>())
-    override suspend fun topDebtors(dateFrom: String, dateTo: String) = AppResult.Success(emptyList<com.posfab.shared.features.reports.manager.DebtorItem>())
+    override suspend fun topDebtors(limit: Int?) = AppResult.Success(emptyList<com.posfab.shared.features.reports.manager.DebtorItem>())
     override suspend fun wasteTotals(dateFrom: String, dateTo: String) = AppResult.Success(emptyList<com.posfab.shared.features.reports.manager.WasteItem>())
-    override suspend fun integrityCheck() = AppResult.Success(com.posfab.shared.features.reports.manager.IntegrityResult(ok = true, issues = emptyList(), checkedAt = null))
+    override suspend fun integrityCheck() = AppResult.Success(com.posfab.shared.features.reports.manager.IntegrityResult(ok = true, issues = emptyList()))
 }

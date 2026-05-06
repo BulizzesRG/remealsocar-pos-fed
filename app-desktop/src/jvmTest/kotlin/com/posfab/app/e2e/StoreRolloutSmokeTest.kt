@@ -309,13 +309,12 @@ private class FakeStoreBackend :
     override suspend fun cashSummary(date: String, terminalId: String): AppResult<DailyCashReport> = getDailyReport(date, terminalId)
 
     override suspend fun dailyTotals(dateFrom: String, dateTo: String): AppResult<List<ManagerDailyTotal>> = AppResult.Success(emptyList())
-    override suspend fun topDebtors(dateFrom: String, dateTo: String): AppResult<List<DebtorItem>> = AppResult.Success(emptyList())
+    override suspend fun topDebtors(limit: Int?): AppResult<List<DebtorItem>> = AppResult.Success(emptyList())
     override suspend fun wasteTotals(dateFrom: String, dateTo: String): AppResult<List<WasteItem>> = AppResult.Success(emptyList())
     override suspend fun integrityCheck(): AppResult<IntegrityResult> = AppResult.Success(
         IntegrityResult(
             ok = true,
-            issues = listOf(IntegrityIssue(key = "all", count = 0, samples = emptyList())),
-            checkedAt = "2026-03-01T20:00:00",
+            issues = listOf(IntegrityIssue(code = "all", count = 0, samples = emptyList())),
         )
     )
 }

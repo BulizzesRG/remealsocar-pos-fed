@@ -12,7 +12,7 @@ import io.ktor.http.HttpHeaders
 interface ReportsApi {
     suspend fun dailySales(accessToken: String, date: String, terminalId: String): AppResult<List<SaleHistoryItemDto>>
     suspend fun dailyTotals(accessToken: String, dateFrom: String, dateTo: String): AppResult<List<DailySalesTotalsDto>>
-    suspend fun topDebtors(accessToken: String, dateFrom: String, dateTo: String): AppResult<List<DebtorItemDto>>
+    suspend fun topDebtors(accessToken: String, limit: Int? = null): AppResult<List<DebtorItemDto>>
     suspend fun wasteTotals(accessToken: String, dateFrom: String, dateTo: String): AppResult<List<WasteItemDto>>
     suspend fun integrityCheck(accessToken: String): AppResult<IntegrityCheckDto>
 }
@@ -30,23 +30,22 @@ class ReportsApiClient(
     }
 
     override suspend fun dailyTotals(accessToken: String, dateFrom: String, dateTo: String): AppResult<List<DailySalesTotalsDto>> = safeCall {
-        httpClient.get("${config.apiBaseUrl}/reports/daily-totals") {
+        httpClient.get("${config.apiBaseUrl}/reports/sales/daily-totals") {
             bearer(accessToken)
             parameter("date_from", dateFrom)
             parameter("date_to", dateTo)
         }
     }
 
-    override suspend fun topDebtors(accessToken: String, dateFrom: String, dateTo: String): AppResult<List<DebtorItemDto>> = safeCall {
-        httpClient.get("${config.apiBaseUrl}/reports/debtors") {
+    override suspend fun topDebtors(accessToken: String, limit: Int?): AppResult<List<DebtorItemDto>> = safeCall {
+        httpClient.get("${config.apiBaseUrl}/reports/customers/top-debtors") {
             bearer(accessToken)
-            parameter("date_from", dateFrom)
-            parameter("date_to", dateTo)
+            limit?.let { parameter("limit", it) }
         }
     }
 
     override suspend fun wasteTotals(accessToken: String, dateFrom: String, dateTo: String): AppResult<List<WasteItemDto>> = safeCall {
-        httpClient.get("${config.apiBaseUrl}/reports/waste") {
+        httpClient.get("${config.apiBaseUrl}/reports/inventory/waste") {
             bearer(accessToken)
             parameter("date_from", dateFrom)
             parameter("date_to", dateTo)

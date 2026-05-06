@@ -123,14 +123,14 @@ fun DailyHistoryScreen(viewModel: DailyHistoryViewModel) {
                                     fontWeight = FontWeight.SemiBold,
                                 )
                                 Text(
-                                    "${item.createdAt} · ${item.terminalId}",
+                                    "${item.soldAt} · ${item.terminalId}",
                                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
                             Column(horizontalAlignment = Alignment.End) {
                                 Text(
-                                    item.paymentStatus,
+                                    item.paymentType,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
