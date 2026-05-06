@@ -22,7 +22,7 @@ class ShellViewModel(
     private val _state = MutableStateFlow(
         ShellState(
             session = session,
-            selectedRoute = allowed.firstOrNull() ?: ShellRoute.POS,
+            selectedRoute = ShellRoute.HOME,
             allowedRoutes = allowed,
         )
     )

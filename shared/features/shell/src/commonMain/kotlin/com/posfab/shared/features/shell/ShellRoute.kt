@@ -3,6 +3,7 @@ package com.posfab.shared.features.shell
 import com.posfab.shared.core.model.UserRole
 
 enum class ShellRoute(val title: String, val requiredRoles: Set<UserRole>) {
+    HOME("Inicio", setOf(UserRole.CASHIER, UserRole.MANAGER, UserRole.ADMIN)),
     POS("POS", setOf(UserRole.CASHIER, UserRole.MANAGER, UserRole.ADMIN)),
     CASH("Cash", setOf(UserRole.CASHIER, UserRole.MANAGER, UserRole.ADMIN)),
     HISTORY("History", setOf(UserRole.CASHIER, UserRole.MANAGER, UserRole.ADMIN)),
