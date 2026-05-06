@@ -13,7 +13,7 @@ import io.ktor.http.contentType
 
 interface AuthApi {
     suspend fun login(request: LoginRequestDto): AppResult<AuthResponseDto>
-    suspend fun refresh(request: RefreshRequestDto): AppResult<AuthResponseDto>
+    suspend fun refresh(request: RefreshRequestDto): AppResult<AuthRefreshResponseDto>
     suspend fun logout(request: LogoutRequestDto, accessToken: String? = null): AppResult<Unit>
 }
 
@@ -28,7 +28,7 @@ class AuthApiClient(
         }
     }
 
-    override suspend fun refresh(request: RefreshRequestDto): AppResult<AuthResponseDto> = safeCall {
+    override suspend fun refresh(request: RefreshRequestDto): AppResult<AuthRefreshResponseDto> = safeCall {
         httpClient.post("${config.apiBaseUrl}/auth/refresh") {
             contentType(ContentType.Application.Json)
             setBody(request)

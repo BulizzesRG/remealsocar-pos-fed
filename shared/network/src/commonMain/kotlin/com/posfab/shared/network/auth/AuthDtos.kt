@@ -1,13 +1,12 @@
 package com.posfab.shared.network.auth
 
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
 data class LoginRequestDto(
     val username: String,
     val password: String,
-    @SerialName("terminalCode") val terminalCode: String,
+    val terminalCode: String,
 )
 
 @Serializable
@@ -22,16 +21,29 @@ data class LogoutRequestDto(
 
 @Serializable
 data class AuthResponseDto(
-    @SerialName("accessToken") val accessToken: String,
-    @SerialName("refreshToken") val refreshToken: String,
-    @SerialName("accessTokenExpiresAt") val accessTokenExpiresAt: String? = null,
-    @SerialName("refreshTokenExpiresAt") val refreshTokenExpiresAt: String? = null,
+    val accessToken: String,
+    val refreshToken: String,
+    val accessExpiresAt: String,
     val user: UserDto,
+    val terminal: TerminalDto,
+)
+
+@Serializable
+data class AuthRefreshResponseDto(
+    val accessToken: String,
+    val refreshToken: String,
+    val accessExpiresAt: String,
 )
 
 @Serializable
 data class UserDto(
-    val id: String,
-    val username: String,
-    val roles: List<String>,
+    val id: Long,
+    val fullName: String,
+    val role: String,
+)
+
+@Serializable
+data class TerminalDto(
+    val id: Long,
+    val code: String,
 )

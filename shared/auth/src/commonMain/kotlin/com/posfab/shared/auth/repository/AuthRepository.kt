@@ -36,7 +36,7 @@ class AuthRepositoryImpl(
 
         return when (response) {
             is AppResult.Success -> {
-                val session = response.value.toSession(terminal)
+                val session = response.value.toSession()
                 sessionManager.set(session)
                 AppResult.Success(session)
             }
@@ -51,8 +51,12 @@ class AuthRepositoryImpl(
 
         return when (val response = authApi.refresh(RefreshRequestDto(refreshToken))) {
             is AppResult.Success -> {
-                val terminal = current?.terminal ?: TerminalCode.POS1
-                val updated = response.value.toSession(terminal)
+                val updated = current?.copy(
+                    tokens = AuthTokens(
+                        accessToken = response.value.accessToken,
+                        refreshToken = response.value.refreshToken,
+                    )
+                ) ?: return AppResult.Failure(AppError.Unauthorized)
                 sessionManager.set(updated)
                 AppResult.Success(updated)
             }
@@ -94,19 +98,18 @@ class AuthRepositoryImpl(
         return AppResult.Success(Unit)
     }
 
-    private fun AuthResponseDto.toSession(terminal: TerminalCode): UserSession {
-        val roles = user.roles.mapNotNull(UserRole::fromRaw).toSet()
+    private fun AuthResponseDto.toSession(): UserSession {
         return UserSession(
             tokens = AuthTokens(
                 accessToken = accessToken,
                 refreshToken = refreshToken,
             ),
             user = AuthUser(
-                id = user.id,
-                username = user.username,
-                roles = roles,
+                id = user.id.toString(),
+                username = user.fullName,
+                roles = setOfNotNull(UserRole.fromRaw(user.role)),
             ),
-            terminal = terminal,
+            terminal = TerminalCode.fromRaw(terminal.code) ?: TerminalCode.POS1,
         )
     }
 }

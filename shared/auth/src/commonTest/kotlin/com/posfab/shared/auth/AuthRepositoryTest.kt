@@ -41,7 +41,9 @@ class AuthRepositoryTest {
                 {
                   "accessToken": "access-1",
                   "refreshToken": "refresh-1",
-                  "user": {"id": "u1", "username": "alice", "roles": ["CASHIER"]}
+                  "accessExpiresAt": "2099-01-01T00:00:00Z",
+                  "user": {"id": 1, "fullName": "alice", "role": "CASHIER"},
+                  "terminal": {"id": 1, "code": "POS1"}
                 }
                 """.trimIndent(),
                 status = HttpStatusCode.OK,
