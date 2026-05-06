@@ -9,31 +9,31 @@ import com.posfab.shared.features.sale.domain.SaleProduct
 import com.posfab.shared.core.result.AppResult
 
 interface SaleRepository {
+    suspend fun isCashSessionOpen(): AppResult<Boolean>
     suspend fun openOrCreateCurrentSaleDraft(): AppResult<SaleDraft>
     suspend fun searchProducts(query: String, limit: Int): AppResult<List<SaleProduct>>
     suspend fun findProductByBarcode(barcode: String): AppResult<SaleProduct?>
     suspend fun addLine(
-        draftId: String,
+        draftId: Long,
         product: SaleProduct,
         qty: Double,
-        unit: String,
+        unitId: Long,
         unitPrice: Double,
-        lotId: String?,
-        expectedVersion: Long,
+        lotId: Long?,
+        expectedVersion: Int,
     ): SaleMutationResult
     suspend fun updateLine(
-        draftId: String,
-        lineId: String,
+        draftId: Long,
+        lineId: Long,
         qty: Double,
-        unit: String,
+        unitId: Long,
         unitPrice: Double,
-        lotId: String?,
-        expectedVersion: Long,
+        lotId: Long?,
+        expectedVersion: Int,
     ): SaleMutationResult
-
-    suspend fun removeLine(draftId: String, lineId: String, expectedVersion: Long): SaleMutationResult
-    suspend fun validateDraft(draftId: String): AppResult<DraftValidation>
-    suspend fun resolveLots(draftId: String): AppResult<SaleDraft>
-    suspend fun checkout(draftId: String, mode: CheckoutMode, expectedVersion: Long, idempotencyKey: String): AppResult<CheckoutResult>
+    suspend fun removeLine(draftId: Long, lineId: Long, expectedVersion: Int): SaleMutationResult
+    suspend fun validateDraft(draftId: Long): AppResult<DraftValidation>
+    suspend fun resolveLots(draftId: Long): AppResult<SaleDraft>
+    suspend fun checkout(draftId: Long, mode: CheckoutMode, expectedVersion: Int, idempotencyKey: String): AppResult<CheckoutResult>
     suspend fun refetchCurrentDraft(): AppResult<SaleDraft>
 }

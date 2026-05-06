@@ -85,11 +85,9 @@ fun DailyHistoryScreen(viewModel: DailyHistoryViewModel) {
                 if (cash == null) {
                     EmptyDailyText("Sin resumen disponible.")
                 } else {
-                    DailyMoneyRow("Apertura de caja", cash.openingCash)
-                    DailyMoneyRow("Entradas", cash.movementIn)
-                    DailyMoneyRow("Salidas", cash.movementOut)
-                    DailyMoneyRow("Efectivo esperado", cash.expectedClose)
-                    DailyMoneyRow("Efectivo contado", cash.countedClose ?: 0.0)
+                    DailyMoneyRow("Total entradas", cash.totalIn)
+                    DailyMoneyRow("Total salidas", cash.totalOut)
+                    DailyLabelRow("Movimientos", "${cash.movements}")
                 }
             }
         }
@@ -163,6 +161,22 @@ private fun DailyMoneyRow(label: String, amount: Double) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         PosMoneyText(amount)
+    }
+}
+
+@Composable
+private fun DailyLabelRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(value, style = MaterialTheme.typography.bodyMedium)
     }
 }
 

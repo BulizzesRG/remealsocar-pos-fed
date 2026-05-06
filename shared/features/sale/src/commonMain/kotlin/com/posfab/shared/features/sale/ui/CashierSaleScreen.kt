@@ -10,7 +10,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -22,12 +24,16 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Inventory
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -59,6 +65,12 @@ import com.posfab.shared.ui.theme.PosSpacing
 fun CashierSaleScreen(viewModel: CashierSaleViewModel) {
     val state by viewModel.state.collectAsState()
 
+    // Re-check cash session + reload draft each time the screen enters composition
+    // (handles returning from Cash screen after opening a session)
+    LaunchedEffect(Unit) {
+        viewModel.retryCashSessionCheck()
+    }
+
     if (state.isInitializing) {
         Box(
             modifier = Modifier.fillMaxSize(),
@@ -70,6 +82,56 @@ fun CashierSaleScreen(viewModel: CashierSaleViewModel) {
             ) {
                 CircularProgressIndicator()
                 Text("Cargando venta...", style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+        return
+    }
+
+    if (state.cashSessionMissing) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
+        ) {
+            Surface(
+                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier.width(460.dp),
+            ) {
+                Column(
+                    modifier = Modifier.padding(PosSpacing.xxl),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(PosSpacing.lg),
+                ) {
+                    Icon(
+                        Icons.Filled.Payments,
+                        contentDescription = null,
+                        modifier = Modifier.size(48.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        "No hay caja abierta",
+                        style = MaterialTheme.typography.titleLarge,
+                    )
+                    Text(
+                        "Para realizar ventas necesitas abrir una sesion de caja primero.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(PosSpacing.md),
+                    ) {
+                        PosSecondaryButton(
+                            text = "Reintentar",
+                            onClick = viewModel::retryCashSessionCheck,
+                        )
+                        PosPrimaryButton(
+                            text = "Abrir caja",
+                            onClick = viewModel.onNavigateToCash,
+                            icon = Icons.Filled.Payments,
+                        )
+                    }
+                }
             }
         }
         return
@@ -106,6 +168,7 @@ fun CashierSaleScreen(viewModel: CashierSaleViewModel) {
                 },
             horizontalArrangement = Arrangement.spacedBy(PosSpacing.lg),
         ) {
+            // ── Left panel: product search ────────────────────────────────────
             Column(
                 modifier = Modifier
                     .width(340.dp)
@@ -123,10 +186,7 @@ fun CashierSaleScreen(viewModel: CashierSaleViewModel) {
                     label = "Codigo de barras (Enter)",
                     enabled = !state.isBusy,
                     leadingIcon = {
-                        androidx.compose.material3.Icon(
-                            Icons.Filled.QrCodeScanner,
-                            contentDescription = null,
-                        )
+                        Icon(Icons.Filled.QrCodeScanner, contentDescription = null)
                     },
                 )
 
@@ -136,10 +196,7 @@ fun CashierSaleScreen(viewModel: CashierSaleViewModel) {
                     label = "Buscar por nombre",
                     enabled = !state.isBusy,
                     leadingIcon = {
-                        androidx.compose.material3.Icon(
-                            Icons.Filled.Search,
-                            contentDescription = null,
-                        )
+                        Icon(Icons.Filled.Search, contentDescription = null)
                     },
                 )
 
@@ -243,6 +300,7 @@ fun CashierSaleScreen(viewModel: CashierSaleViewModel) {
                 }
             }
 
+            // ── Right panel: cart + actions ───────────────────────────────────
             Column(
                 modifier = Modifier
                     .weight(1f)
@@ -255,6 +313,7 @@ fun CashierSaleScreen(viewModel: CashierSaleViewModel) {
                 val canRunSecondary = !state.isBusy && !state.isCheckoutInFlight
                 val canCheckout = !state.isBusy && !state.isCheckoutInFlight
 
+                // 1. Header row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -262,21 +321,23 @@ fun CashierSaleScreen(viewModel: CashierSaleViewModel) {
                 ) {
                     Text(
                         "Venta en caja",
-                        style = MaterialTheme.typography.titleLarge,
+                        style = MaterialTheme.typography.titleMedium,
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(PosSpacing.sm)) {
-                        PosSecondaryButton(
-                            text = "+",
+                        FilledTonalIconButton(
                             onClick = viewModel::incrementSelectedLineQty,
                             enabled = canEditLine,
-                            modifier = Modifier.width(56.dp),
-                        )
-                        PosSecondaryButton(
-                            text = "-",
+                            modifier = Modifier.size(48.dp),
+                        ) {
+                            Icon(Icons.Filled.Add, contentDescription = "Incrementar cantidad")
+                        }
+                        FilledTonalIconButton(
                             onClick = viewModel::decrementSelectedLineQty,
                             enabled = canEditLine,
-                            modifier = Modifier.width(56.dp),
-                        )
+                            modifier = Modifier.size(48.dp),
+                        ) {
+                            Icon(Icons.Filled.Remove, contentDescription = "Decrementar cantidad")
+                        }
                         PosDestructiveButton(
                             text = "Eliminar",
                             onClick = viewModel::removeSelectedLine,
@@ -286,6 +347,15 @@ fun CashierSaleScreen(viewModel: CashierSaleViewModel) {
                     }
                 }
 
+                // 2. Notice / error banner (conditional)
+                if (state.notice != null || state.errorMessage != null) {
+                    PosNoticeRow(
+                        notice = state.notice,
+                        errorMessage = state.errorMessage,
+                    )
+                }
+
+                // 3. Cart lines
                 PosSectionCard(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -341,19 +411,18 @@ fun CashierSaleScreen(viewModel: CashierSaleViewModel) {
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
                                         )
-                                        Text(
-                                            text = if (line.lotTracked) {
-                                                "Lote: ${line.lotId ?: "pendiente"}"
-                                            } else {
-                                                "Sin lote"
-                                            },
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = if (line.lotTracked && line.lotId == null) {
-                                                MaterialTheme.colorScheme.error
-                                            } else {
-                                                MaterialTheme.colorScheme.onSurfaceVariant
-                                            },
-                                        )
+                                        // Only show lot subtitle for lot-tracked products
+                                        if (line.lotTracked) {
+                                            Text(
+                                                text = "Lote: ${line.lotId ?: "pendiente"}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = if (line.lotId == null) {
+                                                    MaterialTheme.colorScheme.error
+                                                } else {
+                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                                },
+                                            )
+                                        }
                                     }
                                     Text(
                                         text = formatDisplayQty(line.qty, line.unit),
@@ -373,6 +442,7 @@ fun CashierSaleScreen(viewModel: CashierSaleViewModel) {
                     }
                 }
 
+                // 4. Line editor (conditional)
                 if (state.selectedLineId != null) {
                     PosSectionCard(
                         title = "Editar linea seleccionada",
@@ -420,13 +490,7 @@ fun CashierSaleScreen(viewModel: CashierSaleViewModel) {
                     }
                 }
 
-                PosTotalDisplay(
-                    subtotal = state.draft?.totals?.subtotal ?: 0.0,
-                    tax = state.draft?.totals?.tax ?: 0.0,
-                    total = state.draft?.totals?.total ?: 0.0,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-
+                // 5. Validation issues (above totals)
                 if (state.validationIssues.isNotEmpty()) {
                     PosSectionCard(
                         title = "Observaciones",
@@ -442,52 +506,17 @@ fun CashierSaleScreen(viewModel: CashierSaleViewModel) {
                     }
                 }
 
-                Row(
+                // 6. Totals
+                PosTotalDisplay(
+                    subtotal = state.draft?.totals?.subtotal ?: 0.0,
+                    tax = state.draft?.totals?.tax ?: 0.0,
+                    total = state.draft?.totals?.total ?: 0.0,
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(PosSpacing.sm),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    PosSecondaryButton(
-                        text = "Validar",
-                        onClick = viewModel::validateDraft,
-                        enabled = canRunSecondary,
-                        icon = Icons.Filled.CheckCircle,
-                        modifier = Modifier.weight(1f),
-                    )
-                    PosSecondaryButton(
-                        text = "Lotes",
-                        onClick = viewModel::resolveLots,
-                        enabled = canRunSecondary,
-                        icon = Icons.Filled.Inventory,
-                        modifier = Modifier.weight(1f),
-                    )
-                    PosSecondaryButton(
-                        text = "Nueva venta",
-                        onClick = viewModel::startNewSale,
-                        enabled = canRunSecondary,
-                        icon = Icons.Filled.Add,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Spacer(Modifier.width(PosSpacing.lg))
-                    PosPrimaryButton(
-                        text = "Cobrar efectivo  F9",
-                        onClick = viewModel::checkoutCash,
-                        enabled = canCheckout,
-                        icon = Icons.Filled.Payments,
-                        isLoading = state.isCheckoutInFlight,
-                        modifier = Modifier.weight(1.5f),
-                    )
-                    PosPrimaryButton(
-                        text = "Cobrar credito",
-                        onClick = viewModel::checkoutCredit,
-                        enabled = canCheckout,
-                        icon = Icons.Filled.CreditCard,
-                        isLoading = state.isCheckoutInFlight,
-                        modifier = Modifier.weight(1.5f),
-                    )
-                }
+                )
 
-                state.checkoutResult?.let { result ->
+                if (state.checkoutResult != null) {
+                    // 7. Post-checkout: folio banner + single "Nueva venta" button
+                    val result = state.checkoutResult
                     Surface(
                         color = MaterialTheme.colorScheme.tertiaryContainer,
                         shape = MaterialTheme.shapes.medium,
@@ -498,24 +527,81 @@ fun CashierSaleScreen(viewModel: CashierSaleViewModel) {
                             horizontalArrangement = Arrangement.spacedBy(PosSpacing.sm),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            androidx.compose.material3.Icon(
+                            Icon(
                                 Icons.Filled.CheckCircle,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.onTertiaryContainer,
                             )
                             Text(
-                                text = "Venta completada. Folio: ${result.folio}",
+                                text = "Venta completada. Folio: ${result?.folio}",
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.onTertiaryContainer,
                             )
                         }
                     }
-                }
+                    PosPrimaryButton(
+                        text = "Nueva venta",
+                        onClick = viewModel::startNewSale,
+                        enabled = canRunSecondary,
+                        icon = Icons.Filled.Add,
+                        modifier = Modifier.fillMaxWidth().height(64.dp),
+                    )
+                } else {
+                    // 8. Else: secondary actions + payment zone
+                    // Tier 1 — secondary actions
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(PosSpacing.sm),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        PosSecondaryButton(
+                            text = "Validar",
+                            onClick = viewModel::validateDraft,
+                            enabled = canRunSecondary,
+                            icon = Icons.Filled.CheckCircle,
+                            modifier = Modifier.weight(1f),
+                        )
+                        PosSecondaryButton(
+                            text = "Lotes",
+                            onClick = viewModel::resolveLots,
+                            enabled = canRunSecondary,
+                            icon = Icons.Filled.Inventory,
+                            modifier = Modifier.weight(1f),
+                        )
+                        PosSecondaryButton(
+                            text = "Nueva venta",
+                            onClick = viewModel::startNewSale,
+                            enabled = canRunSecondary,
+                            icon = Icons.Filled.Add,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
 
-                PosNoticeRow(
-                    notice = state.notice,
-                    errorMessage = state.errorMessage,
-                )
+                    Spacer(Modifier.height(PosSpacing.xs))
+
+                    // Tier 2 — payment zone
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(PosSpacing.sm),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        PosSecondaryButton(
+                            text = "Cobrar credito",
+                            onClick = viewModel::checkoutCredit,
+                            enabled = canCheckout,
+                            icon = Icons.Filled.CreditCard,
+                            modifier = Modifier.weight(1f).height(64.dp),
+                        )
+                        PosPrimaryButton(
+                            text = "Cobrar efectivo  F9",
+                            onClick = viewModel::checkoutCash,
+                            enabled = canCheckout,
+                            icon = Icons.Filled.Payments,
+                            isLoading = state.isCheckoutInFlight,
+                            modifier = Modifier.weight(1.5f).height(64.dp),
+                        )
+                    }
+                }
             }
         }
 

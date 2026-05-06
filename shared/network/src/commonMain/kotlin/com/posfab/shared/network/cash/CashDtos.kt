@@ -1,44 +1,44 @@
 package com.posfab.shared.network.cash
 
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
 data class OpenCashSessionRequestDto(
-    @SerialName("terminal_id") val terminalId: String,
-    @SerialName("opening_cash") val openingCash: Double,
+    val terminalId: Long,
+    val businessUnitId: Long,
+    val openingAmount: String,
+    val userId: Long? = null,
 )
 
 @Serializable
 data class CloseCashSessionRequestDto(
-    @SerialName("terminal_id") val terminalId: String,
-    @SerialName("counted_cash") val countedCash: Double,
+    val terminalId: Long,
+    val closingAmount: String,
+    val userId: Long? = null,
 )
 
 @Serializable
-data class CashSessionDto(
-    val id: String,
+data class CashSessionResponseDto(
+    val id: Long,
+    val terminalId: Long,
+    val businessUnitId: Long,
     val status: String,
-    @SerialName("terminal_id") val terminalId: String,
-    @SerialName("opened_at") val openedAt: String? = null,
-    @SerialName("opened_by") val openedBy: String? = null,
-    @SerialName("opening_cash") val openingCash: Double = 0.0,
-    @SerialName("movement_in") val movementIn: Double = 0.0,
-    @SerialName("movement_out") val movementOut: Double = 0.0,
-    @SerialName("expected_close") val expectedClose: Double = 0.0,
-    @SerialName("counted_close") val countedClose: Double? = null,
-    @SerialName("delta") val delta: Double? = null,
+    val openingAmount: String,
+    val closingAmount: String? = null,
+    val openedAt: String,
+    val closedAt: String? = null,
 )
 
 @Serializable
-data class DailyCashReportDto(
+data class CashIdResponseDto(
+    val id: Long,
+)
+
+@Serializable
+data class DailyCashReportResponseDto(
     val date: String,
-    @SerialName("terminal_id") val terminalId: String,
-    @SerialName("opening_cash") val openingCash: Double = 0.0,
-    @SerialName("movement_in") val movementIn: Double = 0.0,
-    @SerialName("movement_out") val movementOut: Double = 0.0,
-    @SerialName("sales_cash") val salesCash: Double = 0.0,
-    @SerialName("expected_close") val expectedClose: Double = 0.0,
-    @SerialName("counted_close") val countedClose: Double? = null,
-    @SerialName("delta") val delta: Double? = null,
+    val terminalId: Long,
+    val totalIn: String,
+    val totalOut: String,
+    val movements: Int,
 )

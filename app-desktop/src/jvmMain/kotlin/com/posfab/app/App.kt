@@ -19,6 +19,7 @@ import com.posfab.shared.auth.usecase.LogoutUseCase
 import com.posfab.shared.features.catalog.common.CatalogUseCases
 import com.posfab.shared.features.catalog.ui.CatalogScreen
 import com.posfab.shared.features.catalog.ui.CatalogViewModel
+import com.posfab.shared.config.PosConfig
 import com.posfab.shared.features.cash.ui.CashSessionScreen
 import com.posfab.shared.features.cash.ui.CashSessionViewModel
 import com.posfab.shared.features.cash.usecase.CashUseCases
@@ -91,10 +92,17 @@ fun PosApp(controller: AppStateController) {
                         saleUiStateStore = koin.get(),
                         cardPaymentAdapter = koin.get<CardPaymentAdapter>(),
                         receiptPrinterAdapter = koin.get<ReceiptPrinterAdapter>(),
+                        onNavigateToCash = { shellViewModel.select(com.posfab.shared.features.shell.ShellRoute.CASH) },
                     )
                 }
+                val config: PosConfig = koin.get()
                 val cashViewModel = remember(screen.session) {
-                    CashSessionViewModel(screen.session, koin.get<CashUseCases>())
+                    CashSessionViewModel(
+                        terminalId = config.terminalId,
+                        businessUnitId = config.businessUnitId,
+                        cashUseCases = koin.get<CashUseCases>(),
+                        onNavigateToPos = { shellViewModel.select(com.posfab.shared.features.shell.ShellRoute.POS) },
+                    )
                 }
                 val historyViewModel = remember(screen.session) {
                     DailyHistoryViewModel(screen.session, koin.get<ReportsUseCases>())

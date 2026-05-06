@@ -3,27 +3,19 @@ package com.posfab.shared.features.cash.domain
 enum class CashSessionStatus { OPEN, CLOSED, NONE }
 
 data class CashSession(
-    val id: String,
+    val id: Long,
     val status: CashSessionStatus,
-    val terminalId: String,
-    val openedAt: String?,
-    val openedBy: String?,
-    val openingCash: Double,
-    val movementIn: Double,
-    val movementOut: Double,
-    val expectedClose: Double,
-    val countedClose: Double?,
-    val delta: Double?,
+    val terminalId: Long,
+    val openingAmount: Double,
+    val closingAmount: Double?,
+    val openedAt: String,
+    val closedAt: String?,
 )
 
 data class DailyCashReport(
     val date: String,
-    val terminalId: String,
-    val openingCash: Double,
-    val movementIn: Double,
-    val movementOut: Double,
-    val salesCash: Double,
-    val expectedClose: Double,
-    val countedClose: Double?,
-    val delta: Double?,
+    val terminalId: Long,
+    val totalIn: Double,
+    val totalOut: Double,
+    val movements: Int,
 )

@@ -30,8 +30,8 @@ class DesktopSaleUiStateStore(
             SaleUiRecoveryState(
                 searchQuery = obj["searchQuery"]?.jsonPrimitive?.contentOrNull.orEmpty(),
                 barcodeInput = obj["barcodeInput"]?.jsonPrimitive?.contentOrNull.orEmpty(),
-                selectedLineId = obj["selectedLineId"]?.jsonPrimitive?.contentOrNull,
-                draftId = obj["draftId"]?.jsonPrimitive?.contentOrNull,
+                selectedLineId = obj["selectedLineId"]?.jsonPrimitive?.longOrNull,
+                draftId = obj["draftId"]?.jsonPrimitive?.longOrNull,
                 savedAtEpochMs = obj["savedAtEpochMs"]?.jsonPrimitive?.longOrNull ?: 0L,
             )
         }.getOrNull()

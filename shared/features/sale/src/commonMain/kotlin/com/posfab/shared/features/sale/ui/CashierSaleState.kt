@@ -15,13 +15,14 @@ data class SaleConfirmDialogState(
 
 data class CashierSaleState(
     val isInitializing: Boolean = true,
+    val cashSessionMissing: Boolean = false,
     val isBusy: Boolean = false,
     val isCheckoutInFlight: Boolean = false,
     val searchQuery: String = "",
     val barcodeInput: String = "",
     val searchResults: List<SaleProduct> = emptyList(),
     val draft: SaleDraft? = null,
-    val selectedLineId: String? = null,
+    val selectedLineId: Long? = null,
     val editQtyInput: String = "",
     val editUnitInput: String = "",
     val editPriceInput: String = "",

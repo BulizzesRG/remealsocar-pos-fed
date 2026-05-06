@@ -1,8 +1,6 @@
 package com.posfab.shared.features.sale.repository
 
 import com.posfab.shared.auth.refresh.AuthorizedApiExecutor
-import com.posfab.shared.auth.session.SessionManager
-import com.posfab.shared.core.model.TerminalCode
 import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
 import com.posfab.shared.features.sale.domain.CheckoutMode
@@ -14,52 +12,116 @@ import com.posfab.shared.features.sale.domain.SaleLine
 import com.posfab.shared.features.sale.domain.SaleMutationResult
 import com.posfab.shared.features.sale.domain.SaleProduct
 import com.posfab.shared.features.sale.domain.SaleTotals
+import com.posfab.shared.network.catalog.CatalogApi
 import com.posfab.shared.network.pos.AddLineRequestDto
 import com.posfab.shared.network.pos.CheckoutRequestDto
-import com.posfab.shared.network.pos.CheckoutResponseDto
+import com.posfab.shared.network.pos.DeleteLineRequestDto
+import com.posfab.shared.network.pos.DraftCreateRequestDto
 import com.posfab.shared.network.pos.DraftDto
 import com.posfab.shared.network.pos.PosApi
-import com.posfab.shared.network.pos.ProductDto
+import com.posfab.shared.network.pos.UpdateLineRequestDto
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 class SaleRepositoryImpl(
     private val posApi: PosApi,
-    private val sessionManager: SessionManager,
+    private val catalogApi: CatalogApi,
+    private val terminalId: Long,
+    private val businessUnitId: Long,
     private val executor: AuthorizedApiExecutor,
 ) : SaleRepository {
     private val checkoutMutex = Mutex()
 
-    override suspend fun openOrCreateCurrentSaleDraft(): AppResult<SaleDraft> = authorized {
-        val terminal = sessionManager.current()?.terminal ?: TerminalCode.POS1
-        posApi.openCurrentSaleDraft(it, terminal.name)
-    }.mapDraft()
+    override suspend fun isCashSessionOpen(): AppResult<Boolean> = authorized {
+        posApi.isCashSessionOpen(it, terminalId)
+    }
 
-    override suspend fun searchProducts(query: String, limit: Int): AppResult<List<SaleProduct>> = authorized {
-        posApi.searchProducts(it, query, limit)
-    }.mapProducts()
+    override suspend fun openOrCreateCurrentSaleDraft(): AppResult<SaleDraft> {
+        val currentResult = authorized { posApi.getCurrentSaleDraft(it) }
+        if (currentResult is AppResult.Success) {
+            return AppResult.Success(currentResult.value.toDomain())
+        }
+        // 404 maps to AppError.Validation — attempt to create a new draft
+        val createResult = authorized {
+            posApi.createDraft(
+                accessToken = it,
+                request = DraftCreateRequestDto(
+                    type = "SALE",
+                    terminalId = terminalId,
+                    businessUnitId = businessUnitId,
+                ),
+            )
+        }
+        return when (createResult) {
+            is AppResult.Success -> authorized { posApi.getDraft(it, createResult.value.id) }.mapDraft()
+            is AppResult.Failure -> createResult
+        }
+    }
 
-    override suspend fun findProductByBarcode(barcode: String): AppResult<SaleProduct?> = authorized {
-        posApi.findByBarcode(it, barcode)
-    }.mapProductOrNull()
+    override suspend fun searchProducts(query: String, limit: Int): AppResult<List<SaleProduct>> {
+        val result = authorized { catalogApi.listProducts(it, query, limit, 0, true) }
+        return when (result) {
+            is AppResult.Success -> AppResult.Success(result.value.items.map { item ->
+                SaleProduct(
+                    id = item.id,
+                    name = item.name,
+                    sku = item.sku,
+                    barcode = item.barcode,
+                    defaultUnit = item.baseUnit,
+                    baseUnitId = item.baseUnitId,
+                    unitPrice = item.currentPrice ?: 0.0,
+                    lotTracked = item.lotTracked,
+                )
+            })
+            is AppResult.Failure -> result
+        }
+    }
+
+    override suspend fun findProductByBarcode(barcode: String): AppResult<SaleProduct?> {
+        val result = authorized { posApi.findByBarcode(it, barcode) }
+        return when (result) {
+            is AppResult.Success -> {
+                val dto = result.value
+                val product = SaleProduct(
+                    id = dto.product.id.toString(),
+                    name = dto.product.name,
+                    sku = dto.product.sku,
+                    barcode = barcode,
+                    defaultUnit = dto.matchedUom?.unitId?.toString() ?: dto.product.baseUnitId.toString(),
+                    baseUnitId = dto.matchedUom?.unitId ?: dto.product.baseUnitId,
+                    unitPrice = dto.product.currentPrice ?: 0.0,
+                    lotTracked = dto.product.requiresLotTracking,
+                )
+                AppResult.Success(product)
+            }
+            is AppResult.Failure -> {
+                // 404 means barcode not found — return null rather than propagating failure
+                if (result.error is AppError.Validation) {
+                    AppResult.Success(null)
+                } else {
+                    result
+                }
+            }
+        }
+    }
 
     override suspend fun addLine(
-        draftId: String,
+        draftId: Long,
         product: SaleProduct,
         qty: Double,
-        unit: String,
+        unitId: Long,
         unitPrice: Double,
-        lotId: String?,
-        expectedVersion: Long,
+        lotId: Long?,
+        expectedVersion: Int,
     ): SaleMutationResult = mutationWithConflictRefetch {
         posApi.addDraftLine(
             accessToken = it,
             draftId = draftId,
             request = AddLineRequestDto(
-                productId = product.id,
-                qty = qty,
-                unit = unit,
-                unitPrice = unitPrice,
+                productId = product.id.toLongOrNull() ?: 0L,
+                unitId = unitId,
+                qty = qty.toBigDecimal().toPlainString(),
+                unitPrice = unitPrice.toBigDecimal().toPlainString(),
                 lotId = lotId,
                 expectedVersion = expectedVersion,
             ),
@@ -67,41 +129,42 @@ class SaleRepositoryImpl(
     }
 
     override suspend fun updateLine(
-        draftId: String,
-        lineId: String,
+        draftId: Long,
+        lineId: Long,
         qty: Double,
-        unit: String,
+        unitId: Long,
         unitPrice: Double,
-        lotId: String?,
-        expectedVersion: Long,
+        lotId: Long?,
+        expectedVersion: Int,
     ): SaleMutationResult = mutationWithConflictRefetch {
         posApi.updateDraftLine(
             accessToken = it,
             draftId = draftId,
             lineId = lineId,
-            request = com.posfab.shared.network.pos.UpdateLineRequestDto(
-                qty = qty,
-                unit = unit,
-                unitPrice = unitPrice,
+            request = UpdateLineRequestDto(
+                // unitId == 0L signals "leave unchanged" — pass null to backend
+                unitId = unitId.takeIf { id -> id > 0L },
+                qty = qty.toBigDecimal().toPlainString(),
+                unitPrice = unitPrice.toBigDecimal().toPlainString(),
                 lotId = lotId,
                 expectedVersion = expectedVersion,
             ),
         )
     }
 
-    override suspend fun removeLine(draftId: String, lineId: String, expectedVersion: Long): SaleMutationResult = mutationWithConflictRefetch {
-        posApi.removeDraftLine(
-            accessToken = it,
-            draftId = draftId,
-            lineId = lineId,
-            expectedVersion = expectedVersion,
-        )
-    }
+    override suspend fun removeLine(draftId: Long, lineId: Long, expectedVersion: Int): SaleMutationResult =
+        mutationWithConflictRefetch {
+            posApi.removeDraftLine(
+                accessToken = it,
+                draftId = draftId,
+                lineId = lineId,
+                request = DeleteLineRequestDto(expectedVersion = expectedVersion),
+            )
+        }
 
-    override suspend fun validateDraft(draftId: String): AppResult<DraftValidation> = authorized {
-        posApi.validateDraft(it, draftId)
-    }.let { result ->
-        when (result) {
+    override suspend fun validateDraft(draftId: Long): AppResult<DraftValidation> {
+        val result = authorized { posApi.validateDraft(it, draftId) }
+        return when (result) {
             is AppResult.Success -> AppResult.Success(
                 DraftValidation(result.value.issues.map { issue ->
                     DraftIssue(lineId = issue.lineId, code = issue.code, message = issue.message)
@@ -111,25 +174,53 @@ class SaleRepositoryImpl(
         }
     }
 
-    override suspend fun resolveLots(draftId: String): AppResult<SaleDraft> = authorized {
-        posApi.resolveLots(it, draftId)
-    }.mapDraft()
+    override suspend fun resolveLots(draftId: Long): AppResult<SaleDraft> {
+        val result = authorized { posApi.resolveLots(it, draftId) }
+        return when (result) {
+            is AppResult.Success -> {
+                // resolve-lots returns a summary DTO, not a full DraftDto — refetch the draft
+                authorized { posApi.getDraft(it, draftId) }.mapDraft()
+            }
+            is AppResult.Failure -> result
+        }
+    }
 
     override suspend fun checkout(
-        draftId: String,
+        draftId: Long,
         mode: CheckoutMode,
-        expectedVersion: Long,
+        expectedVersion: Int,
         idempotencyKey: String,
     ): AppResult<CheckoutResult> = checkoutMutex.withLock {
+        // Capture total from current draft state before checkout
+        val draftTotal = when (val draft = authorized { posApi.getDraft(it, draftId) }) {
+            is AppResult.Success -> draft.value.totals.total.toDoubleOrNull() ?: 0.0
+            is AppResult.Failure -> 0.0
+        }
+        val paymentStatus = when (mode) {
+            CheckoutMode.CASH -> "PAID"
+            CheckoutMode.ON_CREDIT -> "ON_CREDIT"
+        }
         val result = authorized {
             posApi.checkoutDraft(
                 accessToken = it,
                 draftId = draftId,
-                request = CheckoutRequestDto(mode = mode.name, expectedVersion = expectedVersion),
-                idempotencyKey = idempotencyKey,
+                request = CheckoutRequestDto(
+                    paymentStatus = paymentStatus,
+                    idempotencyKey = idempotencyKey,
+                ),
             )
         }
-        result.mapCheckout(mode)
+        when (result) {
+            is AppResult.Success -> AppResult.Success(
+                CheckoutResult(
+                    saleId = result.value.id,
+                    folio = result.value.folio.orEmpty(),
+                    total = draftTotal,
+                    mode = mode,
+                )
+            )
+            is AppResult.Failure -> result
+        }
     }
 
     override suspend fun refetchCurrentDraft(): AppResult<SaleDraft> = openOrCreateCurrentSaleDraft()
@@ -157,63 +248,31 @@ class SaleRepositoryImpl(
         is AppResult.Failure -> this
     }
 
-    private fun AppResult<List<ProductDto>>.mapProducts(): AppResult<List<SaleProduct>> = when (this) {
-        is AppResult.Success -> AppResult.Success(value.map { it.toDomain() })
-        is AppResult.Failure -> this
-    }
-
-    private fun AppResult<ProductDto?>.mapProductOrNull(): AppResult<SaleProduct?> = when (this) {
-        is AppResult.Success -> AppResult.Success(value?.toDomain())
-        is AppResult.Failure -> this
-    }
-
-    private fun AppResult<CheckoutResponseDto>.mapCheckout(mode: CheckoutMode): AppResult<CheckoutResult> = when (this) {
-        is AppResult.Success -> AppResult.Success(
-            CheckoutResult(
-                saleId = value.saleId,
-                folio = value.folio,
-                total = value.total,
-                mode = mode,
-            )
-        )
-
-        is AppResult.Failure -> this
-    }
-
     private fun DraftDto.toDomain(): SaleDraft = SaleDraft(
         id = id,
         status = status,
         type = type,
-        terminalCode = terminalCode,
+        terminalId = terminalId,
+        businessUnitId = businessUnitId ?: 0L,
         version = version,
         lines = lines.map { line ->
             SaleLine(
                 id = line.id,
                 productId = line.productId,
                 productName = line.productName,
-                barcode = line.barcode,
-                qty = line.qty,
-                unit = line.unit,
-                unitPrice = line.unitPrice,
-                lineTotal = line.lineTotal,
+                barcode = line.productBarcode,
+                qty = line.qty.toDoubleOrNull() ?: 0.0,
+                unit = line.unitCode,
+                unitPrice = line.unitPrice?.toDoubleOrNull() ?: 0.0,
+                lineTotal = line.lineTotal.toDoubleOrNull() ?: 0.0,
                 lotId = line.lotId,
                 lotTracked = line.lotTracked,
             )
         },
         totals = SaleTotals(
-            subtotal = totals.subtotal,
-            tax = totals.tax,
-            total = totals.total,
+            subtotal = totals.subtotal.toDoubleOrNull() ?: 0.0,
+            tax = totals.tax.toDoubleOrNull() ?: 0.0,
+            total = totals.total.toDoubleOrNull() ?: 0.0,
         ),
-    )
-
-    private fun ProductDto.toDomain(): SaleProduct = SaleProduct(
-        id = id,
-        name = name,
-        sku = sku,
-        barcode = barcode,
-        defaultUnit = defaultUnit,
-        unitPrice = unitPrice,
-        lotTracked = lotTracked,
     )
 }

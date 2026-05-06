@@ -3,8 +3,8 @@ package com.posfab.shared.features.sale.ui
 data class SaleUiRecoveryState(
     val searchQuery: String = "",
     val barcodeInput: String = "",
-    val selectedLineId: String? = null,
-    val draftId: String? = null,
+    val selectedLineId: Long? = null,
+    val draftId: Long? = null,
     val savedAtEpochMs: Long,
 )
 

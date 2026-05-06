@@ -63,7 +63,7 @@ class CashierSaleViewModelTest {
         advanceUntilIdle()
 
         assertTrue(vm.state.value.notice?.contains("recargo", ignoreCase = true) == true)
-        assertEquals(3L, vm.state.value.draft?.version)
+        assertEquals(3, vm.state.value.draft?.version)
     }
 
     @Test
@@ -114,7 +114,7 @@ class CashierSaleViewModelTest {
         vm.resolveLots()
         advanceUntilIdle()
         assertEquals(0, vm.state.value.validationIssues.size)
-        assertEquals("LOT-AUTO", vm.state.value.draft?.lines?.first()?.lotId)
+        assertEquals(999L, vm.state.value.draft?.lines?.first()?.lotId)
     }
 
     @Test
@@ -144,21 +144,23 @@ private class FakeSaleRepository(
 ) : SaleRepository {
     val searchPool = listOf(
         SaleProduct(
-            id = "p1",
+            id = "1",
             name = "Cafe 500g",
             sku = "CAF-500",
             barcode = "7501000100015",
             defaultUnit = "PZA",
+            baseUnitId = 1L,
             unitPrice = 120.0,
             lotTracked = true,
         )
     )
 
     private var draft = SaleDraft(
-        id = "draft-1",
+        id = 1L,
         status = "OPEN",
         type = "SALE",
-        terminalCode = "POS1",
+        terminalId = 1L,
+        businessUnitId = 1L,
         version = 1,
         lines = emptyList(),
         totals = SaleTotals(subtotal = 0.0, tax = 0.0, total = 0.0),
@@ -169,6 +171,10 @@ private class FakeSaleRepository(
     val checkoutKeys = mutableListOf<String>()
     var failFirstCheckoutWithNetwork = false
 
+    private var nextLineId = 1L
+
+    override suspend fun isCashSessionOpen(): AppResult<Boolean> = AppResult.Success(true)
+
     override suspend fun openOrCreateCurrentSaleDraft(): AppResult<SaleDraft> = AppResult.Success(draft)
 
     override suspend fun searchProducts(query: String, limit: Int): AppResult<List<SaleProduct>> = AppResult.Success(searchPool)
@@ -178,21 +184,21 @@ private class FakeSaleRepository(
     }
 
     override suspend fun addLine(
-        draftId: String,
+        draftId: Long,
         product: SaleProduct,
         qty: Double,
-        unit: String,
+        unitId: Long,
         unitPrice: Double,
-        lotId: String?,
-        expectedVersion: Long,
+        lotId: Long?,
+        expectedVersion: Int,
     ): SaleMutationResult {
         val nextLine = SaleLine(
-            id = "line-${draft.lines.size + 1}",
-            productId = product.id,
+            id = nextLineId++,
+            productId = product.id.toLongOrNull() ?: 0L,
             productName = product.name,
             barcode = product.barcode,
             qty = qty,
-            unit = unit,
+            unit = product.defaultUnit,
             unitPrice = unitPrice,
             lineTotal = qty * unitPrice,
             lotId = lotId,
@@ -207,13 +213,13 @@ private class FakeSaleRepository(
     }
 
     override suspend fun updateLine(
-        draftId: String,
-        lineId: String,
+        draftId: Long,
+        lineId: Long,
         qty: Double,
-        unit: String,
+        unitId: Long,
         unitPrice: Double,
-        lotId: String?,
-        expectedVersion: Long,
+        lotId: Long?,
+        expectedVersion: Int,
     ): SaleMutationResult {
         if (forceConflictOnNextUpdate) {
             forceConflictOnNextUpdate = false
@@ -223,35 +229,37 @@ private class FakeSaleRepository(
 
         val updated = draft.lines.map { line ->
             if (line.id == lineId) {
-                line.copy(qty = qty, unit = unit, unitPrice = unitPrice, lineTotal = qty * unitPrice, lotId = lotId)
-            } else line
+                line.copy(qty = qty, unitPrice = unitPrice, lineTotal = qty * unitPrice, lotId = lotId)
+            } else {
+                line
+            }
         }
         draft = draft.copy(version = draft.version + 1, lines = updated, totals = draftTotals(updated))
         return SaleMutationResult.Success(draft)
     }
 
-    override suspend fun removeLine(draftId: String, lineId: String, expectedVersion: Long): SaleMutationResult {
+    override suspend fun removeLine(draftId: Long, lineId: Long, expectedVersion: Int): SaleMutationResult {
         val updated = draft.lines.filterNot { it.id == lineId }
         draft = draft.copy(version = draft.version + 1, lines = updated, totals = draftTotals(updated))
         return SaleMutationResult.Success(draft)
     }
 
-    override suspend fun validateDraft(draftId: String): AppResult<DraftValidation> {
+    override suspend fun validateDraft(draftId: Long): AppResult<DraftValidation> {
         val issues = draft.lines.filter { it.lotTracked && it.lotId == null }
             .map { DraftIssue(lineId = it.id, code = "LOT_REQUIRED", message = "Falta lote para ${it.productName}") }
         return AppResult.Success(DraftValidation(issues))
     }
 
-    override suspend fun resolveLots(draftId: String): AppResult<SaleDraft> {
-        val updated = draft.lines.map { if (it.lotTracked) it.copy(lotId = "LOT-AUTO") else it }
+    override suspend fun resolveLots(draftId: Long): AppResult<SaleDraft> {
+        val updated = draft.lines.map { if (it.lotTracked) it.copy(lotId = 999L) else it }
         draft = draft.copy(version = draft.version + 1, lines = updated, totals = draftTotals(updated))
         return AppResult.Success(draft)
     }
 
     override suspend fun checkout(
-        draftId: String,
+        draftId: Long,
         mode: CheckoutMode,
-        expectedVersion: Long,
+        expectedVersion: Int,
         idempotencyKey: String,
     ): AppResult<CheckoutResult> {
         checkoutCalls += 1
@@ -263,7 +271,7 @@ private class FakeSaleRepository(
         draft = draft.copy(status = "COMPLETED")
         return AppResult.Success(
             CheckoutResult(
-                saleId = "sale-1",
+                saleId = 1L,
                 folio = "FOL-0001",
                 total = draft.totals.total,
                 mode = mode,

@@ -31,6 +31,8 @@ class AuthRepositoryTest {
         logLevel = LogLevel.DEBUG,
         requestTimeoutMs = 5_000,
         enableVerboseLogs = false,
+        terminalId = 1L,
+        businessUnitId = 1L,
     )
 
     @Test

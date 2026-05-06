@@ -18,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.posfab.shared.features.cash.domain.CashSessionStatus
 import com.posfab.shared.ui.components.PosConfirmDialog
 import com.posfab.shared.ui.components.PosMoneyText
 import com.posfab.shared.ui.components.PosNoticeRow
@@ -26,141 +27,134 @@ import com.posfab.shared.ui.components.PosSecondaryButton
 import com.posfab.shared.ui.components.PosSectionCard
 import com.posfab.shared.ui.components.PosStatusBadge
 import com.posfab.shared.ui.components.PosTextField
-import com.posfab.shared.ui.theme.PosLayout
 import com.posfab.shared.ui.theme.PosSpacing
+import androidx.compose.foundation.layout.height
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ShoppingCart
 
 @Composable
 fun CashSessionScreen(viewModel: CashSessionViewModel) {
     val state by viewModel.state.collectAsState()
     val session = state.currentSession
+    val sessionStatus = session?.status ?: CashSessionStatus.NONE
 
     Column(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(PosSpacing.lg),
     ) {
-        Text(
-            "Caja",
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
-        )
-
-        Row(horizontalArrangement = Arrangement.spacedBy(PosSpacing.sm)) {
-            PosTextField(
-                value = state.terminalId,
-                onValueChange = viewModel::onTerminalChange,
-                label = "Terminal",
-                enabled = state.canSwitchTerminal,
-                modifier = Modifier.width(180.dp),
-            )
-            PosSecondaryButton(
-                text = "Refrescar",
-                onClick = viewModel::refreshCurrentSession,
-                enabled = !state.isLoading,
-                modifier = Modifier.width(140.dp),
-            )
-        }
-
-        PosSectionCard(
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            title = "Estado de caja",
-            actions = {
-                PosStatusBadge(status = session?.status?.name ?: "NONE")
-            },
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (state.isLoading) {
-                CircularProgressIndicator(modifier = Modifier.size(24.dp))
-            } else if (session == null) {
+            Text(
+                "Caja",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(PosSpacing.sm),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
-                    "No hay sesion activa",
+                    "Terminal: ${state.terminalId}",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            } else {
-                LabeledRow("Apertura de caja") {
-                    PosMoneyText(session.openingCash)
-                }
-                LabeledRow("Entradas") {
-                    PosMoneyText(session.movementIn)
-                }
-                LabeledRow("Salidas") {
-                    PosMoneyText(session.movementOut)
-                }
-                LabeledRow("Efectivo esperado") {
-                    PosMoneyText(session.expectedClose)
-                }
-                LabeledRow("Disponible en caja") {
-                    PosMoneyText(session.openingCash + session.movementIn - session.movementOut)
-                }
-                HorizontalDivider()
-                LabeledRow("Abierta por") {
-                    Text(session.openedBy ?: "-", style = MaterialTheme.typography.bodyMedium)
-                }
-                LabeledRow("Hora de apertura") {
-                    Text(session.openedAt ?: "-", style = MaterialTheme.typography.bodyMedium)
-                }
-            }
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(PosSpacing.lg),
-            verticalAlignment = Alignment.Top,
-        ) {
-            PosSectionCard(
-                modifier = Modifier.weight(1f),
-                title = "Abrir sesion",
-            ) {
-                PosTextField(
-                    value = state.openingCashInput,
-                    onValueChange = viewModel::onOpeningCashChange,
-                    label = "Efectivo de apertura",
-                    enabled = !state.isOpenSubmitting,
-                    modifier = Modifier.width(220.dp),
-                )
-                PosPrimaryButton(
-                    text = "Abrir sesion",
-                    onClick = viewModel::openSession,
-                    enabled = !state.isOpenSubmitting,
-                    isLoading = state.isOpenSubmitting,
-                    modifier = Modifier.width(180.dp),
-                )
-            }
-
-            PosSectionCard(
-                modifier = Modifier.weight(1f),
-                title = "Cerrar sesion",
-            ) {
-                PosTextField(
-                    value = state.countedCashInput,
-                    onValueChange = viewModel::onCountedCashChange,
-                    label = "Efectivo contado",
-                    enabled = !state.isCloseSubmitting,
-                    modifier = Modifier.width(220.dp),
-                )
-                PosPrimaryButton(
-                    text = "Cerrar sesion",
-                    onClick = viewModel::requestCloseSession,
-                    enabled = !state.isCloseSubmitting,
-                    isLoading = state.isCloseSubmitting,
-                    modifier = Modifier.width(180.dp),
+                PosSecondaryButton(
+                    text = "Refrescar",
+                    onClick = viewModel::refreshCurrentSession,
+                    enabled = !state.isLoading,
+                    modifier = Modifier.width(140.dp),
                 )
             }
         }
 
-        session?.let {
-            if (it.countedClose != null || it.delta != null) {
+        PosNoticeRow(
+            notice = state.notice,
+            errorMessage = state.errorMessage,
+        )
+
+        when {
+            state.isLoading -> {
+                CircularProgressIndicator(modifier = Modifier.size(24.dp))
+            }
+            sessionStatus == CashSessionStatus.NONE -> {
                 PosSectionCard(
                     modifier = Modifier.fillMaxWidth(),
-                    title = "Reconciliacion",
+                    title = "Abrir sesion",
                 ) {
-                    LabeledRow("Efectivo esperado") {
-                        PosMoneyText(it.expectedClose)
+                    PosTextField(
+                        value = state.openingAmountInput,
+                        onValueChange = viewModel::onOpeningAmountChange,
+                        label = "Efectivo de apertura",
+                        enabled = !state.isOpenSubmitting,
+                        modifier = Modifier.width(220.dp),
+                    )
+                    PosPrimaryButton(
+                        text = "Abrir sesion",
+                        onClick = viewModel::openSession,
+                        enabled = !state.isOpenSubmitting,
+                        isLoading = state.isOpenSubmitting,
+                        modifier = Modifier.width(180.dp),
+                    )
+                }
+            }
+            else -> {
+                PosSectionCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    title = "Estado de caja",
+                    actions = {
+                        PosStatusBadge(status = sessionStatus.name)
+                    },
+                ) {
+                    session?.let {
+                        LabeledRow("Apertura de caja") {
+                            PosMoneyText(it.openingAmount)
+                        }
+                        LabeledRow("Hora de apertura") {
+                            Text(it.openedAt, style = MaterialTheme.typography.bodyMedium)
+                        }
+                        it.closingAmount?.let { closing ->
+                            HorizontalDivider()
+                            LabeledRow("Cierre de caja") {
+                                PosMoneyText(closing)
+                            }
+                            it.closedAt?.let { closedAt ->
+                                LabeledRow("Hora de cierre") {
+                                    Text(closedAt, style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+                        }
                     }
-                    LabeledRow("Efectivo contado") {
-                        PosMoneyText(it.countedClose ?: 0.0)
-                    }
-                    LabeledRow("Diferencia") {
-                        PosMoneyText(it.delta ?: 0.0)
+                }
+
+                if (sessionStatus == CashSessionStatus.OPEN) {
+                    PosPrimaryButton(
+                        text = "Ir a venta",
+                        onClick = viewModel.onNavigateToPos,
+                        icon = Icons.Filled.ShoppingCart,
+                        modifier = Modifier.fillMaxWidth().height(56.dp),
+                    )
+
+                    PosSectionCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        title = "Cerrar sesion",
+                    ) {
+                        PosTextField(
+                            value = state.closingAmountInput,
+                            onValueChange = viewModel::onClosingAmountChange,
+                            label = "Efectivo de cierre",
+                            enabled = !state.isCloseSubmitting,
+                            modifier = Modifier.width(220.dp),
+                        )
+                        PosPrimaryButton(
+                            text = "Cerrar sesion",
+                            onClick = viewModel::requestCloseSession,
+                            enabled = !state.isCloseSubmitting,
+                            isLoading = state.isCloseSubmitting,
+                            modifier = Modifier.width(180.dp),
+                        )
                     }
                 }
             }
@@ -194,38 +188,21 @@ fun CashSessionScreen(viewModel: CashSessionViewModel) {
             state.dailyReport?.let { report ->
                 HorizontalDivider()
                 Text(
-                    "Resumen ${report.date} · ${report.terminalId}",
+                    "Resumen ${report.date} · Terminal ${report.terminalId}",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )
-                LabeledRow("Apertura de caja") {
-                    PosMoneyText(report.openingCash)
+                LabeledRow("Total entradas") {
+                    PosMoneyText(report.totalIn)
                 }
-                LabeledRow("Entradas") {
-                    PosMoneyText(report.movementIn)
+                LabeledRow("Total salidas") {
+                    PosMoneyText(report.totalOut)
                 }
-                LabeledRow("Salidas") {
-                    PosMoneyText(report.movementOut)
-                }
-                LabeledRow("Ventas en efectivo") {
-                    PosMoneyText(report.salesCash)
-                }
-                LabeledRow("Efectivo esperado") {
-                    PosMoneyText(report.expectedClose)
-                }
-                LabeledRow("Efectivo contado") {
-                    PosMoneyText(report.countedClose ?: 0.0)
-                }
-                LabeledRow("Diferencia") {
-                    PosMoneyText(report.delta ?: 0.0)
+                LabeledRow("Movimientos") {
+                    Text("${report.movements}", style = MaterialTheme.typography.bodyMedium)
                 }
             }
         }
-
-        PosNoticeRow(
-            notice = state.notice,
-            errorMessage = state.errorMessage,
-        )
     }
 
     state.closeConfirmDialog?.let { dialog ->

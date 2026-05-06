@@ -11,14 +11,13 @@ data class CashCloseConfirmState(
 )
 
 data class CashSessionState(
-    val terminalId: String,
-    val canSwitchTerminal: Boolean,
+    val terminalId: Long,
     val isLoading: Boolean = true,
     val isOpenSubmitting: Boolean = false,
     val isCloseSubmitting: Boolean = false,
     val isReportLoading: Boolean = false,
-    val openingCashInput: String = "",
-    val countedCashInput: String = "",
+    val openingAmountInput: String = "",
+    val closingAmountInput: String = "",
     val reportDateInput: String,
     val currentSession: CashSession? = null,
     val dailyReport: DailyCashReport? = null,

@@ -10,20 +10,21 @@ data class SaleProduct(
     val sku: String?,
     val barcode: String?,
     val defaultUnit: String,
+    val baseUnitId: Long,
     val unitPrice: Double,
     val lotTracked: Boolean,
 )
 
 data class SaleLine(
-    val id: String,
-    val productId: String,
+    val id: Long,
+    val productId: Long,
     val productName: String,
     val barcode: String?,
     val qty: Double,
     val unit: String,
     val unitPrice: Double,
     val lineTotal: Double,
-    val lotId: String?,
+    val lotId: Long?,
     val lotTracked: Boolean,
 )
 
@@ -34,17 +35,18 @@ data class SaleTotals(
 )
 
 data class SaleDraft(
-    val id: String,
+    val id: Long,
     val status: String,
     val type: String,
-    val terminalCode: String,
-    val version: Long,
+    val terminalId: Long,
+    val businessUnitId: Long,
+    val version: Int,
     val lines: List<SaleLine>,
     val totals: SaleTotals,
 )
 
 data class DraftIssue(
-    val lineId: String?,
+    val lineId: Long?,
     val code: String,
     val message: String,
 )
@@ -56,7 +58,7 @@ data class DraftValidation(
 }
 
 data class CheckoutResult(
-    val saleId: String,
+    val saleId: Long,
     val folio: String,
     val total: Double,
     val mode: CheckoutMode,

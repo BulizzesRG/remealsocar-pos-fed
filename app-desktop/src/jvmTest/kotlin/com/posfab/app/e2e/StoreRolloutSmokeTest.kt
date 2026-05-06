@@ -51,12 +51,12 @@ class StoreRolloutSmokeTest {
         val cashierSession = (login("cashier", "pwd", TerminalCode.POS1) as AppResult.Success).value
         assertTrue(cashierSession.user.roles.contains(UserRole.CASHIER))
 
-        val opened = cash.open("POS1", 1000.0)
+        val opened = cash.open(1L, 1L, 1000.0)
         assertIs<AppResult.Success<CashSession>>(opened)
 
         val draft = (sale.openDraft() as AppResult.Success).value
         val product = (sale.searchProducts("cafe", 5) as AppResult.Success).value.first()
-        val add = sale.addLine(draft.id, product, 1.0, "EA", 30.0, null, draft.version)
+        val add = sale.addLine(draft.id, product, 1.0, product.baseUnitId, 30.0, null, draft.version)
         assertIs<SaleMutationResult.Success>(add)
 
         val resolved = sale.resolveLots(draft.id)
@@ -66,11 +66,11 @@ class StoreRolloutSmokeTest {
         assertIs<AppResult.Success<CheckoutResult>>(checkoutCash)
 
         val nextDraft = (sale.openDraft() as AppResult.Success).value
-        sale.addLine(nextDraft.id, product, 1.0, "EA", 30.0, null, nextDraft.version)
+        sale.addLine(nextDraft.id, product, 1.0, product.baseUnitId, 30.0, null, nextDraft.version)
         val checkoutCredit = sale.checkout(nextDraft.id, CheckoutMode.ON_CREDIT, backend.currentDraft.version, "idem-credit-1")
         assertIs<AppResult.Success<CheckoutResult>>(checkoutCredit)
 
-        val closed = cash.close("POS1", 1060.0)
+        val closed = cash.close(1L, 1060.0)
         assertIs<AppResult.Success<CashSession>>(closed)
 
         val managerSession = (login("manager", "pwd", TerminalCode.ADMIN) as AppResult.Success).value
@@ -88,7 +88,7 @@ class StoreRolloutSmokeTest {
 
         val draft = (sale.openDraft() as AppResult.Success).value
         val product = (sale.searchProducts("cafe", 5) as AppResult.Success).value.first()
-        sale.addLine(draft.id, product, 1.0, "EA", 30.0, null, draft.version)
+        sale.addLine(draft.id, product, 1.0, product.baseUnitId, 30.0, null, draft.version)
 
         val key = "idem-checkout-xyz"
         val first = sale.checkout(draft.id, CheckoutMode.CASH, backend.currentDraft.version, key)
@@ -113,22 +113,27 @@ private class FakeStoreBackend :
     var checkoutCalls: Int = 0
     val processedCheckoutKeys = mutableSetOf<String>()
 
+    private var draftCounter = 1L
+    private var lineCounter = 1L
+
     var currentDraft = SaleDraft(
-        id = "draft-1",
+        id = 1L,
         status = "OPEN",
         type = "SALE",
-        terminalCode = "POS1",
+        terminalId = 1L,
+        businessUnitId = 1L,
         version = 1,
         lines = emptyList(),
         totals = SaleTotals(0.0, 0.0, 0.0),
     )
 
     private val product = SaleProduct(
-        id = "p1",
+        id = "1",
         name = "Cafe",
         sku = null,
         barcode = "7501",
         defaultUnit = "EA",
+        baseUnitId = 1L,
         unitPrice = 30.0,
         lotTracked = true,
     )
@@ -148,72 +153,63 @@ private class FakeStoreBackend :
     override suspend fun restoreSession(): AppResult<UserSession?> = AppResult.Success(null)
     override suspend fun logout(): AppResult<Unit> = AppResult.Success(Unit)
 
-    override suspend fun getCurrentSession(terminalId: String): AppResult<CashSession?> = AppResult.Success(
+    override suspend fun getCurrentSession(terminalId: Long): AppResult<CashSession?> = AppResult.Success(
         CashSession(
-            id = "cash-1",
+            id = 1L,
             status = CashSessionStatus.OPEN,
             terminalId = terminalId,
+            openingAmount = 1000.0,
+            closingAmount = null,
             openedAt = "2026-03-01T08:00:00",
-            openedBy = "cashier",
-            openingCash = 1000.0,
-            movementIn = 100.0,
-            movementOut = 40.0,
-            expectedClose = 1060.0,
-            countedClose = null,
-            delta = null,
+            closedAt = null,
         )
     )
 
-    override suspend fun openSession(terminalId: String, openingCash: Double): AppResult<CashSession> = AppResult.Success(
+    override suspend fun openSession(
+        terminalId: Long,
+        businessUnitId: Long,
+        openingAmount: Double,
+    ): AppResult<CashSession> = AppResult.Success(
         CashSession(
-            id = "cash-1",
+            id = 1L,
             status = CashSessionStatus.OPEN,
             terminalId = terminalId,
+            openingAmount = openingAmount,
+            closingAmount = null,
             openedAt = "2026-03-01T08:00:00",
-            openedBy = "cashier",
-            openingCash = openingCash,
-            movementIn = 0.0,
-            movementOut = 0.0,
-            expectedClose = openingCash,
-            countedClose = null,
-            delta = null,
+            closedAt = null,
         )
     )
 
-    override suspend fun closeSession(terminalId: String, countedCash: Double): AppResult<CashSession> = AppResult.Success(
+    override suspend fun closeSession(terminalId: Long, closingAmount: Double): AppResult<CashSession> = AppResult.Success(
         CashSession(
-            id = "cash-1",
+            id = 1L,
             status = CashSessionStatus.CLOSED,
             terminalId = terminalId,
+            openingAmount = 1000.0,
+            closingAmount = closingAmount,
             openedAt = "2026-03-01T08:00:00",
-            openedBy = "cashier",
-            openingCash = 1000.0,
-            movementIn = 100.0,
-            movementOut = 40.0,
-            expectedClose = 1060.0,
-            countedClose = countedCash,
-            delta = countedCash - 1060.0,
+            closedAt = "2026-03-01T18:00:00",
         )
     )
 
-    override suspend fun getDailyReport(date: String, terminalId: String): AppResult<DailyCashReport> = AppResult.Success(
+    override suspend fun getDailyReport(date: String, terminalId: Long): AppResult<DailyCashReport> = AppResult.Success(
         DailyCashReport(
             date = date,
             terminalId = terminalId,
-            openingCash = 1000.0,
-            movementIn = 100.0,
-            movementOut = 40.0,
-            salesCash = 60.0,
-            expectedClose = 1060.0,
-            countedClose = 1060.0,
-            delta = 0.0,
+            totalIn = 100.0,
+            totalOut = 40.0,
+            movements = 5,
         )
     )
 
+    override suspend fun isCashSessionOpen(): AppResult<Boolean> = AppResult.Success(true)
+
     override suspend fun openOrCreateCurrentSaleDraft(): AppResult<SaleDraft> {
         if (currentDraft.status == "COMPLETED") {
+            draftCounter += 1
             currentDraft = currentDraft.copy(
-                id = "draft-${currentDraft.version + 1}",
+                id = draftCounter,
                 status = "OPEN",
                 version = currentDraft.version + 1,
                 lines = emptyList(),
@@ -227,21 +223,21 @@ private class FakeStoreBackend :
     override suspend fun findProductByBarcode(barcode: String): AppResult<SaleProduct?> = AppResult.Success(product)
 
     override suspend fun addLine(
-        draftId: String,
+        draftId: Long,
         product: SaleProduct,
         qty: Double,
-        unit: String,
+        unitId: Long,
         unitPrice: Double,
-        lotId: String?,
-        expectedVersion: Long,
+        lotId: Long?,
+        expectedVersion: Int,
     ): SaleMutationResult {
         val line = SaleLine(
-            id = "line-1",
-            productId = product.id,
+            id = lineCounter++,
+            productId = product.id.toLongOrNull() ?: 0L,
             productName = product.name,
             barcode = product.barcode,
             qty = qty,
-            unit = unit,
+            unit = product.defaultUnit,
             unitPrice = unitPrice,
             lineTotal = qty * unitPrice,
             lotId = lotId,
@@ -256,33 +252,34 @@ private class FakeStoreBackend :
     }
 
     override suspend fun updateLine(
-        draftId: String,
-        lineId: String,
+        draftId: Long,
+        lineId: Long,
         qty: Double,
-        unit: String,
+        unitId: Long,
         unitPrice: Double,
-        lotId: String?,
-        expectedVersion: Long,
+        lotId: Long?,
+        expectedVersion: Int,
     ): SaleMutationResult = SaleMutationResult.Success(currentDraft)
 
-    override suspend fun removeLine(draftId: String, lineId: String, expectedVersion: Long): SaleMutationResult = SaleMutationResult.Success(currentDraft)
+    override suspend fun removeLine(draftId: Long, lineId: Long, expectedVersion: Int): SaleMutationResult =
+        SaleMutationResult.Success(currentDraft)
 
-    override suspend fun validateDraft(draftId: String): AppResult<DraftValidation> = AppResult.Success(
+    override suspend fun validateDraft(draftId: Long): AppResult<DraftValidation> = AppResult.Success(
         DraftValidation(issues = emptyList())
     )
 
-    override suspend fun resolveLots(draftId: String): AppResult<SaleDraft> {
+    override suspend fun resolveLots(draftId: Long): AppResult<SaleDraft> {
         currentDraft = currentDraft.copy(
             version = currentDraft.version + 1,
-            lines = currentDraft.lines.map { it.copy(lotId = it.lotId ?: "LOT-1") },
+            lines = currentDraft.lines.map { it.copy(lotId = it.lotId ?: 1L) },
         )
         return AppResult.Success(currentDraft)
     }
 
     override suspend fun checkout(
-        draftId: String,
+        draftId: Long,
         mode: CheckoutMode,
-        expectedVersion: Long,
+        expectedVersion: Int,
         idempotencyKey: String,
     ): AppResult<CheckoutResult> {
         checkoutCalls += 1
@@ -295,7 +292,7 @@ private class FakeStoreBackend :
         }
         return AppResult.Success(
             CheckoutResult(
-                saleId = "sale-${processedCheckoutKeys.size}",
+                saleId = processedCheckoutKeys.size.toLong(),
                 folio = "F-${processedCheckoutKeys.size}",
                 total = currentDraft.totals.total,
                 mode = mode,
@@ -306,7 +303,8 @@ private class FakeStoreBackend :
     override suspend fun refetchCurrentDraft(): AppResult<SaleDraft> = AppResult.Success(currentDraft)
 
     override suspend fun salesByDate(date: String, terminalId: String): AppResult<List<DailySaleItem>> = AppResult.Success(emptyList())
-    override suspend fun cashSummary(date: String, terminalId: String): AppResult<DailyCashReport> = getDailyReport(date, terminalId)
+    override suspend fun cashSummary(date: String, terminalId: String): AppResult<DailyCashReport> =
+        getDailyReport(date, terminalId.toLongOrNull() ?: 1L)
 
     override suspend fun dailyTotals(dateFrom: String, dateTo: String): AppResult<List<ManagerDailyTotal>> = AppResult.Success(emptyList())
     override suspend fun topDebtors(limit: Int?): AppResult<List<DebtorItem>> = AppResult.Success(emptyList())

@@ -6,8 +6,11 @@ import com.posfab.shared.features.cash.domain.DailyCashReport
 import com.posfab.shared.features.cash.repository.CashRepository
 
 class CashUseCases(private val repository: CashRepository) {
-    suspend fun current(terminalId: String): AppResult<CashSession?> = repository.getCurrentSession(terminalId)
-    suspend fun open(terminalId: String, openingCash: Double): AppResult<CashSession> = repository.openSession(terminalId, openingCash)
-    suspend fun close(terminalId: String, countedCash: Double): AppResult<CashSession> = repository.closeSession(terminalId, countedCash)
-    suspend fun daily(date: String, terminalId: String): AppResult<DailyCashReport> = repository.getDailyReport(date, terminalId)
+    suspend fun current(terminalId: Long): AppResult<CashSession?> = repository.getCurrentSession(terminalId)
+    suspend fun open(terminalId: Long, businessUnitId: Long, openingAmount: Double): AppResult<CashSession> =
+        repository.openSession(terminalId, businessUnitId, openingAmount)
+    suspend fun close(terminalId: Long, closingAmount: Double): AppResult<CashSession> =
+        repository.closeSession(terminalId, closingAmount)
+    suspend fun daily(date: String, terminalId: Long): AppResult<DailyCashReport> =
+        repository.getDailyReport(date, terminalId)
 }

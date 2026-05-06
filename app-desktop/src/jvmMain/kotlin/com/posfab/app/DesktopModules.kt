@@ -77,7 +77,10 @@ fun desktopModule(config: PosConfig): Module = module {
     single<CashApi> { CashApiClient(get(), get()) }
     single<ReportsApi> { ReportsApiClient(get(), get()) }
     single<AuthRepository> { AuthRepositoryImpl(get(), get()) }
-    single<SaleRepository> { SaleRepositoryImpl(get(), get(), get()) }
+    single<SaleRepository> {
+        val cfg = get<PosConfig>()
+        SaleRepositoryImpl(get<PosApi>(), get<CatalogApi>(), cfg.terminalId, cfg.businessUnitId, get())
+    }
     single<CatalogRepository> { CatalogRepositoryImpl(get(), get()) }
     single<OperationsRepository> { OperationsRepositoryImpl(get(), get()) }
     single<CashRepository> { CashRepositoryImpl(get(), get()) }

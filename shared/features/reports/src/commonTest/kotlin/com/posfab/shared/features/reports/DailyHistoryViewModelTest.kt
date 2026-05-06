@@ -83,14 +83,10 @@ private class FakeDailyHistoryRepo : DailyHistoryRepository {
         return AppResult.Success(
             DailyCashReport(
                 date = date,
-                terminalId = terminalId,
-                openingCash = 1000.0,
-                movementIn = 200.0,
-                movementOut = 50.0,
-                salesCash = 300.0,
-                expectedClose = 1150.0,
-                countedClose = 1140.0,
-                delta = -10.0,
+                terminalId = terminalId.toLongOrNull() ?: 1L,
+                totalIn = 200.0,
+                totalOut = 50.0,
+                movements = 5,
             )
         )
     }

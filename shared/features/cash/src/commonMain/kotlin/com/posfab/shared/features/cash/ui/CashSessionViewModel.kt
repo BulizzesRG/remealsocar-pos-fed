@@ -1,10 +1,9 @@
 package com.posfab.shared.features.cash.ui
 
-import com.posfab.shared.auth.domain.UserSession
 import com.posfab.shared.core.BaseViewModel
-import com.posfab.shared.core.model.UserRole
 import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
+import com.posfab.shared.features.cash.domain.CashSessionStatus
 import com.posfab.shared.features.cash.usecase.CashUseCases
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -17,17 +16,17 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 
 class CashSessionViewModel(
-    private val session: UserSession,
+    private val terminalId: Long,
+    private val businessUnitId: Long,
     private val cashUseCases: CashUseCases,
+    val onNavigateToPos: () -> Unit = {},
     dispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : BaseViewModel(dispatcher) {
-    private val canSwitchTerminal = session.user.roles.any { it == UserRole.ADMIN || it == UserRole.MANAGER }
     private val defaultDate = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).date.toString()
 
     private val _state = MutableStateFlow(
         CashSessionState(
-            terminalId = session.terminal.name,
-            canSwitchTerminal = canSwitchTerminal,
+            terminalId = terminalId,
             reportDateInput = defaultDate,
         )
     )
@@ -38,34 +37,19 @@ class CashSessionViewModel(
         fetchDailyReport()
     }
 
-    fun onOpeningCashChange(value: String) {
-        _state.value = _state.value.copy(openingCashInput = value)
+    fun onOpeningAmountChange(value: String) {
+        _state.value = _state.value.copy(openingAmountInput = value)
     }
 
-    fun onCountedCashChange(value: String) {
-        _state.value = _state.value.copy(countedCashInput = value)
+    fun onClosingAmountChange(value: String) {
+        _state.value = _state.value.copy(closingAmountInput = value)
     }
 
     fun onReportDateChange(value: String) {
         _state.value = _state.value.copy(reportDateInput = value)
     }
 
-    fun onTerminalChange(value: String) {
-        val normalized = value.trim().uppercase()
-        if (normalized.isBlank()) return
-
-        if (!canSwitchTerminal && normalized != session.terminal.name) {
-            _state.value = _state.value.copy(notice = "Perfil CAJERO: terminal fija ${session.terminal.name}")
-            return
-        }
-
-        _state.value = _state.value.copy(terminalId = normalized)
-        refreshCurrentSession()
-        fetchDailyReport()
-    }
-
     fun refreshCurrentSession() {
-        val terminalId = _state.value.terminalId
         scope.launch {
             _state.value = _state.value.copy(isLoading = true, errorMessage = null)
             when (val result = cashUseCases.current(terminalId)) {
@@ -91,15 +75,15 @@ class CashSessionViewModel(
         val snapshot = _state.value
         if (snapshot.isOpenSubmitting) return
 
-        val openingCash = snapshot.openingCashInput.toDoubleOrNull()
-        if (openingCash == null || openingCash < 0.0) {
+        val openingAmount = snapshot.openingAmountInput.toDoubleOrNull()
+        if (openingAmount == null || openingAmount < 0.0) {
             _state.value = snapshot.copy(errorMessage = "Monto de apertura invalido")
             return
         }
 
         _state.value = snapshot.copy(isOpenSubmitting = true, errorMessage = null, notice = null)
         scope.launch {
-            when (val result = cashUseCases.open(snapshot.terminalId, openingCash)) {
+            when (val result = cashUseCases.open(terminalId, businessUnitId, openingAmount)) {
                 is AppResult.Success -> {
                     _state.value = _state.value.copy(
                         isOpenSubmitting = false,
@@ -128,20 +112,20 @@ class CashSessionViewModel(
 
     fun requestCloseSession() {
         val snapshot = _state.value
-        val counted = snapshot.countedCashInput.toDoubleOrNull()
-        if (counted == null || counted < 0.0) {
-            _state.value = snapshot.copy(errorMessage = "Monto contado invalido")
+        val closingAmount = snapshot.closingAmountInput.toDoubleOrNull()
+        if (closingAmount == null || closingAmount < 0.0) {
+            _state.value = snapshot.copy(errorMessage = "Monto de cierre invalido")
             return
         }
         val session = snapshot.currentSession
-        if (session == null || session.status != com.posfab.shared.features.cash.domain.CashSessionStatus.OPEN) {
+        if (session == null || session.status != CashSessionStatus.OPEN) {
             _state.value = snapshot.copy(notice = "No hay una sesion abierta para cerrar.")
             return
         }
         _state.value = snapshot.copy(
             errorMessage = null,
             closeConfirmDialog = CashCloseConfirmState(
-                message = "Se registrara un cierre con efectivo contado de $counted para la terminal ${snapshot.terminalId}.",
+                message = "Se registrara un cierre con efectivo de $closingAmount para la terminal ${snapshot.terminalId}.",
             ),
         )
     }
@@ -154,9 +138,9 @@ class CashSessionViewModel(
         val snapshot = _state.value
         if (snapshot.isCloseSubmitting) return
 
-        val counted = snapshot.countedCashInput.toDoubleOrNull()
-        if (counted == null || counted < 0.0) {
-            _state.value = snapshot.copy(errorMessage = "Monto contado invalido")
+        val closingAmount = snapshot.closingAmountInput.toDoubleOrNull()
+        if (closingAmount == null || closingAmount < 0.0) {
+            _state.value = snapshot.copy(errorMessage = "Monto de cierre invalido")
             return
         }
 
@@ -167,12 +151,12 @@ class CashSessionViewModel(
             closeConfirmDialog = null,
         )
         scope.launch {
-            when (val result = cashUseCases.close(snapshot.terminalId, counted)) {
+            when (val result = cashUseCases.close(terminalId, closingAmount)) {
                 is AppResult.Success -> {
                     _state.value = _state.value.copy(
                         isCloseSubmitting = false,
                         currentSession = result.value,
-                        notice = "Sesion cerrada. Delta: ${result.value.delta ?: 0.0}",
+                        notice = "Sesion cerrada.",
                     )
                     fetchDailyReport()
                 }
@@ -199,7 +183,7 @@ class CashSessionViewModel(
         val snapshot = _state.value
         scope.launch {
             _state.value = snapshot.copy(isReportLoading = true, errorMessage = null)
-            when (val result = cashUseCases.daily(snapshot.reportDateInput, snapshot.terminalId)) {
+            when (val result = cashUseCases.daily(snapshot.reportDateInput, terminalId)) {
                 is AppResult.Success -> {
                     _state.value = _state.value.copy(
                         isReportLoading = false,

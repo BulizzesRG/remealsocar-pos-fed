@@ -39,18 +39,17 @@ class ReportsRepositoryImpl(
     }
 
     override suspend fun cashSummary(date: String, terminalId: String): AppResult<DailyCashReport> {
-        return when (val result = executor.execute { cashApi.dailyReport(it, date, terminalId) }) {
+        val terminalIdLong = terminalId.toLongOrNull() ?: return AppResult.Failure(
+            com.posfab.shared.core.result.AppError.Validation("Invalid terminal id: $terminalId")
+        )
+        return when (val result = executor.execute { cashApi.dailyReport(it, date, terminalIdLong) }) {
             is AppResult.Success -> AppResult.Success(
                 DailyCashReport(
                     date = result.value.date,
                     terminalId = result.value.terminalId,
-                    openingCash = result.value.openingCash,
-                    movementIn = result.value.movementIn,
-                    movementOut = result.value.movementOut,
-                    salesCash = result.value.salesCash,
-                    expectedClose = result.value.expectedClose,
-                    countedClose = result.value.countedClose,
-                    delta = result.value.delta,
+                    totalIn = result.value.totalIn.toDoubleOrNull() ?: 0.0,
+                    totalOut = result.value.totalOut.toDoubleOrNull() ?: 0.0,
+                    movements = result.value.movements,
                 )
             )
             is AppResult.Failure -> result

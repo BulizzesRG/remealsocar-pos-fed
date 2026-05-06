@@ -22,6 +22,7 @@ class CashierSaleViewModel(
     private val saleUiStateStore: SaleUiStateStore = NoOpSaleUiStateStore,
     private val cardPaymentAdapter: CardPaymentAdapter = NoOpCardPaymentAdapter,
     private val receiptPrinterAdapter: ReceiptPrinterAdapter = NoOpReceiptPrinterAdapter,
+    val onNavigateToCash: () -> Unit = {},
     dispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : BaseViewModel(dispatcher) {
     private val _state = MutableStateFlow(CashierSaleState())
@@ -30,13 +31,50 @@ class CashierSaleViewModel(
     init {
         scope.launch {
             restoreUiState()
-            openOrCreateDraft()
+        }
+    }
+
+    private suspend fun checkCashSessionThenLoad() {
+        _state.value = _state.value.copy(isInitializing = true, cashSessionMissing = false, errorMessage = null)
+        when (val result = saleUseCases.isCashSessionOpen()) {
+            is AppResult.Success -> {
+                if (result.value) {
+                    openOrCreateDraft()
+                } else {
+                    _state.value = _state.value.copy(isInitializing = false, cashSessionMissing = true)
+                }
+            }
+            is AppResult.Failure -> {
+                // Network error — still try to load the draft; checkout will fail later with a clear message
+                openOrCreateDraft()
+            }
+        }
+    }
+
+    fun retryCashSessionCheck() {
+        scope.launch {
+            // Full state reset — clear ALL stale data from previous session
+            _state.value = CashierSaleState()
+            restoreUiState()
+            checkCashSessionThenLoad()
         }
     }
 
     fun openOrCreateDraft() {
         scope.launch {
-            _state.value = _state.value.copy(isInitializing = true, errorMessage = null, notice = null)
+            _state.value = _state.value.copy(
+                isInitializing = true,
+                isBusy = false,
+                isCheckoutInFlight = false,
+                cashSessionMissing = false,
+                errorMessage = null,
+                notice = null,
+                draft = null,
+                checkoutResult = null,
+                checkoutIdempotencyKey = null,
+                validationIssues = emptyList(),
+                searchResults = emptyList(),
+            )
             when (val result = saleUseCases.openDraft()) {
                 is AppResult.Success -> {
                     val recoveredSelectedId = _state.value.selectedLineId
@@ -49,7 +87,7 @@ class CashierSaleViewModel(
                         editQtyInput = firstLine?.qty?.toString().orEmpty(),
                         editUnitInput = firstLine?.unit.orEmpty(),
                         editPriceInput = firstLine?.unitPrice?.toString().orEmpty(),
-                        editLotInput = firstLine?.lotId.orEmpty(),
+                        editLotInput = firstLine?.lotId?.toString().orEmpty(),
                         validationIssues = emptyList(),
                         checkoutResult = null,
                         checkoutIdempotencyKey = null,
@@ -125,14 +163,14 @@ class CashierSaleViewModel(
         scope.launch { addProductInternal(product) }
     }
 
-    fun selectLine(lineId: String) {
+    fun selectLine(lineId: Long) {
         val line = _state.value.draft?.lines?.firstOrNull { it.id == lineId } ?: return
         _state.value = _state.value.copy(
             selectedLineId = lineId,
             editQtyInput = line.qty.toString(),
             editUnitInput = line.unit,
             editPriceInput = line.unitPrice.toString(),
-            editLotInput = line.lotId.orEmpty(),
+            editLotInput = line.lotId?.toString().orEmpty(),
         )
         persistUiState()
     }
@@ -158,9 +196,9 @@ class CashierSaleViewModel(
         updateLine(currentLine.copy(unitPrice = price.coerceAtLeast(0.0)))
     }
 
-    fun updateSelectedLineLot(lotId: String?) {
+    fun updateSelectedLineLot(lotId: Long?) {
         val currentLine = selectedLine() ?: return
-        updateLine(currentLine.copy(lotId = lotId?.trim()?.ifBlank { null }))
+        updateLine(currentLine.copy(lotId = lotId))
     }
 
     fun onEditQtyChange(value: String) {
@@ -185,7 +223,7 @@ class CashierSaleViewModel(
         val qty = snapshot.editQtyInput.toDoubleOrNull() ?: currentLine.qty
         val unit = snapshot.editUnitInput.trim().ifBlank { currentLine.unit }
         val price = snapshot.editPriceInput.toDoubleOrNull() ?: currentLine.unitPrice
-        val lot = snapshot.editLotInput.trim().ifBlank { null }
+        val lot = snapshot.editLotInput.trim().toLongOrNull()
         updateLine(currentLine.copy(qty = qty.coerceAtLeast(1.0), unit = unit, unitPrice = price.coerceAtLeast(0.0), lotId = lot))
     }
 
@@ -284,6 +322,7 @@ class CashierSaleViewModel(
         val snapshot = _state.value
         val draft = snapshot.draft ?: return
         if (snapshot.isCheckoutInFlight) return
+        if (draft.status != "OPEN") return  // guard: don't checkout a completed/cancelled draft
 
         val checkoutKey = snapshot.checkoutIdempotencyKey ?: buildCheckoutKey(draft.id)
         _state.value = snapshot.copy(
@@ -310,6 +349,7 @@ class CashierSaleViewModel(
                 is AppResult.Failure -> {
                     _state.value = _state.value.copy(
                         isCheckoutInFlight = false,
+                        checkoutIdempotencyKey = null,
                         errorMessage = SaleErrorText.from(result.error),
                     )
                 }
@@ -323,7 +363,7 @@ class CashierSaleViewModel(
             draftId = draft.id,
             product = product,
             qty = 1.0,
-            unit = product.defaultUnit,
+            unitId = product.baseUnitId,
             price = product.unitPrice,
             lotId = null,
             expectedVersion = draft.version,
@@ -342,11 +382,12 @@ class CashierSaleViewModel(
 
         scope.launch {
             _state.value = _state.value.copy(isBusy = true, errorMessage = null, notice = null)
+            // unitId 0L signals the repository to pass null in UpdateLineRequestDto (leave unchanged on backend)
             val result = saleUseCases.updateLine(
                 draftId = draft.id,
                 lineId = line.id,
                 qty = line.qty,
-                unit = line.unit,
+                unitId = 0L,
                 price = line.unitPrice,
                 lotId = line.lotId,
                 expectedVersion = draft.version,
@@ -358,7 +399,8 @@ class CashierSaleViewModel(
     private fun applyMutationResult(result: SaleMutationResult) {
         when (result) {
             is SaleMutationResult.Success -> {
-                val selected = result.draft.lines.firstOrNull { it.id == _state.value.selectedLineId } ?: result.draft.lines.firstOrNull()
+                val selected = result.draft.lines.firstOrNull { it.id == _state.value.selectedLineId }
+                    ?: result.draft.lines.firstOrNull()
                 _state.value = _state.value.copy(
                     isBusy = false,
                     draft = result.draft,
@@ -366,7 +408,7 @@ class CashierSaleViewModel(
                     editQtyInput = selected?.qty?.toString().orEmpty(),
                     editUnitInput = selected?.unit.orEmpty(),
                     editPriceInput = selected?.unitPrice?.toString().orEmpty(),
-                    editLotInput = selected?.lotId.orEmpty(),
+                    editLotInput = selected?.lotId?.toString().orEmpty(),
                     notice = null,
                 )
                 persistUiState()
@@ -380,7 +422,7 @@ class CashierSaleViewModel(
                     editQtyInput = selected?.qty?.toString().orEmpty(),
                     editUnitInput = selected?.unit.orEmpty(),
                     editPriceInput = selected?.unitPrice?.toString().orEmpty(),
-                    editLotInput = selected?.lotId.orEmpty(),
+                    editLotInput = selected?.lotId?.toString().orEmpty(),
                     notice = "Otro usuario modifico el borrador. Se recargo la ultima version.",
                 )
                 persistUiState()
@@ -394,7 +436,7 @@ class CashierSaleViewModel(
         }
     }
 
-    private fun buildCheckoutKey(draftId: String): String {
+    private fun buildCheckoutKey(draftId: Long): String {
         return "sale-$draftId-${kotlinx.datetime.Clock.System.now().toEpochMilliseconds()}-${Random.nextInt(1_000, 9_999)}"
     }
 

@@ -10,6 +10,7 @@ data class ProductListItemDto(
     val barcode: String? = null,
     val name: String,
     @SerialName("baseUnit") val baseUnit: String,
+    @SerialName("baseUnitId") val baseUnitId: Long,
     @SerialName("lotTracked") val lotTracked: Boolean,
     val active: Boolean,
     @SerialName("currentPrice") val currentPrice: Double? = null,
@@ -30,6 +31,7 @@ data class ProductDetailDto(
     val barcode: String? = null,
     val name: String,
     @SerialName("baseUnit") val baseUnit: String,
+    @SerialName("baseUnitId") val baseUnitId: Long,
     @SerialName("lotTracked") val lotTracked: Boolean,
     val active: Boolean,
     @SerialName("currentPrice") val currentPrice: Double? = null,
@@ -52,8 +54,10 @@ data class PriceHistoryDto(
 
 @Serializable
 data class UnitDto(
+    val id: Long,
     val code: String,
     val name: String,
+    val active: Boolean,
 )
 
 @Serializable

@@ -5,8 +5,8 @@ import com.posfab.shared.features.cash.domain.CashSession
 import com.posfab.shared.features.cash.domain.DailyCashReport
 
 interface CashRepository {
-    suspend fun getCurrentSession(terminalId: String): AppResult<CashSession?>
-    suspend fun openSession(terminalId: String, openingCash: Double): AppResult<CashSession>
-    suspend fun closeSession(terminalId: String, countedCash: Double): AppResult<CashSession>
-    suspend fun getDailyReport(date: String, terminalId: String): AppResult<DailyCashReport>
+    suspend fun getCurrentSession(terminalId: Long): AppResult<CashSession?>
+    suspend fun openSession(terminalId: Long, businessUnitId: Long, openingAmount: Double): AppResult<CashSession>
+    suspend fun closeSession(terminalId: Long, closingAmount: Double): AppResult<CashSession>
+    suspend fun getDailyReport(date: String, terminalId: Long): AppResult<DailyCashReport>
 }

@@ -10,6 +10,8 @@ data class PosConfig(
     val logLevel: LogLevel,
     val requestTimeoutMs: Long,
     val enableVerboseLogs: Boolean,
+    val terminalId: Long,
+    val businessUnitId: Long,
 )
 
 object PosConfigLoader {
@@ -34,6 +36,8 @@ object PosConfigLoader {
             logLevel = logLevel,
             requestTimeoutMs = source["POS_REQUEST_TIMEOUT_MS"]?.toLongOrNull() ?: 15_000L,
             enableVerboseLogs = source["POS_ENABLE_VERBOSE_LOGS"]?.toBooleanStrictOrNull() ?: (env == PosEnv.DEV),
+            terminalId = source["POS_TERMINAL_ID"]?.toLongOrNull() ?: 1L,
+            businessUnitId = source["POS_BUSINESS_UNIT_ID"]?.toLongOrNull() ?: 1L,
         )
     }
 }
