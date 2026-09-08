@@ -3,6 +3,7 @@ package com.posfab.shared.network.catalog
 import com.posfab.shared.config.PosConfig
 import com.posfab.shared.core.result.AppResult
 import com.posfab.shared.network.http.safeCall
+import com.posfab.shared.network.pos.BarcodeLookupResponseDto
 import io.ktor.client.HttpClient
 import io.ktor.client.request.get
 import io.ktor.client.request.header
@@ -30,7 +31,8 @@ interface CatalogApi {
     suspend fun listUnits(accessToken: String): AppResult<List<UnitDto>>
     suspend fun listBusinessUnits(accessToken: String): AppResult<List<BusinessUnitDto>>
     suspend fun addPriceHistory(accessToken: String, request: CreatePriceHistoryRequestDto): AppResult<Unit>
-    suspend fun findByBarcode(accessToken: String, barcode: String): AppResult<ProductDetailDto?>
+    /** GET /products/by-barcode returns a lookup envelope (product summary + matched UOM), not a product detail. */
+    suspend fun findByBarcode(accessToken: String, barcode: String): AppResult<BarcodeLookupResponseDto>
 }
 
 class CatalogApiClient(
@@ -103,7 +105,7 @@ class CatalogApiClient(
         }
     }
 
-    override suspend fun findByBarcode(accessToken: String, barcode: String): AppResult<ProductDetailDto?> = safeCall {
+    override suspend fun findByBarcode(accessToken: String, barcode: String): AppResult<BarcodeLookupResponseDto> = safeCall {
         httpClient.get("${config.apiBaseUrl}/products/by-barcode") {
             bearer(accessToken)
             parameter("barcode", barcode)

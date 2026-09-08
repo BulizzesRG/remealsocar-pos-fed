@@ -1,6 +1,7 @@
 package com.posfab.shared.features.catalog.repository
 
 import com.posfab.shared.auth.refresh.AuthorizedApiExecutor
+import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
 import com.posfab.shared.features.catalog.domain.BusinessUnit
 import com.posfab.shared.features.catalog.domain.CatalogProductDetail
@@ -120,9 +121,13 @@ class CatalogRepositoryImpl(
         }
 
     override suspend fun findByBarcode(barcode: String): AppResult<CatalogProductDetail?> {
-        return when (val result = authorized { catalogApi.findByBarcode(it, barcode) }) {
-            is AppResult.Success -> AppResult.Success(result.value?.toDomain())
-            is AppResult.Failure -> result
+        // The backend answers with a lightweight lookup (product summary + matched UOM). The catalog
+        // screen needs the full detail (UOMs, price history), so resolve it with a second call by id.
+        return when (val lookup = authorized { catalogApi.findByBarcode(it, barcode) }) {
+            is AppResult.Success -> getProduct(lookup.value.product.id.toString())
+            is AppResult.Failure ->
+                // 404 (unknown barcode) is mapped to AppError.Validation by ApiErrorMapper.
+                if (lookup.error is AppError.Validation) AppResult.Success(null) else lookup
         }
     }
 
