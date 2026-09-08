@@ -437,7 +437,7 @@ class CashierSaleViewModel(
     }
 
     private fun buildCheckoutKey(draftId: Long): String {
-        return "sale-$draftId-${kotlinx.datetime.Clock.System.now().toEpochMilliseconds()}-${Random.nextInt(1_000, 9_999)}"
+        return "sale-$draftId-${kotlin.time.Clock.System.now().toEpochMilliseconds()}-${Random.nextInt(1_000, 9_999)}"
     }
 
     private suspend fun restoreUiState() {
@@ -458,7 +458,7 @@ class CashierSaleViewModel(
                     barcodeInput = snapshot.barcodeInput,
                     selectedLineId = snapshot.selectedLineId,
                     draftId = snapshot.draft?.id,
-                    savedAtEpochMs = kotlinx.datetime.Clock.System.now().toEpochMilliseconds(),
+                    savedAtEpochMs = kotlin.time.Clock.System.now().toEpochMilliseconds(),
                 )
             )
         }

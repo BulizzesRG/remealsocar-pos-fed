@@ -7,7 +7,7 @@ import com.posfab.shared.core.result.AppError
 import io.ktor.client.call.body
 import io.ktor.client.statement.HttpResponse
 import io.ktor.http.isSuccess
-import kotlinx.datetime.Clock
+import kotlin.time.Clock
 
 suspend inline fun <reified T> safeCall(block: suspend () -> HttpResponse): AppResult<T> {
     val startedAt = Clock.System.now().toEpochMilliseconds()

@@ -668,6 +668,6 @@ class OperationsViewModel(
 
     private fun generateIdempotencyKey(prefix: String): String {
         val randomSuffix = Random.nextInt(100000, 999999)
-        return "$prefix-${kotlinx.datetime.Clock.System.now().toEpochMilliseconds()}-$randomSuffix"
+        return "$prefix-${kotlin.time.Clock.System.now().toEpochMilliseconds()}-$randomSuffix"
     }
 }

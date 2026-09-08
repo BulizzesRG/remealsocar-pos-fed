@@ -17,9 +17,19 @@ val includedModules = listOf(
     ":shared:features:catalog",
     ":shared:features:operations",
     ":shared:features:reports",
+    ":shared:features:device-setup",
     ":shared:ui",
     ":shared:config",
 )
+
+// Pin the JDK for every Kotlin module so builds do not depend on whichever JDK launches Gradle.
+subprojects {
+    plugins.withId("org.jetbrains.kotlin.multiplatform") {
+        extensions.configure<org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension> {
+            jvmToolchain(21)
+        }
+    }
+}
 
 tasks.register("test") {
     group = "verification"
