@@ -89,5 +89,5 @@ private class FakeManagerRepository : ManagerRepository {
 
 private class FakeDailyRepo : DailyHistoryRepository {
     override suspend fun salesByDate(date: String, terminalId: String) = AppResult.Success(emptyList<com.posfab.shared.features.reports.daily.DailySaleItem>())
-    override suspend fun cashSummary(date: String, terminalId: String) = AppResult.Success(com.posfab.shared.features.cash.domain.DailyCashReport(date, terminalId, 0.0, 0.0, 0.0, 0.0, 0.0, null, null))
+    override suspend fun cashSummary(date: String, terminalId: String) = AppResult.Success(com.posfab.shared.features.cash.domain.DailyCashReport(date, terminalId.toLongOrNull() ?: 0L, 0.0, 0.0, 0))
 }

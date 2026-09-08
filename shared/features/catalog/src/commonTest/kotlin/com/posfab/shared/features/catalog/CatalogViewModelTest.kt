@@ -12,6 +12,7 @@ import com.posfab.shared.features.catalog.domain.ProductPage
 import com.posfab.shared.features.catalog.domain.ProductUomConversion
 import com.posfab.shared.features.catalog.domain.UpdateProductInput
 import com.posfab.shared.features.catalog.repository.CatalogRepository
+import com.posfab.shared.features.catalog.ui.CatalogFormMode
 import com.posfab.shared.features.catalog.ui.CatalogViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -20,7 +21,9 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -107,6 +110,128 @@ class CatalogViewModelTest {
         assertEquals(39.9, vm.state.value.selectedProduct?.currentPrice)
         assertTrue((vm.state.value.selectedProduct?.priceHistory?.size ?: 0) >= 1)
     }
+
+    // ── New tests ──
+
+    @Test
+    fun create_product_with_initial_price_chains_price_entry() = runTest(dispatcher) {
+        val repo = FakeCatalogRepository()
+        val vm = CatalogViewModel(CatalogUseCases(repo), dispatcher)
+        advanceUntilIdle()
+
+        vm.startCreateProduct()
+        vm.onFormNameChange("Coca Cola 600ml")
+        vm.onFormBaseUnitChange("EA")
+        vm.onFormInitialPriceChange("15.50")
+        vm.saveProduct()
+        advanceUntilIdle()
+
+        assertEquals(1, repo.createdProducts)
+        assertEquals(1, repo.addPriceCalls)
+        assertTrue(vm.state.value.notice?.contains("precio") == true)
+    }
+
+    @Test
+    fun quick_add_creates_product_with_price() = runTest(dispatcher) {
+        val repo = FakeCatalogRepository()
+        val vm = CatalogViewModel(CatalogUseCases(repo), dispatcher)
+        advanceUntilIdle()
+
+        vm.openQuickAdd()
+        assertTrue(vm.state.value.showQuickAddDialog)
+
+        vm.onQuickAddNameChange("Sabritas")
+        vm.onQuickAddPriceChange("18.00")
+        vm.onQuickAddUnitChange("EA")
+        vm.submitQuickAdd()
+        advanceUntilIdle()
+
+        assertEquals(1, repo.createdProducts)
+        assertEquals(1, repo.addPriceCalls)
+        assertFalse(vm.state.value.showQuickAddDialog)
+        assertTrue(vm.state.value.notice?.contains("Sabritas") == true)
+    }
+
+    @Test
+    fun quick_add_validates_empty_name() = runTest(dispatcher) {
+        val repo = FakeCatalogRepository()
+        val vm = CatalogViewModel(CatalogUseCases(repo), dispatcher)
+        advanceUntilIdle()
+
+        vm.openQuickAdd()
+        vm.onQuickAddPriceChange("10.00")
+        vm.submitQuickAdd()
+
+        assertTrue(vm.state.value.errorMessage?.contains("Nombre", ignoreCase = true) == true)
+        assertEquals(0, repo.createdProducts)
+    }
+
+    @Test
+    fun quick_add_validates_invalid_price() = runTest(dispatcher) {
+        val repo = FakeCatalogRepository()
+        val vm = CatalogViewModel(CatalogUseCases(repo), dispatcher)
+        advanceUntilIdle()
+
+        vm.openQuickAdd()
+        vm.onQuickAddNameChange("Test")
+        vm.submitQuickAdd()
+
+        assertTrue(vm.state.value.errorMessage?.contains("Precio", ignoreCase = true) == true)
+        assertEquals(0, repo.createdProducts)
+    }
+
+    @Test
+    fun lot_tracking_warning_shown_when_enabling() = runTest(dispatcher) {
+        val repo = FakeCatalogRepository()
+        val vm = CatalogViewModel(CatalogUseCases(repo), dispatcher)
+        advanceUntilIdle()
+
+        vm.startCreateProduct()
+        assertFalse(vm.state.value.form.lotTracked)
+
+        // Turning ON should show warning, NOT toggle immediately
+        vm.onFormLotTrackedChange(true)
+        assertTrue(vm.state.value.showLotTrackingWarning)
+        assertFalse(vm.state.value.form.lotTracked)
+
+        // Confirming should apply the change
+        vm.confirmLotTracking()
+        assertFalse(vm.state.value.showLotTrackingWarning)
+        assertTrue(vm.state.value.form.lotTracked)
+
+        // Turning OFF should NOT show warning
+        vm.onFormLotTrackedChange(false)
+        assertFalse(vm.state.value.showLotTrackingWarning)
+        assertFalse(vm.state.value.form.lotTracked)
+    }
+
+    @Test
+    fun barcode_check_auto_selects_product() = runTest(dispatcher) {
+        val repo = FakeCatalogRepository()
+        val vm = CatalogViewModel(CatalogUseCases(repo), dispatcher)
+        advanceUntilIdle()
+
+        vm.onBarcodeCheckInputChange("750123")
+        vm.checkBarcode()
+        advanceUntilIdle()
+
+        assertEquals(CatalogFormMode.EDITING, vm.state.value.formMode)
+        assertEquals("p1", vm.state.value.selectedProduct?.id)
+        assertEquals("", vm.state.value.barcodeCheckInput)
+        assertTrue(vm.state.value.notice?.contains("encontrado") == true)
+    }
+
+    @Test
+    fun pagination_text_displays_range() = runTest(dispatcher) {
+        val repo = FakeCatalogRepository()
+        val vm = CatalogViewModel(CatalogUseCases(repo), dispatcher)
+        advanceUntilIdle()
+
+        val text = vm.state.value.paginationText
+        assertTrue(text.contains("Mostrando"))
+        assertTrue(text.contains("1"))
+        assertTrue(text.contains("40"))
+    }
 }
 
 private class FakeCatalogRepository(
@@ -116,6 +241,7 @@ private class FakeCatalogRepository(
     var lastOffset: Int = 0
     var createdProducts: Int = 0
     var updatedProducts: Int = 0
+    var addPriceCalls: Int = 0
 
     private val products = mutableMapOf(
         "p1" to CatalogProductDetail(
@@ -208,6 +334,7 @@ private class FakeCatalogRepository(
     )
 
     override suspend fun addPrice(productId: String, price: Double): AppResult<Unit> {
+        addPriceCalls++
         val current = products[productId] ?: return AppResult.Failure(AppError.Validation("not found"))
         products[productId] = current.copy(
             currentPrice = price,

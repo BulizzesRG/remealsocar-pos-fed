@@ -3,7 +3,6 @@ package com.posfab.shared.features.operations
 import com.posfab.shared.auth.domain.AuthTokens
 import com.posfab.shared.auth.domain.AuthUser
 import com.posfab.shared.auth.domain.UserSession
-import com.posfab.shared.core.model.TerminalCode
 import com.posfab.shared.core.model.UserRole
 import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
@@ -160,13 +159,13 @@ class OperationsViewModelTest {
     private fun managerSession() = UserSession(
         tokens = AuthTokens("a", "r"),
         user = AuthUser("u1", "manager", setOf(UserRole.MANAGER)),
-        terminal = TerminalCode.POS1,
+        terminalCode = "POS1",
     )
 
     private fun cashierSession() = UserSession(
         tokens = AuthTokens("a", "r"),
         user = AuthUser("u2", "cashier", setOf(UserRole.CASHIER)),
-        terminal = TerminalCode.POS1,
+        terminalCode = "POS1",
     )
 }
 

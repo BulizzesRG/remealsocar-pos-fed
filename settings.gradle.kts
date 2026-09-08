@@ -30,6 +30,7 @@ include(
     ":shared:features:catalog",
     ":shared:features:operations",
     ":shared:features:reports",
+    ":shared:features:device-setup",
     ":shared:ui",
     ":shared:config"
 )

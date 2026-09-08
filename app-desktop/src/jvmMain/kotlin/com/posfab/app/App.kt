@@ -16,13 +16,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import com.posfab.shared.auth.usecase.LoginUseCase
 import com.posfab.shared.auth.usecase.LogoutUseCase
+import com.posfab.shared.core.device.DeviceStorage
 import com.posfab.shared.features.catalog.common.CatalogUseCases
 import com.posfab.shared.features.catalog.ui.CatalogScreen
 import com.posfab.shared.features.catalog.ui.CatalogViewModel
-import com.posfab.shared.config.PosConfig
 import com.posfab.shared.features.cash.ui.CashSessionScreen
 import com.posfab.shared.features.cash.ui.CashSessionViewModel
 import com.posfab.shared.features.cash.usecase.CashUseCases
+import com.posfab.shared.features.devicesetup.DeviceSetupScreen
+import com.posfab.shared.features.devicesetup.DeviceSetupViewModel
 import com.posfab.shared.features.login.LoginScreen
 import com.posfab.shared.features.login.LoginViewModel
 import com.posfab.shared.features.operations.common.OperationsUseCases
@@ -42,9 +44,9 @@ import com.posfab.shared.features.sale.ui.ReceiptPrinterAdapter
 import com.posfab.shared.features.sale.usecase.SaleUseCases
 import com.posfab.shared.features.shell.ShellScreen
 import com.posfab.shared.features.shell.ShellViewModel
+import com.posfab.shared.network.device.DeviceApi
 import com.posfab.shared.ui.theme.PosSpacing
 import com.posfab.shared.ui.theme.PosTheme
-import kotlinx.coroutines.flow.collect
 import org.koin.core.context.GlobalContext
 
 @Composable
@@ -68,10 +70,24 @@ fun PosApp(controller: AppStateController) {
                     }
                 }
             }
+            AppScreen.DeviceSetup -> {
+                val koin = GlobalContext.get()
+                val setupViewModel = remember {
+                    DeviceSetupViewModel(koin.get<DeviceApi>(), koin.get<DeviceStorage>())
+                }
+                LaunchedEffect(setupViewModel) {
+                    setupViewModel.registrationComplete.collect { registration ->
+                        controller.onDeviceRegistered(registration)
+                    }
+                }
+                DeviceSetupScreen(setupViewModel)
+            }
             AppScreen.Login -> {
                 val koin = GlobalContext.get()
+                val device = controller.deviceRegistration.value
+                    ?: error("Login screen reached before device registration")
                 val loginViewModel = remember {
-                    LoginViewModel(koin.get<LoginUseCase>())
+                    LoginViewModel(koin.get<LoginUseCase>(), device)
                 }
                 LaunchedEffect(loginViewModel) {
                     loginViewModel.loggedIn.collect { session ->
@@ -82,6 +98,8 @@ fun PosApp(controller: AppStateController) {
             }
             is AppScreen.Shell -> {
                 val koin = GlobalContext.get()
+                val device = controller.deviceRegistration.value
+                    ?: error("Shell screen reached before device registration")
                 val logoutUseCase: LogoutUseCase = koin.get()
                 val shellViewModel = remember(screen.session) {
                     ShellViewModel(screen.session, logoutUseCase)
@@ -95,11 +113,10 @@ fun PosApp(controller: AppStateController) {
                         onNavigateToCash = { shellViewModel.select(com.posfab.shared.features.shell.ShellRoute.CASH) },
                     )
                 }
-                val config: PosConfig = koin.get()
                 val cashViewModel = remember(screen.session) {
                     CashSessionViewModel(
-                        terminalId = config.terminalId,
-                        businessUnitId = config.businessUnitId,
+                        terminalId = device.terminalId,
+                        businessUnitId = device.businessUnitId,
                         cashUseCases = koin.get<CashUseCases>(),
                         onNavigateToPos = { shellViewModel.select(com.posfab.shared.features.shell.ShellRoute.POS) },
                     )

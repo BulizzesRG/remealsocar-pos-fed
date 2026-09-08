@@ -7,7 +7,6 @@ import com.posfab.shared.auth.refresh.AuthorizedApiExecutor
 import com.posfab.shared.auth.repository.AuthRepository
 import com.posfab.shared.auth.session.InMemorySessionStorage
 import com.posfab.shared.auth.session.SessionManager
-import com.posfab.shared.core.model.TerminalCode
 import com.posfab.shared.core.model.UserRole
 import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
@@ -26,7 +25,7 @@ class AuthorizedApiExecutorTest {
             UserSession(
                 tokens = AuthTokens("old-access", "refresh-1"),
                 user = AuthUser("u1", "cashier", setOf(UserRole.CASHIER)),
-                terminal = TerminalCode.POS1,
+                terminalCode = "POS1",
             )
         )
 
@@ -60,12 +59,12 @@ class AuthorizedApiExecutorTest {
             UserSession(
                 tokens = AuthTokens("old-access", "refresh-1"),
                 user = AuthUser("u1", "cashier", setOf(UserRole.CASHIER)),
-                terminal = TerminalCode.POS1,
+                terminalCode = "POS1",
             )
         )
 
         val repo = object : AuthRepository {
-            override suspend fun login(username: String, password: String, terminal: TerminalCode) =
+            override suspend fun login(username: String, password: String, terminalCode: String) =
                 AppResult.Failure(AppError.Unknown("n/a"))
 
             override suspend fun refresh(refreshTokenOverride: String?) =
@@ -85,7 +84,7 @@ class AuthorizedApiExecutorTest {
     private class FakeAuthRepository(
         private val manager: SessionManager,
     ) : AuthRepository {
-        override suspend fun login(username: String, password: String, terminal: TerminalCode): AppResult<UserSession> {
+        override suspend fun login(username: String, password: String, terminalCode: String): AppResult<UserSession> {
             return AppResult.Failure(AppError.Unknown("Not needed"))
         }
 

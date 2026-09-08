@@ -25,7 +25,7 @@ class DailyHistoryViewModel(
 
     private val _state = kotlinx.coroutines.flow.MutableStateFlow(
         DailyHistoryState(
-            terminalId = session.terminal.name,
+            terminalId = session.terminalCode,
             canSwitchTerminal = canSwitchTerminal,
             dateInput = defaultDate,
             isLoadingSales = true,
@@ -49,8 +49,8 @@ class DailyHistoryViewModel(
         val normalized = value.trim().uppercase()
         if (normalized.isBlank()) return
 
-        if (!canSwitchTerminal && normalized != session.terminal.name) {
-            _state.value = _state.value.copy(notice = "Perfil CAJERO: terminal fija ${session.terminal.name}")
+        if (!canSwitchTerminal && normalized != session.terminalCode) {
+            _state.value = _state.value.copy(notice = "Perfil CAJERO: terminal fija ${session.terminalCode}")
             return
         }
 

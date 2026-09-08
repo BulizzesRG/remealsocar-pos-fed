@@ -1,7 +1,6 @@
 package com.posfab.shared.features.shell
 
 import com.posfab.shared.auth.domain.UserSession
-import com.posfab.shared.core.model.TerminalCode
 
 object RouteGuard {
     fun canAccess(session: UserSession, route: ShellRoute): Boolean {
@@ -9,7 +8,7 @@ object RouteGuard {
         if (!hasRole) return false
 
         return when (route) {
-            ShellRoute.ADMIN -> session.terminal == TerminalCode.ADMIN
+            ShellRoute.ADMIN -> session.terminalType == "ADMIN"
             else -> true
         }
     }

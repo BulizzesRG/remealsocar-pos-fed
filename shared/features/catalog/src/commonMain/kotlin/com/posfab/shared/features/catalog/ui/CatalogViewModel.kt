@@ -76,12 +76,13 @@ class CatalogViewModel(
                 )
             ) {
                 is AppResult.Success -> {
+                    val emptyNotice = if (result.value.items.isEmpty()) "Sin productos para el filtro actual" else null
                     _state.value = _state.value.copy(
                         isLoadingList = false,
                         products = result.value.items,
                         total = result.value.total,
                         offset = result.value.offset,
-                        notice = if (result.value.items.isEmpty()) "Sin productos para el filtro actual" else null,
+                        notice = emptyNotice ?: _state.value.notice,
                     )
                 }
                 is AppResult.Failure -> {
@@ -121,6 +122,7 @@ class CatalogViewModel(
             newUomUnit = defaultUnit,
             newUomFactorInput = "1",
             newPriceInput = "",
+            showAdvancedFields = false,
             notice = null,
             errorMessage = null,
         )
@@ -141,8 +143,29 @@ class CatalogViewModel(
     fun onFormSkuChange(value: String) = updateForm { copy(sku = value) }
     fun onFormBarcodeChange(value: String) = updateForm { copy(barcode = value) }
     fun onFormBaseUnitChange(value: String) = updateForm { copy(baseUnit = value) }
-    fun onFormLotTrackedChange(value: Boolean) = updateForm { copy(lotTracked = value) }
     fun onFormActiveChange(value: Boolean) = updateForm { copy(active = value) }
+    fun onFormInitialPriceChange(value: String) = updateForm { copy(initialPrice = value) }
+
+    fun onFormLotTrackedChange(value: Boolean) {
+        if (value && !_state.value.form.lotTracked) {
+            _state.value = _state.value.copy(showLotTrackingWarning = true)
+        } else {
+            updateForm { copy(lotTracked = value) }
+        }
+    }
+
+    fun confirmLotTracking() {
+        _state.value = _state.value.copy(showLotTrackingWarning = false)
+        updateForm { copy(lotTracked = true) }
+    }
+
+    fun dismissLotTrackingWarning() {
+        _state.value = _state.value.copy(showLotTrackingWarning = false)
+    }
+
+    fun toggleAdvancedFields() {
+        _state.value = _state.value.copy(showAdvancedFields = !_state.value.showAdvancedFields)
+    }
 
     fun saveProduct() {
         val snapshot = _state.value
@@ -182,11 +205,38 @@ class CatalogViewModel(
 
             when (result) {
                 is AppResult.Success -> {
-                    applySelectedProduct(result.value)
-                    _state.value = _state.value.copy(
-                        isSaving = false,
-                        notice = if (snapshot.selectedProduct == null) "Producto creado" else "Producto actualizado",
-                    )
+                    val isCreating = snapshot.selectedProduct == null
+                    val parsedPrice = form.initialPrice.toDoubleOrNull()
+
+                    if (isCreating && parsedPrice != null && parsedPrice > 0.0) {
+                        when (useCases.repository.addPrice(result.value.id, parsedPrice)) {
+                            is AppResult.Success -> {
+                                // Refresh product to get updated price
+                                when (val refreshed = useCases.repository.getProduct(result.value.id)) {
+                                    is AppResult.Success -> applySelectedProduct(refreshed.value)
+                                    is AppResult.Failure -> applySelectedProduct(result.value)
+                                }
+                                _state.value = _state.value.copy(
+                                    isSaving = false,
+                                    notice = "Producto creado con precio $${"%.2f".format(parsedPrice)}",
+                                )
+                            }
+                            is AppResult.Failure -> {
+                                applySelectedProduct(result.value)
+                                _state.value = _state.value.copy(
+                                    isSaving = false,
+                                    notice = "Producto creado",
+                                    errorMessage = "No se pudo registrar el precio. Registralo manualmente.",
+                                )
+                            }
+                        }
+                    } else {
+                        applySelectedProduct(result.value)
+                        _state.value = _state.value.copy(
+                            isSaving = false,
+                            notice = if (isCreating) "Producto creado" else "Producto actualizado",
+                        )
+                    }
                     refreshList(resetOffset = false)
                 }
                 is AppResult.Failure -> {
@@ -298,16 +348,100 @@ class CatalogViewModel(
             when (val result = useCases.repository.findByBarcode(barcode)) {
                 is AppResult.Success -> {
                     val detail = result.value
-                    _state.value = _state.value.copy(
-                        isSaving = false,
-                        barcodeCheckResult = detail?.toSummary(),
-                        notice = if (detail == null) "Codigo no encontrado" else "Codigo encontrado: ${detail.name}",
-                    )
+                    if (detail != null) {
+                        applySelectedProduct(detail)
+                        _state.value = _state.value.copy(
+                            isSaving = false,
+                            barcodeCheckInput = "",
+                            barcodeCheckResult = detail.toSummary(),
+                            notice = "Producto encontrado: ${detail.name}",
+                        )
+                    } else {
+                        _state.value = _state.value.copy(
+                            isSaving = false,
+                            barcodeCheckResult = null,
+                            notice = "Codigo de barras no encontrado",
+                        )
+                    }
                 }
                 is AppResult.Failure -> {
                     _state.value = _state.value.copy(
                         isSaving = false,
                         errorMessage = CatalogErrorText.from(result.error),
+                    )
+                }
+            }
+        }
+    }
+
+    // ── Quick-add dialog ──
+
+    fun openQuickAdd() {
+        val defaultUnit = _state.value.units.firstOrNull()?.code ?: "EA"
+        _state.value = _state.value.copy(
+            showQuickAddDialog = true,
+            quickAddName = "",
+            quickAddPrice = "",
+            quickAddUnit = defaultUnit,
+            errorMessage = null,
+        )
+    }
+
+    fun closeQuickAdd() {
+        _state.value = _state.value.copy(showQuickAddDialog = false, errorMessage = null)
+    }
+
+    fun onQuickAddNameChange(value: String) {
+        _state.value = _state.value.copy(quickAddName = value)
+    }
+
+    fun onQuickAddPriceChange(value: String) {
+        _state.value = _state.value.copy(quickAddPrice = value)
+    }
+
+    fun onQuickAddUnitChange(value: String) {
+        _state.value = _state.value.copy(quickAddUnit = value)
+    }
+
+    fun submitQuickAdd() {
+        val s = _state.value
+        val name = s.quickAddName.trim()
+        if (name.isEmpty()) {
+            _state.value = s.copy(errorMessage = "Nombre requerido")
+            return
+        }
+        val price = s.quickAddPrice.toDoubleOrNull()
+        if (price == null || price <= 0.0) {
+            _state.value = s.copy(errorMessage = "Precio invalido")
+            return
+        }
+        scope.launch {
+            _state.value = _state.value.copy(isQuickAdding = true, errorMessage = null)
+            val createResult = useCases.repository.createProduct(
+                CreateProductInput(
+                    name = name,
+                    sku = null,
+                    barcode = null,
+                    baseUnit = s.quickAddUnit,
+                    lotTracked = false,
+                    active = true,
+                )
+            )
+            when (createResult) {
+                is AppResult.Success -> {
+                    useCases.repository.addPrice(createResult.value.id, price)
+                    _state.value = _state.value.copy(
+                        isQuickAdding = false,
+                        showQuickAddDialog = false,
+                        notice = "Producto \"$name\" creado con precio $${"%.2f".format(price)}",
+                        errorMessage = null,
+                    )
+                    refreshList(resetOffset = false)
+                }
+                is AppResult.Failure -> {
+                    _state.value = _state.value.copy(
+                        isQuickAdding = false,
+                        errorMessage = CatalogErrorText.from(createResult.error),
                     )
                 }
             }

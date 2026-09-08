@@ -6,7 +6,6 @@ import com.posfab.shared.auth.session.SessionManager
 import com.posfab.shared.config.PosConfig
 import com.posfab.shared.config.PosEnv
 import com.posfab.shared.core.logging.LogLevel
-import com.posfab.shared.core.model.TerminalCode
 import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
 import com.posfab.shared.network.auth.AuthApiClient
@@ -31,8 +30,6 @@ class AuthRepositoryTest {
         logLevel = LogLevel.DEBUG,
         requestTimeoutMs = 5_000,
         enableVerboseLogs = false,
-        terminalId = 1L,
-        businessUnitId = 1L,
     )
 
     @Test
@@ -55,7 +52,7 @@ class AuthRepositoryTest {
         val api = AuthApiClient(httpClient(engine), config)
         val repo = AuthRepositoryImpl(api, SessionManager(InMemorySessionStorage()))
 
-        val result = repo.login("alice", "pw", TerminalCode.POS1)
+        val result = repo.login("alice", "pw", "POS1")
 
         val success = assertIs<AppResult.Success<*>>(result)
         assertEquals("alice", (success.value as com.posfab.shared.auth.domain.UserSession).user.username)
@@ -73,7 +70,7 @@ class AuthRepositoryTest {
         val api = AuthApiClient(httpClient(engine), config)
         val repo = AuthRepositoryImpl(api, SessionManager(InMemorySessionStorage()))
 
-        val result = repo.login("alice", "bad", TerminalCode.POS1)
+        val result = repo.login("alice", "bad", "POS1")
 
         val failure = assertIs<AppResult.Failure>(result)
         assertIs<AppError.Unauthorized>(failure.error)

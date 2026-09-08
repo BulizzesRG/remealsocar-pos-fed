@@ -31,8 +31,8 @@ class OperationsViewModel(
         OperationsState(
             canManageOperations = roles.any { it == UserRole.ADMIN || it == UserRole.MANAGER },
             canManageWasteAdjustments = roles.contains(UserRole.MANAGER),
-            terminalId = session.terminal.name,
-            purchasePaidFromTerminalId = session.terminal.name,
+            terminalId = session.terminalCode,
+            purchasePaidFromTerminalId = session.terminalCode,
         )
     )
     val state: StateFlow<OperationsState> = _state.asStateFlow()

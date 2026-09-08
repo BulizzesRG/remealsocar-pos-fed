@@ -4,73 +4,110 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
 
-val PosRed900 = Color(0xFF7B1A0F)
-val PosRed700 = Color(0xFFB5290E)
-val PosRed500 = Color(0xFFD94A2B)
-val PosRed100 = Color(0xFFFFDAD6)
+// ─── Primary: Amber-Gold (money, warmth, trust) ─────────────────────────────
+val PosAmberPrimary = Color(0xFFC4882A)
+val PosAmberOnPrimary = Color(0xFF1A0F00)
+val PosAmberPrimaryContainer = Color(0xFF3D2A0A)
+val PosAmberOnPrimaryContainer = Color(0xFFFFD8A8)
 
-val PosAmber800 = Color(0xFF5C3D00)
-val PosAmber600 = Color(0xFF8B5E00)
-val PosAmber200 = Color(0xFFFFDFA0)
-val PosAmber50 = Color(0xFFFFF8E1)
+// ─── Secondary: Muted sienna ─────────────────────────────────────────────────
+val PosSienna = Color(0xFFE8C88A)
+val PosSiennaOn = Color(0xFF1A0F00)
+val PosSiennaContainer = Color(0xFF2E2010)
+val PosSiennaOnContainer = Color(0xFFE8C88A)
 
-val PosGreen800 = Color(0xFF1B4D1F)
-val PosGreen600 = Color(0xFF2E7D32)
-val PosGreen200 = Color(0xFFA5D6A7)
+// ─── Tertiary: Forest green (success, active) ────────────────────────────────
+val PosGreen = Color(0xFFB0D4A8)
+val PosGreenOn = Color(0xFF00180A)
+val PosGreenContainer = Color(0xFF1A3A1A)
+val PosGreenOnContainer = Color(0xFFB0D4A8)
 
-val PosNeutral950 = Color(0xFF0F0D0C)
-val PosNeutral900 = Color(0xFF1A1714)
-val PosNeutral800 = Color(0xFF2A2522)
-val PosNeutral700 = Color(0xFF3D3733)
-val PosNeutral300 = Color(0xFFB0A89E)
-val PosNeutral100 = Color(0xFFF0EBE6)
+// ─── Error: Warm rose-red (distinct from primary amber) ──────────────────────
+val PosError = Color(0xFFCF6679)
+val PosErrorOn = Color(0xFF1A0008)
+val PosErrorContainer = Color(0xFF3D0015)
+val PosErrorOnContainer = Color(0xFFFFB3C0)
 
-val PosError = Color(0xFFFF6B6B)
+// ─── Neutrals: Warm dark tones with adequate step separation ─────────────────
+val PosNeutral950 = Color(0xFF0F0D0C)    // background
+val PosNeutral900 = Color(0xFF1C1917)    // surface (cards, panels)
+val PosNeutral850 = Color(0xFF262220)    // surfaceVariant, surfaceContainer
+val PosNeutral800 = Color(0xFF312C29)    // surfaceContainerHigh
+val PosNeutral750 = Color(0xFF3D3733)    // surfaceContainerHighest
+
+// ─── Text ────────────────────────────────────────────────────────────────────
+val PosTextPrimary = Color(0xFFF0E8DF)   // warm off-white, no halation
+val PosTextSecondary = Color(0xFFC4B8AE) // secondary text
+
+// ─── Outlines: WCAG 1.4.11 compliant (3:1+ against surface) ─────────────────
+val PosOutline = Color(0xFF6B6560)       // input borders, dividers
+val PosOutlineVariant = Color(0xFF4D4845) // subtle dividers
 
 val PosDarkColorScheme = darkColorScheme(
-    primary = PosRed500,
-    onPrimary = Color.White,
-    primaryContainer = PosRed900,
-    onPrimaryContainer = PosRed100,
-    secondary = PosAmber200,
-    onSecondary = PosAmber800,
-    secondaryContainer = PosAmber800,
-    onSecondaryContainer = PosAmber200,
-    tertiary = PosGreen200,
-    onTertiary = PosGreen800,
-    tertiaryContainer = PosGreen800,
-    onTertiaryContainer = PosGreen200,
+    // Primary — amber-gold
+    primary = PosAmberPrimary,
+    onPrimary = PosAmberOnPrimary,
+    primaryContainer = PosAmberPrimaryContainer,
+    onPrimaryContainer = PosAmberOnPrimaryContainer,
+
+    // Secondary
+    secondary = PosSienna,
+    onSecondary = PosSiennaOn,
+    secondaryContainer = PosSiennaContainer,
+    onSecondaryContainer = PosSiennaOnContainer,
+
+    // Tertiary
+    tertiary = PosGreen,
+    onTertiary = PosGreenOn,
+    tertiaryContainer = PosGreenContainer,
+    onTertiaryContainer = PosGreenOnContainer,
+
+    // Error
     error = PosError,
-    onError = Color(0xFF690005),
-    errorContainer = Color(0xFF93000A),
-    onErrorContainer = Color(0xFFFFDAD6),
+    onError = PosErrorOn,
+    errorContainer = PosErrorContainer,
+    onErrorContainer = PosErrorOnContainer,
+
+    // Background & Surface hierarchy
     background = PosNeutral950,
-    onBackground = PosNeutral100,
+    onBackground = PosTextPrimary,
     surface = PosNeutral900,
-    onSurface = PosNeutral100,
-    surfaceVariant = PosNeutral800,
-    onSurfaceVariant = PosNeutral300,
+    onSurface = PosTextPrimary,
+    surfaceVariant = PosNeutral850,
+    onSurfaceVariant = PosTextSecondary,
+    surfaceTint = PosAmberPrimary,
+
+    // Surface container levels (prevents M3 purple defaults)
     surfaceDim = PosNeutral950,
     surfaceBright = Color(0xFF3A3531),
     surfaceContainerLowest = Color(0xFF0A0807),
     surfaceContainerLow = PosNeutral900,
-    surfaceContainer = Color(0xFF221E1B),
+    surfaceContainer = PosNeutral850,
     surfaceContainerHigh = PosNeutral800,
-    surfaceContainerHighest = Color(0xFF35302C),
-    outline = PosNeutral700,
-    outlineVariant = Color(0xFF524A46),
+    surfaceContainerHighest = PosNeutral750,
+
+    // Outlines — visible input borders
+    outline = PosOutline,
+    outlineVariant = PosOutlineVariant,
+
+    // Inverse (snackbars, tooltips)
+    inverseSurface = PosTextPrimary,
+    inverseOnSurface = PosNeutral900,
+    inversePrimary = Color(0xFF8C5A10),
+
+    scrim = Color.Black,
 )
 
 val PosLightColorScheme = lightColorScheme(
-    primary = PosRed700,
+    primary = Color(0xFF8C5A10),
     onPrimary = Color.White,
-    primaryContainer = PosRed100,
-    onPrimaryContainer = PosRed900,
-    secondary = PosAmber600,
+    primaryContainer = Color(0xFFFFDFA0),
+    onPrimaryContainer = Color(0xFF3D2A0A),
+    secondary = Color(0xFF6B5330),
     onSecondary = Color.White,
-    secondaryContainer = PosAmber50,
-    onSecondaryContainer = PosAmber800,
-    tertiary = PosGreen600,
+    secondaryContainer = Color(0xFFFFF8E1),
+    onSecondaryContainer = Color(0xFF2E2010),
+    tertiary = Color(0xFF2E7D32),
     onTertiary = Color.White,
     background = Color(0xFFFFF8F5),
     onBackground = Color(0xFF1A0A07),

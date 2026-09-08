@@ -4,7 +4,6 @@ import com.posfab.shared.auth.domain.AuthTokens
 import com.posfab.shared.auth.domain.AuthUser
 import com.posfab.shared.auth.domain.UserSession
 import com.posfab.shared.auth.session.SessionManager
-import com.posfab.shared.core.model.TerminalCode
 import com.posfab.shared.core.model.UserRole
 import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
@@ -15,7 +14,7 @@ import com.posfab.shared.network.auth.LogoutRequestDto
 import com.posfab.shared.network.auth.RefreshRequestDto
 
 interface AuthRepository {
-    suspend fun login(username: String, password: String, terminal: TerminalCode): AppResult<UserSession>
+    suspend fun login(username: String, password: String, terminalCode: String): AppResult<UserSession>
     suspend fun refresh(refreshTokenOverride: String? = null): AppResult<UserSession>
     suspend fun restoreSession(): AppResult<UserSession?>
     suspend fun logout(): AppResult<Unit>
@@ -25,12 +24,12 @@ class AuthRepositoryImpl(
     private val authApi: AuthApi,
     private val sessionManager: SessionManager,
 ) : AuthRepository {
-    override suspend fun login(username: String, password: String, terminal: TerminalCode): AppResult<UserSession> {
+    override suspend fun login(username: String, password: String, terminalCode: String): AppResult<UserSession> {
         val response = authApi.login(
             LoginRequestDto(
                 username = username,
                 password = password,
-                terminalCode = terminal.name,
+                terminalCode = terminalCode,
             )
         )
 
@@ -109,7 +108,8 @@ class AuthRepositoryImpl(
                 username = user.fullName,
                 roles = setOfNotNull(UserRole.fromRaw(user.role)),
             ),
-            terminal = TerminalCode.fromRaw(terminal.code) ?: TerminalCode.POS1,
+            terminalCode = terminal.code,
+            terminalType = if (terminal.code.equals("ADMIN", ignoreCase = true)) "ADMIN" else "POS",
         )
     }
 }

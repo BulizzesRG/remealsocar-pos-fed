@@ -1,6 +1,5 @@
 package com.posfab.shared.auth.domain
 
-import com.posfab.shared.core.model.TerminalCode
 import com.posfab.shared.core.model.UserRole
 import kotlinx.serialization.Serializable
 
@@ -21,5 +20,6 @@ data class AuthUser(
 data class UserSession(
     val tokens: AuthTokens,
     val user: AuthUser,
-    val terminal: TerminalCode,
+    val terminalCode: String = "",
+    val terminalType: String = "POS",
 )

@@ -5,7 +5,6 @@ import com.posfab.shared.auth.domain.AuthUser
 import com.posfab.shared.auth.domain.UserSession
 import com.posfab.shared.auth.repository.AuthRepository
 import com.posfab.shared.auth.usecase.LoginUseCase
-import com.posfab.shared.core.model.TerminalCode
 import com.posfab.shared.core.model.UserRole
 import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
@@ -48,7 +47,7 @@ class StoreRolloutSmokeTest {
         val sale = SaleUseCases(backend)
         val reports = ReportsUseCases(backend, backend)
 
-        val cashierSession = (login("cashier", "pwd", TerminalCode.POS1) as AppResult.Success).value
+        val cashierSession = (login("cashier", "pwd", "POS1") as AppResult.Success).value
         assertTrue(cashierSession.user.roles.contains(UserRole.CASHIER))
 
         val opened = cash.open(1L, 1L, 1000.0)
@@ -73,7 +72,7 @@ class StoreRolloutSmokeTest {
         val closed = cash.close(1L, 1060.0)
         assertIs<AppResult.Success<CashSession>>(closed)
 
-        val managerSession = (login("manager", "pwd", TerminalCode.ADMIN) as AppResult.Success).value
+        val managerSession = (login("manager", "pwd", "ADMIN") as AppResult.Success).value
         assertTrue(managerSession.user.roles.contains(UserRole.MANAGER))
 
         val integrity = reports.managerRepository.integrityCheck()
@@ -138,13 +137,14 @@ private class FakeStoreBackend :
         lotTracked = true,
     )
 
-    override suspend fun login(username: String, password: String, terminal: TerminalCode): AppResult<UserSession> {
+    override suspend fun login(username: String, password: String, terminalCode: String): AppResult<UserSession> {
         val roles = if (username == "manager") setOf(UserRole.MANAGER) else setOf(UserRole.CASHIER)
         return AppResult.Success(
             UserSession(
                 tokens = AuthTokens("access-$username", "refresh-$username"),
                 user = AuthUser("u-$username", username, roles),
-                terminal = terminal,
+                terminalCode = terminalCode,
+                terminalType = if (terminalCode.equals("ADMIN", ignoreCase = true)) "ADMIN" else "POS",
             )
         )
     }

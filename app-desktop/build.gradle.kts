@@ -15,6 +15,7 @@ kotlin {
             implementation(project(":shared:network"))
             implementation(project(":shared:auth"))
             implementation(project(":shared:features:login"))
+            implementation(project(":shared:features:device-setup"))
             implementation(project(":shared:features:shell"))
             implementation(project(":shared:features:sale"))
             implementation(project(":shared:features:cash"))

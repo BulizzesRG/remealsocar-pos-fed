@@ -25,7 +25,7 @@ class DiagnosticsViewModel(
             appBuild = buildInfo.build,
             environment = config.env.name.lowercase(),
             apiBaseUrl = config.apiBaseUrl,
-            terminal = session.terminal.name,
+            terminal = session.terminalCode,
             username = session.user.username,
             roles = session.user.roles.joinToString(",") { it.name },
         )

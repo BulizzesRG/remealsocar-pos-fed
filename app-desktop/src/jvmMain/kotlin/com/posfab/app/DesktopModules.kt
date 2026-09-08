@@ -10,6 +10,7 @@ import com.posfab.shared.auth.usecase.LoginUseCase
 import com.posfab.shared.auth.usecase.LogoutUseCase
 import com.posfab.shared.auth.usecase.RestoreSessionUseCase
 import com.posfab.shared.config.PosConfig
+import com.posfab.shared.core.device.DeviceStorage
 import com.posfab.shared.core.diagnostics.AppBuildInfo
 import com.posfab.shared.features.catalog.common.CatalogUseCases
 import com.posfab.shared.features.catalog.repository.CatalogRepository
@@ -38,6 +39,8 @@ import com.posfab.shared.network.catalog.CatalogApi
 import com.posfab.shared.network.catalog.CatalogApiClient
 import com.posfab.shared.network.cash.CashApi
 import com.posfab.shared.network.cash.CashApiClient
+import com.posfab.shared.network.device.DeviceApi
+import com.posfab.shared.network.device.DeviceApiClient
 import com.posfab.shared.network.http.HttpClientFactory
 import com.posfab.shared.network.operations.OperationsApi
 import com.posfab.shared.network.operations.OperationsApiClient
@@ -62,6 +65,10 @@ fun desktopModule(config: PosConfig): Module = module {
         val home = System.getProperty("user.home")
         DesktopSessionStorage(Paths.get(home, ".pos-fab-fed", "session.json")) as SessionStorage
     }
+    single<DeviceStorage> {
+        val home = System.getProperty("user.home")
+        DesktopDeviceStorage(Paths.get(home, ".pos-fab-fed", "device.json"))
+    }
     single<SaleUiStateStore> {
         val home = System.getProperty("user.home")
         DesktopSaleUiStateStore(Paths.get(home, ".pos-fab-fed", "sale-ui-state.json"))
@@ -76,10 +83,13 @@ fun desktopModule(config: PosConfig): Module = module {
     single<OperationsApi> { OperationsApiClient(get(), get()) }
     single<CashApi> { CashApiClient(get(), get()) }
     single<ReportsApi> { ReportsApiClient(get(), get()) }
+    single<DeviceApi> { DeviceApiClient(get(), get()) }
     single<AuthRepository> { AuthRepositoryImpl(get(), get()) }
-    single<SaleRepository> {
-        val cfg = get<PosConfig>()
-        SaleRepositoryImpl(get<PosApi>(), get<CatalogApi>(), cfg.terminalId, cfg.businessUnitId, get())
+    factory<SaleRepository> {
+        val controller = get<AppStateController>()
+        val device = controller.deviceRegistration.value
+            ?: error("SaleRepository created before device registration")
+        SaleRepositoryImpl(get<PosApi>(), get<CatalogApi>(), device.terminalId, device.businessUnitId, get())
     }
     single<CatalogRepository> { CatalogRepositoryImpl(get(), get()) }
     single<OperationsRepository> { OperationsRepositoryImpl(get(), get()) }
@@ -96,5 +106,5 @@ fun desktopModule(config: PosConfig): Module = module {
     single { CashUseCases(get()) }
     single { ReportsUseCases(get(), get()) }
     single { AuthorizedApiExecutor(get(), get()) }
-    single { AppStateController(get(), get()) }
+    single { AppStateController(get(), get(), get(), get()) }
 }

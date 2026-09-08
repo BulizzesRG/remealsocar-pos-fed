@@ -19,6 +19,7 @@ data class ProductFormState(
     val baseUnit: String = "EA",
     val lotTracked: Boolean = false,
     val active: Boolean = true,
+    val initialPrice: String = "",
 )
 
 data class CatalogState(
@@ -44,7 +45,20 @@ data class CatalogState(
     val barcodeCheckResult: CatalogProductSummary? = null,
     val notice: String? = null,
     val errorMessage: String? = null,
+    val showQuickAddDialog: Boolean = false,
+    val quickAddName: String = "",
+    val quickAddPrice: String = "",
+    val quickAddUnit: String = "EA",
+    val isQuickAdding: Boolean = false,
+    val showLotTrackingWarning: Boolean = false,
+    val showAdvancedFields: Boolean = false,
 ) {
     val canGoPrevPage: Boolean get() = offset > 0
     val canGoNextPage: Boolean get() = (offset + products.size) < total
+    val paginationText: String get() {
+        if (total == 0) return "Sin resultados"
+        val first = offset + 1
+        val last = (offset + products.size).coerceAtMost(total)
+        return "Mostrando $first\u2013$last de $total productos"
+    }
 }

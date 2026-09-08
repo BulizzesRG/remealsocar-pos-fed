@@ -127,7 +127,7 @@ fun ShellScreen(
                                 style = MaterialTheme.typography.labelLarge,
                             )
                             Text(
-                                text = "Terminal: ${state.session.terminal}",
+                                text = "Terminal: ${state.session.terminalCode}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )

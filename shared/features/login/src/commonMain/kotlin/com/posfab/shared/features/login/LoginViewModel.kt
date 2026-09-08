@@ -3,8 +3,10 @@ package com.posfab.shared.features.login
 import com.posfab.shared.auth.domain.UserSession
 import com.posfab.shared.auth.usecase.LoginUseCase
 import com.posfab.shared.core.BaseViewModel
-import com.posfab.shared.core.model.TerminalCode
+import com.posfab.shared.core.model.DeviceRegistration
 import com.posfab.shared.core.result.AppResult
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -14,8 +16,10 @@ import kotlinx.coroutines.launch
 
 class LoginViewModel(
     private val loginUseCase: LoginUseCase,
-) : BaseViewModel() {
-    private val _state = MutableStateFlow(LoginState())
+    private val deviceRegistration: DeviceRegistration,
+    dispatcher: CoroutineDispatcher = Dispatchers.Default,
+) : BaseViewModel(dispatcher) {
+    private val _state = MutableStateFlow(LoginState(terminalCode = deviceRegistration.terminalCode))
     val state: StateFlow<LoginState> = _state.asStateFlow()
 
     private val _loggedIn = MutableSharedFlow<UserSession>()
@@ -29,26 +33,22 @@ class LoginViewModel(
         _state.value = _state.value.copy(password = value)
     }
 
-    fun onTerminalChange(value: TerminalCode) {
-        _state.value = _state.value.copy(terminal = value)
-    }
-
     fun submit() {
         val snapshot = _state.value
         if (snapshot.username.isBlank() || snapshot.password.isBlank()) {
-            _state.value = snapshot.copy(error = "Username and password are required")
+            _state.value = snapshot.copy(error = LoginStrings.ERROR_EMPTY_CREDS)
             return
         }
 
         scope.launch {
             _state.value = _state.value.copy(isLoading = true, error = null)
-            when (val result = loginUseCase(snapshot.username.trim(), snapshot.password, snapshot.terminal)) {
+            when (val result = loginUseCase(snapshot.username.trim(), snapshot.password, deviceRegistration.terminalCode)) {
                 is AppResult.Success -> {
                     _state.value = _state.value.copy(isLoading = false, error = null)
                     _loggedIn.emit(result.value)
                 }
                 is AppResult.Failure -> {
-                    _state.value = _state.value.copy(isLoading = false, error = result.error.toString())
+                    _state.value = _state.value.copy(isLoading = false, error = LoginErrorText.from(result.error))
                 }
             }
         }

@@ -3,7 +3,6 @@ package com.posfab.shared.features.reports
 import com.posfab.shared.auth.domain.AuthTokens
 import com.posfab.shared.auth.domain.AuthUser
 import com.posfab.shared.auth.domain.UserSession
-import com.posfab.shared.core.model.TerminalCode
 import com.posfab.shared.core.model.UserRole
 import com.posfab.shared.core.result.AppResult
 import com.posfab.shared.features.cash.domain.DailyCashReport
@@ -56,7 +55,7 @@ class DailyHistoryViewModelTest {
     private fun cashierSession() = UserSession(
         tokens = AuthTokens("a", "r"),
         user = AuthUser("u1", "cashier", setOf(UserRole.CASHIER)),
-        terminal = TerminalCode.POS1,
+        terminalCode = "POS1",
     )
 }
 
