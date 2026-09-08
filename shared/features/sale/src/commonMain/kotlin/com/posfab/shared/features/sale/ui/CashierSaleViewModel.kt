@@ -2,6 +2,7 @@ package com.posfab.shared.features.sale.ui
 
 import com.posfab.shared.core.BaseViewModel
 import com.posfab.shared.core.logging.AppLogger
+import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
 import com.posfab.shared.features.sale.domain.CheckoutMode
 import com.posfab.shared.features.sale.domain.SaleDraft
@@ -347,9 +348,12 @@ class CashierSaleViewModel(
                     runHardwareHooks(result.value, draft.lines)
                 }
                 is AppResult.Failure -> {
+                    // On a network failure the server may have processed the request: keep the same
+                    // Idempotency-Key so the retry replays instead of creating a second sale.
+                    val keepKey = result.error is AppError.Network
                     _state.value = _state.value.copy(
                         isCheckoutInFlight = false,
-                        checkoutIdempotencyKey = null,
+                        checkoutIdempotencyKey = if (keepKey) checkoutKey else null,
                         errorMessage = SaleErrorText.from(result.error),
                     )
                 }

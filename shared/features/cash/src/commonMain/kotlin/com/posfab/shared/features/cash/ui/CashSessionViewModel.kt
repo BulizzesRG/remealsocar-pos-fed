@@ -50,23 +50,26 @@ class CashSessionViewModel(
     }
 
     fun refreshCurrentSession() {
-        scope.launch {
-            _state.value = _state.value.copy(isLoading = true, errorMessage = null)
-            when (val result = cashUseCases.current(terminalId)) {
-                is AppResult.Success -> {
-                    val existingNotice = _state.value.notice
-                    _state.value = _state.value.copy(
-                        isLoading = false,
-                        currentSession = result.value,
-                        notice = if (result.value == null) "No hay sesion abierta" else existingNotice,
-                    )
-                }
-                is AppResult.Failure -> {
-                    _state.value = _state.value.copy(
-                        isLoading = false,
-                        errorMessage = CashErrorText.from(result.error),
-                    )
-                }
+        scope.launch { loadCurrentSession() }
+    }
+
+    /** Loads the current session and waits for it, so callers can set a notice afterwards without being overwritten. */
+    private suspend fun loadCurrentSession() {
+        _state.value = _state.value.copy(isLoading = true, errorMessage = null)
+        when (val result = cashUseCases.current(terminalId)) {
+            is AppResult.Success -> {
+                val existingNotice = _state.value.notice
+                _state.value = _state.value.copy(
+                    isLoading = false,
+                    currentSession = result.value,
+                    notice = if (result.value == null) "No hay sesion abierta" else existingNotice,
+                )
+            }
+            is AppResult.Failure -> {
+                _state.value = _state.value.copy(
+                    isLoading = false,
+                    errorMessage = CashErrorText.from(result.error),
+                )
             }
         }
     }
@@ -93,7 +96,7 @@ class CashSessionViewModel(
                 }
                 is AppResult.Failure -> {
                     if (result.error is AppError.Conflict) {
-                        refreshCurrentSession()
+                        loadCurrentSession()
                         _state.value = _state.value.copy(
                             isOpenSubmitting = false,
                             notice = "La caja ya estaba abierta. Estado actualizado.",
@@ -162,7 +165,7 @@ class CashSessionViewModel(
                 }
                 is AppResult.Failure -> {
                     if (result.error is AppError.Conflict) {
-                        refreshCurrentSession()
+                        loadCurrentSession()
                         _state.value = _state.value.copy(
                             isCloseSubmitting = false,
                             notice = "La sesion ya estaba cerrada o cambio de estado. Se recargo.",

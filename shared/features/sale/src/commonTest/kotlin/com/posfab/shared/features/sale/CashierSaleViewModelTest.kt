@@ -31,6 +31,7 @@ class CashierSaleViewModelTest {
     fun add_edit_remove_line_updates_state() = runTest(dispatcher) {
         val repo = FakeSaleRepository()
         val vm = CashierSaleViewModel(SaleUseCases(repo), dispatcher = dispatcher)
+        vm.retryCashSessionCheck() // the screen triggers the initial load on first composition
         advanceUntilIdle()
 
         vm.addProduct(repo.searchPool.first())
@@ -52,6 +53,7 @@ class CashierSaleViewModelTest {
     fun conflict_update_triggers_refetch_notice() = runTest(dispatcher) {
         val repo = FakeSaleRepository()
         val vm = CashierSaleViewModel(SaleUseCases(repo), dispatcher = dispatcher)
+        vm.retryCashSessionCheck() // the screen triggers the initial load on first composition
         advanceUntilIdle()
 
         vm.addProduct(repo.searchPool.first())
@@ -70,6 +72,7 @@ class CashierSaleViewModelTest {
     fun checkout_double_click_sends_one_effective_finalize() = runTest(dispatcher) {
         val repo = FakeSaleRepository(checkoutDelayMs = 50)
         val vm = CashierSaleViewModel(SaleUseCases(repo), dispatcher = dispatcher)
+        vm.retryCashSessionCheck() // the screen triggers the initial load on first composition
         advanceUntilIdle()
 
         vm.addProduct(repo.searchPool.first())
@@ -88,6 +91,7 @@ class CashierSaleViewModelTest {
     fun barcode_lookup_populates_line() = runTest(dispatcher) {
         val repo = FakeSaleRepository()
         val vm = CashierSaleViewModel(SaleUseCases(repo), dispatcher = dispatcher)
+        vm.retryCashSessionCheck() // the screen triggers the initial load on first composition
         advanceUntilIdle()
 
         vm.onBarcodeChange("7501000100015")
@@ -102,6 +106,7 @@ class CashierSaleViewModelTest {
     fun validate_and_resolve_lots_updates_issue_state() = runTest(dispatcher) {
         val repo = FakeSaleRepository()
         val vm = CashierSaleViewModel(SaleUseCases(repo), dispatcher = dispatcher)
+        vm.retryCashSessionCheck() // the screen triggers the initial load on first composition
         advanceUntilIdle()
 
         vm.addProduct(repo.searchPool.first())
@@ -121,6 +126,7 @@ class CashierSaleViewModelTest {
     fun checkout_retry_after_network_failure_reuses_idempotency_key() = runTest(dispatcher) {
         val repo = FakeSaleRepository().apply { failFirstCheckoutWithNetwork = true }
         val vm = CashierSaleViewModel(SaleUseCases(repo), dispatcher = dispatcher)
+        vm.retryCashSessionCheck() // the screen triggers the initial load on first composition
         advanceUntilIdle()
 
         vm.addProduct(repo.searchPool.first())
