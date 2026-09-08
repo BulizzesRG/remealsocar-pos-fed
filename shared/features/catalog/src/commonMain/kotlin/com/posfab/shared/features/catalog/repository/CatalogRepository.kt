@@ -1,6 +1,7 @@
 package com.posfab.shared.features.catalog.repository
 
 import com.posfab.shared.core.result.AppResult
+import com.posfab.shared.features.catalog.domain.BusinessUnit
 import com.posfab.shared.features.catalog.domain.CatalogProductDetail
 import com.posfab.shared.features.catalog.domain.CatalogUnit
 import com.posfab.shared.features.catalog.domain.CreateProductInput
@@ -14,6 +15,7 @@ interface CatalogRepository {
     suspend fun updateProduct(productId: String, input: UpdateProductInput): AppResult<CatalogProductDetail>
     suspend fun addUom(productId: String, unit: String, factorToBase: Double): AppResult<Unit>
     suspend fun listUnits(): AppResult<List<CatalogUnit>>
-    suspend fun addPrice(productId: String, price: Double): AppResult<Unit>
+    suspend fun listBusinessUnits(): AppResult<List<BusinessUnit>>
+    suspend fun addPrice(productId: String, businessUnitId: Long, price: Double): AppResult<Unit>
     suspend fun findByBarcode(barcode: String): AppResult<CatalogProductDetail?>
 }

@@ -31,7 +31,7 @@ interface PosApi {
         accessToken: String,
         draftId: Long,
         lineId: Long,
-        request: DeleteLineRequestDto,
+        expectedVersion: Int,
     ): AppResult<DraftDto>
     suspend fun validateDraft(accessToken: String, draftId: Long): AppResult<ValidateDraftResponseDto>
     suspend fun resolveLots(accessToken: String, draftId: Long): AppResult<ResolveLotsResponseDto>
@@ -105,12 +105,11 @@ class PosApiClient(
         accessToken: String,
         draftId: Long,
         lineId: Long,
-        request: DeleteLineRequestDto,
+        expectedVersion: Int,
     ): AppResult<DraftDto> = safeCall {
         httpClient.delete("${config.apiBaseUrl}/pos/drafts/$draftId/lines/$lineId") {
             bearer(accessToken)
-            contentType(ContentType.Application.Json)
-            setBody(request)
+            parameter("expectedVersion", expectedVersion)
         }
     }
 

@@ -130,8 +130,8 @@ fun PosApp(controller: AppStateController) {
                 val diagnosticsViewModel = remember(screen.session) {
                     DiagnosticsViewModel(screen.session, koin.get(), koin.get())
                 }
-                val catalogViewModel = remember {
-                    CatalogViewModel(koin.get<CatalogUseCases>())
+                val catalogViewModel = remember(device.businessUnitId) {
+                    CatalogViewModel(koin.get<CatalogUseCases>(), defaultBusinessUnitId = device.businessUnitId)
                 }
                 val operationsViewModel = remember(screen.session) {
                     OperationsViewModel(screen.session, koin.get<OperationsUseCases>())

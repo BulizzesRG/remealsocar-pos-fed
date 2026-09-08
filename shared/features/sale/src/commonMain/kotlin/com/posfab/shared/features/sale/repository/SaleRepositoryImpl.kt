@@ -15,7 +15,6 @@ import com.posfab.shared.features.sale.domain.SaleTotals
 import com.posfab.shared.network.catalog.CatalogApi
 import com.posfab.shared.network.pos.AddLineRequestDto
 import com.posfab.shared.network.pos.CheckoutRequestDto
-import com.posfab.shared.network.pos.DeleteLineRequestDto
 import com.posfab.shared.network.pos.DraftCreateRequestDto
 import com.posfab.shared.network.pos.DraftDto
 import com.posfab.shared.network.pos.PosApi
@@ -69,7 +68,7 @@ class SaleRepositoryImpl(
                     barcode = item.barcode,
                     defaultUnit = item.baseUnit,
                     baseUnitId = item.baseUnitId,
-                    unitPrice = item.currentPrice ?: 0.0,
+                    unitPrice = item.currentPrice?.toDoubleOrNull() ?: 0.0,
                     lotTracked = item.lotTracked,
                 )
             })
@@ -89,7 +88,7 @@ class SaleRepositoryImpl(
                     barcode = barcode,
                     defaultUnit = dto.matchedUom?.unitId?.toString() ?: dto.product.baseUnitId.toString(),
                     baseUnitId = dto.matchedUom?.unitId ?: dto.product.baseUnitId,
-                    unitPrice = dto.product.currentPrice ?: 0.0,
+                    unitPrice = dto.product.currentPrice?.toDoubleOrNull() ?: 0.0,
                     lotTracked = dto.product.requiresLotTracking,
                 )
                 AppResult.Success(product)
@@ -158,7 +157,7 @@ class SaleRepositoryImpl(
                 accessToken = it,
                 draftId = draftId,
                 lineId = lineId,
-                request = DeleteLineRequestDto(expectedVersion = expectedVersion),
+                expectedVersion = expectedVersion,
             )
         }
 

@@ -20,8 +20,17 @@ import kotlinx.coroutines.launch
 class CatalogViewModel(
     private val useCases: CatalogUseCases,
     dispatcher: CoroutineDispatcher = Dispatchers.Default,
+    /** Business unit of the terminal running the app; preselected for new prices. */
+    private val defaultBusinessUnitId: Long? = null,
 ) : BaseViewModel(dispatcher) {
-    private val _state = MutableStateFlow(CatalogState(isLoadingList = true, isLoadingUnits = true))
+    private val _state = MutableStateFlow(
+        CatalogState(
+            isLoadingList = true,
+            isLoadingUnits = true,
+            isLoadingBusinessUnits = true,
+            selectedBusinessUnitId = defaultBusinessUnitId,
+        )
+    )
     val state: StateFlow<CatalogState> = _state.asStateFlow()
 
     private var listDebounceJob: Job? = null
@@ -29,6 +38,11 @@ class CatalogViewModel(
     init {
         refreshList(resetOffset = true)
         loadUnits()
+        loadBusinessUnits()
+    }
+
+    fun onBusinessUnitChange(businessUnitId: Long) {
+        _state.value = _state.value.copy(selectedBusinessUnitId = businessUnitId)
     }
 
     fun onQueryChange(value: String) {
@@ -176,6 +190,14 @@ class CatalogViewModel(
             return
         }
 
+        val initialPrice = form.initialPrice.toDoubleOrNull()
+        val wantsInitialPrice = snapshot.selectedProduct == null && initialPrice != null && initialPrice > 0.0
+        val priceBusinessUnitId = snapshot.selectedBusinessUnitId
+        if (wantsInitialPrice && priceBusinessUnitId == null) {
+            _state.value = snapshot.copy(errorMessage = BUSINESS_UNIT_REQUIRED)
+            return
+        }
+
         scope.launch {
             _state.value = _state.value.copy(isSaving = true, errorMessage = null, notice = null)
             val result = if (snapshot.selectedProduct == null) {
@@ -206,10 +228,10 @@ class CatalogViewModel(
             when (result) {
                 is AppResult.Success -> {
                     val isCreating = snapshot.selectedProduct == null
-                    val parsedPrice = form.initialPrice.toDoubleOrNull()
+                    val parsedPrice = initialPrice
 
-                    if (isCreating && parsedPrice != null && parsedPrice > 0.0) {
-                        when (useCases.repository.addPrice(result.value.id, parsedPrice)) {
+                    if (isCreating && parsedPrice != null && parsedPrice > 0.0 && priceBusinessUnitId != null) {
+                        when (useCases.repository.addPrice(result.value.id, priceBusinessUnitId, parsedPrice)) {
                             is AppResult.Success -> {
                                 // Refresh product to get updated price
                                 when (val refreshed = useCases.repository.getProduct(result.value.id)) {
@@ -312,10 +334,15 @@ class CatalogViewModel(
             _state.value = snapshot.copy(errorMessage = "Precio invalido")
             return
         }
+        val businessUnitId = snapshot.selectedBusinessUnitId
+        if (businessUnitId == null) {
+            _state.value = snapshot.copy(errorMessage = BUSINESS_UNIT_REQUIRED)
+            return
+        }
 
         scope.launch {
             _state.value = _state.value.copy(isSaving = true, errorMessage = null)
-            when (val result = useCases.repository.addPrice(productId, price)) {
+            when (val result = useCases.repository.addPrice(productId, businessUnitId, price)) {
                 is AppResult.Success -> {
                     _state.value = _state.value.copy(
                         isSaving = false,
@@ -415,6 +442,11 @@ class CatalogViewModel(
             _state.value = s.copy(errorMessage = "Precio invalido")
             return
         }
+        val businessUnitId = s.selectedBusinessUnitId
+        if (businessUnitId == null) {
+            _state.value = s.copy(errorMessage = BUSINESS_UNIT_REQUIRED)
+            return
+        }
         scope.launch {
             _state.value = _state.value.copy(isQuickAdding = true, errorMessage = null)
             val createResult = useCases.repository.createProduct(
@@ -429,7 +461,7 @@ class CatalogViewModel(
             )
             when (createResult) {
                 is AppResult.Success -> {
-                    useCases.repository.addPrice(createResult.value.id, price)
+                    useCases.repository.addPrice(createResult.value.id, businessUnitId, price)
                     _state.value = _state.value.copy(
                         isQuickAdding = false,
                         showQuickAddDialog = false,
@@ -471,6 +503,30 @@ class CatalogViewModel(
                 is AppResult.Failure -> {
                     _state.value = _state.value.copy(
                         isLoadingUnits = false,
+                        errorMessage = CatalogErrorText.from(result.error),
+                    )
+                }
+            }
+        }
+    }
+
+    private fun loadBusinessUnits() {
+        scope.launch {
+            _state.value = _state.value.copy(isLoadingBusinessUnits = true)
+            when (val result = useCases.repository.listBusinessUnits()) {
+                is AppResult.Success -> {
+                    val units = result.value
+                    val current = _state.value.selectedBusinessUnitId
+                    val selected = current?.takeIf { id -> units.any { it.id == id } } ?: units.firstOrNull()?.id
+                    _state.value = _state.value.copy(
+                        isLoadingBusinessUnits = false,
+                        businessUnits = units,
+                        selectedBusinessUnitId = selected,
+                    )
+                }
+                is AppResult.Failure -> {
+                    _state.value = _state.value.copy(
+                        isLoadingBusinessUnits = false,
                         errorMessage = CatalogErrorText.from(result.error),
                     )
                 }
@@ -521,6 +577,10 @@ class CatalogViewModel(
         ActiveFilter.ALL -> null
         ActiveFilter.ACTIVE_ONLY -> true
         ActiveFilter.INACTIVE_ONLY -> false
+    }
+
+    private companion object {
+        const val BUSINESS_UNIT_REQUIRED = "Selecciona la unidad de negocio para el precio"
     }
 
     private fun CatalogProductDetail.toSummary() = CatalogProductSummary(

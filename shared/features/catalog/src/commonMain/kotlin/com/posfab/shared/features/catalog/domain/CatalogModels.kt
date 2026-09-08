@@ -40,6 +40,12 @@ data class CatalogUnit(
     val name: String,
 )
 
+data class BusinessUnit(
+    val id: Long,
+    val code: String,
+    val name: String,
+)
+
 data class ProductPage(
     val items: List<CatalogProductSummary>,
     val total: Int,

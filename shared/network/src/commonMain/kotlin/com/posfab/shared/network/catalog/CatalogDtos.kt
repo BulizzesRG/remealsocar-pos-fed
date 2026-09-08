@@ -13,7 +13,8 @@ data class ProductListItemDto(
     @SerialName("baseUnitId") val baseUnitId: Long,
     @SerialName("lotTracked") val lotTracked: Boolean,
     val active: Boolean,
-    @SerialName("currentPrice") val currentPrice: Double? = null,
+    /** Decimal string from the backend (BigDecimal), e.g. "34.50". */
+    @SerialName("currentPrice") val currentPrice: String? = null,
 )
 
 @Serializable
@@ -34,7 +35,7 @@ data class ProductDetailDto(
     @SerialName("baseUnitId") val baseUnitId: Long,
     @SerialName("lotTracked") val lotTracked: Boolean,
     val active: Boolean,
-    @SerialName("currentPrice") val currentPrice: Double? = null,
+    @SerialName("currentPrice") val currentPrice: String? = null,
     val uoms: List<ProductUomDto> = emptyList(),
     @SerialName("priceHistory") val priceHistory: List<PriceHistoryDto> = emptyList(),
 )
@@ -42,13 +43,13 @@ data class ProductDetailDto(
 @Serializable
 data class ProductUomDto(
     val unit: String,
-    @SerialName("factorToBase") val factorToBase: Double,
+    @SerialName("factorToBase") val factorToBase: String,
 )
 
 @Serializable
 data class PriceHistoryDto(
     @SerialName("productId") val productId: String,
-    val price: Double,
+    val price: String,
     @SerialName("effectiveAt") val effectiveAt: String,
 )
 
@@ -83,11 +84,20 @@ data class UpdateProductRequestDto(
 @Serializable
 data class AddProductUomRequestDto(
     val unit: String,
-    @SerialName("factorToBase") val factorToBase: Double,
+    @SerialName("factorToBase") val factorToBase: String,
 )
 
 @Serializable
 data class CreatePriceHistoryRequestDto(
     @SerialName("productId") val productId: String,
-    val price: Double,
+    @SerialName("businessUnitId") val businessUnitId: Long,
+    val price: String,
+)
+
+@Serializable
+data class BusinessUnitDto(
+    val id: Long,
+    val code: String,
+    val name: String,
+    val active: Boolean = true,
 )

@@ -28,6 +28,7 @@ interface CatalogApi {
     suspend fun updateProduct(accessToken: String, productId: String, request: UpdateProductRequestDto): AppResult<ProductDetailDto>
     suspend fun addProductUom(accessToken: String, productId: String, request: AddProductUomRequestDto): AppResult<Unit>
     suspend fun listUnits(accessToken: String): AppResult<List<UnitDto>>
+    suspend fun listBusinessUnits(accessToken: String): AppResult<List<BusinessUnitDto>>
     suspend fun addPriceHistory(accessToken: String, request: CreatePriceHistoryRequestDto): AppResult<Unit>
     suspend fun findByBarcode(accessToken: String, barcode: String): AppResult<ProductDetailDto?>
 }
@@ -84,6 +85,12 @@ class CatalogApiClient(
 
     override suspend fun listUnits(accessToken: String): AppResult<List<UnitDto>> = safeCall {
         httpClient.get("${config.apiBaseUrl}/units") {
+            bearer(accessToken)
+        }
+    }
+
+    override suspend fun listBusinessUnits(accessToken: String): AppResult<List<BusinessUnitDto>> = safeCall {
+        httpClient.get("${config.apiBaseUrl}/business-units") {
             bearer(accessToken)
         }
     }

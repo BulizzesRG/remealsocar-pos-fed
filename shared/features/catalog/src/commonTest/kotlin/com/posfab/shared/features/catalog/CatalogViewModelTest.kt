@@ -3,6 +3,7 @@ package com.posfab.shared.features.catalog
 import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
 import com.posfab.shared.features.catalog.common.CatalogUseCases
+import com.posfab.shared.features.catalog.domain.BusinessUnit
 import com.posfab.shared.features.catalog.domain.CatalogProductDetail
 import com.posfab.shared.features.catalog.domain.CatalogProductSummary
 import com.posfab.shared.features.catalog.domain.CatalogUnit
@@ -222,6 +223,56 @@ class CatalogViewModelTest {
     }
 
     @Test
+    fun price_uses_terminal_business_unit_by_default() = runTest(dispatcher) {
+        val repo = FakeCatalogRepository()
+        val vm = CatalogViewModel(CatalogUseCases(repo), dispatcher, defaultBusinessUnitId = 2L)
+        advanceUntilIdle()
+
+        assertEquals(2L, vm.state.value.selectedBusinessUnitId)
+        vm.selectProduct("p1")
+        advanceUntilIdle()
+        vm.onNewPriceChange("12.5")
+        vm.addPriceEntry()
+        advanceUntilIdle()
+
+        assertEquals(2L, repo.lastPriceBusinessUnitId)
+        assertEquals(1, repo.addPriceCalls)
+    }
+
+    @Test
+    fun price_falls_back_to_first_business_unit_and_can_be_changed() = runTest(dispatcher) {
+        val repo = FakeCatalogRepository()
+        val vm = CatalogViewModel(CatalogUseCases(repo), dispatcher)
+        advanceUntilIdle()
+
+        assertEquals(1L, vm.state.value.selectedBusinessUnitId)
+        vm.onBusinessUnitChange(2L)
+        vm.selectProduct("p1")
+        advanceUntilIdle()
+        vm.onNewPriceChange("9.99")
+        vm.addPriceEntry()
+        advanceUntilIdle()
+
+        assertEquals(2L, repo.lastPriceBusinessUnitId)
+    }
+
+    @Test
+    fun price_is_blocked_without_business_unit() = runTest(dispatcher) {
+        val repo = FakeCatalogRepository(businessUnits = emptyList())
+        val vm = CatalogViewModel(CatalogUseCases(repo), dispatcher)
+        advanceUntilIdle()
+
+        vm.selectProduct("p1")
+        advanceUntilIdle()
+        vm.onNewPriceChange("9.99")
+        vm.addPriceEntry()
+        advanceUntilIdle()
+
+        assertTrue(vm.state.value.errorMessage?.contains("unidad de negocio", ignoreCase = true) == true)
+        assertEquals(0, repo.addPriceCalls)
+    }
+
+    @Test
     fun pagination_text_displays_range() = runTest(dispatcher) {
         val repo = FakeCatalogRepository()
         val vm = CatalogViewModel(CatalogUseCases(repo), dispatcher)
@@ -236,12 +287,17 @@ class CatalogViewModelTest {
 
 private class FakeCatalogRepository(
     private val conflictOnUom: Boolean = false,
+    private val businessUnits: List<BusinessUnit> = listOf(
+        BusinessUnit(1L, "TIENDA", "Tienda"),
+        BusinessUnit(2L, "FONDA", "Fonda"),
+    ),
 ) : CatalogRepository {
     var lastQuery: String? = null
     var lastOffset: Int = 0
     var createdProducts: Int = 0
     var updatedProducts: Int = 0
     var addPriceCalls: Int = 0
+    var lastPriceBusinessUnitId: Long? = null
 
     private val products = mutableMapOf(
         "p1" to CatalogProductDetail(
@@ -333,8 +389,11 @@ private class FakeCatalogRepository(
         )
     )
 
-    override suspend fun addPrice(productId: String, price: Double): AppResult<Unit> {
+    override suspend fun listBusinessUnits(): AppResult<List<BusinessUnit>> = AppResult.Success(businessUnits)
+
+    override suspend fun addPrice(productId: String, businessUnitId: Long, price: Double): AppResult<Unit> {
         addPriceCalls++
+        lastPriceBusinessUnitId = businessUnitId
         val current = products[productId] ?: return AppResult.Failure(AppError.Validation("not found"))
         products[productId] = current.copy(
             currentPrice = price,

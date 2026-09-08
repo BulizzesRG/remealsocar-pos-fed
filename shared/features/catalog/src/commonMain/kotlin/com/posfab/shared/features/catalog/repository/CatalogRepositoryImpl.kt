@@ -2,6 +2,7 @@ package com.posfab.shared.features.catalog.repository
 
 import com.posfab.shared.auth.refresh.AuthorizedApiExecutor
 import com.posfab.shared.core.result.AppResult
+import com.posfab.shared.features.catalog.domain.BusinessUnit
 import com.posfab.shared.features.catalog.domain.CatalogProductDetail
 import com.posfab.shared.features.catalog.domain.CatalogProductSummary
 import com.posfab.shared.features.catalog.domain.CatalogUnit
@@ -11,6 +12,7 @@ import com.posfab.shared.features.catalog.domain.ProductPage
 import com.posfab.shared.features.catalog.domain.ProductUomConversion
 import com.posfab.shared.features.catalog.domain.UpdateProductInput
 import com.posfab.shared.network.catalog.AddProductUomRequestDto
+import com.posfab.shared.network.catalog.BusinessUnitDto
 import com.posfab.shared.network.catalog.CatalogApi
 import com.posfab.shared.network.catalog.CreatePriceHistoryRequestDto
 import com.posfab.shared.network.catalog.CreateProductRequestDto
@@ -87,7 +89,7 @@ class CatalogRepositoryImpl(
             catalogApi.addProductUom(
                 accessToken = it,
                 productId = productId,
-                request = AddProductUomRequestDto(unit = unit, factorToBase = factorToBase),
+                request = AddProductUomRequestDto(unit = unit, factorToBase = factorToBase.toDecimalString()),
             )
         }
 
@@ -98,11 +100,22 @@ class CatalogRepositoryImpl(
         }
     }
 
-    override suspend fun addPrice(productId: String, price: Double): AppResult<Unit> =
+    override suspend fun listBusinessUnits(): AppResult<List<BusinessUnit>> {
+        return when (val result = authorized { catalogApi.listBusinessUnits(it) }) {
+            is AppResult.Success -> AppResult.Success(result.value.filter { it.active }.map { it.toDomainBusinessUnit() })
+            is AppResult.Failure -> result
+        }
+    }
+
+    override suspend fun addPrice(productId: String, businessUnitId: Long, price: Double): AppResult<Unit> =
         authorized {
             catalogApi.addPriceHistory(
                 accessToken = it,
-                request = CreatePriceHistoryRequestDto(productId = productId, price = price),
+                request = CreatePriceHistoryRequestDto(
+                    productId = productId,
+                    businessUnitId = businessUnitId,
+                    price = price.toDecimalString(),
+                ),
             )
         }
 
@@ -125,7 +138,7 @@ class CatalogRepositoryImpl(
                 baseUnit = it.baseUnit,
                 lotTracked = it.lotTracked,
                 active = it.active,
-                currentPrice = it.currentPrice,
+                currentPrice = it.currentPrice?.toDoubleOrNull(),
             )
         },
         total = total,
@@ -141,19 +154,19 @@ class CatalogRepositoryImpl(
         baseUnit = baseUnit,
         lotTracked = lotTracked,
         active = active,
-        currentPrice = currentPrice,
+        currentPrice = currentPrice?.toDoubleOrNull(),
         uoms = uoms.map { it.toDomainUom() },
         priceHistory = priceHistory.map { it.toDomainPriceHistory() },
     )
 
     private fun ProductUomDto.toDomainUom() = ProductUomConversion(
         unit = unit,
-        factorToBase = factorToBase,
+        factorToBase = factorToBase.toDoubleOrNull() ?: 1.0,
     )
 
     private fun PriceHistoryDto.toDomainPriceHistory() = PriceHistoryEntry(
         productId = productId,
-        price = price,
+        price = price.toDoubleOrNull() ?: 0.0,
         effectiveAt = effectiveAt,
     )
 
@@ -161,4 +174,13 @@ class CatalogRepositoryImpl(
         code = code,
         name = name,
     )
+
+    private fun BusinessUnitDto.toDomainBusinessUnit() = BusinessUnit(
+        id = id,
+        code = code,
+        name = name,
+    )
+
+    /** Backend money/factor contract is a plain decimal string (BigDecimal on the server). */
+    private fun Double.toDecimalString(): String = toBigDecimal().toPlainString()
 }

@@ -51,6 +51,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.posfab.shared.features.catalog.domain.BusinessUnit
 import com.posfab.shared.features.catalog.domain.CatalogProductSummary
 import com.posfab.shared.features.catalog.domain.CatalogUnit
 import com.posfab.shared.features.catalog.domain.PriceHistoryEntry
@@ -105,6 +106,7 @@ fun CatalogScreen(viewModel: CatalogViewModel) {
                         onInitialPriceChange = viewModel::onFormInitialPriceChange,
                         onNewPriceChange = viewModel::onNewPriceChange,
                         onAddPrice = viewModel::addPriceEntry,
+                        onBusinessUnitChange = viewModel::onBusinessUnitChange,
                         onNewUomUnitChange = viewModel::onNewUomUnitChange,
                         onNewUomFactorChange = viewModel::onNewUomFactorChange,
                         onAddUom = viewModel::addUomConversion,
@@ -124,6 +126,9 @@ fun CatalogScreen(viewModel: CatalogViewModel) {
                 price = state.quickAddPrice,
                 unit = state.quickAddUnit,
                 units = state.units,
+                businessUnits = state.businessUnits,
+                selectedBusinessUnitId = state.selectedBusinessUnitId,
+                onBusinessUnitChange = viewModel::onBusinessUnitChange,
                 isLoading = state.isQuickAdding,
                 errorMessage = if (state.showQuickAddDialog) state.errorMessage else null,
                 onNameChange = viewModel::onQuickAddNameChange,
@@ -441,6 +446,7 @@ private fun ProductFormPanel(
     onInitialPriceChange: (String) -> Unit,
     onNewPriceChange: (String) -> Unit,
     onAddPrice: () -> Unit,
+    onBusinessUnitChange: (Long) -> Unit,
     onNewUomUnitChange: (String) -> Unit,
     onNewUomFactorChange: (String) -> Unit,
     onAddUom: () -> Unit,
@@ -519,6 +525,9 @@ private fun ProductFormPanel(
                         newPriceInput = state.newPriceInput,
                         onNewPriceChange = onNewPriceChange,
                         onAddPrice = onAddPrice,
+                        businessUnits = state.businessUnits,
+                        selectedBusinessUnitId = state.selectedBusinessUnitId,
+                        onBusinessUnitChange = onBusinessUnitChange,
                         isSaving = state.isSaving,
                     )
                 } else {
@@ -526,6 +535,13 @@ private fun ProductFormPanel(
                         value = state.form.initialPrice,
                         onValueChange = onInitialPriceChange,
                         label = "Precio de venta",
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    BusinessUnitDropdown(
+                        businessUnits = state.businessUnits,
+                        selectedId = state.selectedBusinessUnitId,
+                        onSelect = onBusinessUnitChange,
+                        label = "Unidad de negocio del precio",
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
@@ -667,6 +683,9 @@ private fun CurrentPriceDisplay(
     newPriceInput: String,
     onNewPriceChange: (String) -> Unit,
     onAddPrice: () -> Unit,
+    businessUnits: List<BusinessUnit>,
+    selectedBusinessUnitId: Long?,
+    onBusinessUnitChange: (Long) -> Unit,
     isSaving: Boolean,
 ) {
     Column(
@@ -694,6 +713,14 @@ private fun CurrentPriceDisplay(
                 )
             }
         }
+        // Business unit that receives the new price
+        BusinessUnitDropdown(
+            businessUnits = businessUnits,
+            selectedId = selectedBusinessUnitId,
+            onSelect = onBusinessUnitChange,
+            label = "Unidad de negocio",
+            modifier = Modifier.fillMaxWidth(),
+        )
         // Change price
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -709,7 +736,7 @@ private fun CurrentPriceDisplay(
             PosSecondaryButton(
                 text = "Cambiar",
                 onClick = onAddPrice,
-                enabled = !isSaving && newPriceInput.isNotBlank(),
+                enabled = !isSaving && newPriceInput.isNotBlank() && selectedBusinessUnitId != null,
                 modifier = Modifier.width(100.dp),
             )
         }
@@ -885,6 +912,9 @@ private fun QuickAddDialog(
     price: String,
     unit: String,
     units: List<CatalogUnit>,
+    businessUnits: List<BusinessUnit>,
+    selectedBusinessUnitId: Long?,
+    onBusinessUnitChange: (Long) -> Unit,
     isLoading: Boolean,
     errorMessage: String?,
     onNameChange: (String) -> Unit,
@@ -926,6 +956,13 @@ private fun QuickAddDialog(
                     selected = unit,
                     onSelect = onUnitChange,
                     label = "Unidad de venta",
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                BusinessUnitDropdown(
+                    businessUnits = businessUnits,
+                    selectedId = selectedBusinessUnitId,
+                    onSelect = onBusinessUnitChange,
+                    label = "Unidad de negocio del precio",
                     modifier = Modifier.fillMaxWidth(),
                 )
                 errorMessage?.let {
@@ -1050,5 +1087,60 @@ private fun formatHumanDate(isoString: String): String {
         "$day $month $year, $hour12:$minute $ampm"
     } catch (_: Exception) {
         isoString.take(19).replace("T", " ")
+    }
+}
+
+@Suppress("DEPRECATION")
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BusinessUnitDropdown(
+    businessUnits: List<BusinessUnit>,
+    selectedId: Long?,
+    onSelect: (Long) -> Unit,
+    label: String,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val displayText = businessUnits.find { it.id == selectedId }
+        ?.let { "${it.code} \u2013 ${it.name}" }
+        ?: "Seleccionar..."
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+        modifier = modifier,
+    ) {
+        OutlinedTextField(
+            value = displayText,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text(label) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
+            modifier = Modifier.fillMaxWidth().menuAnchor(),
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            businessUnits.forEach { bu ->
+                DropdownMenuItem(
+                    text = { Text("${bu.code} \u2013 ${bu.name}") },
+                    onClick = {
+                        onSelect(bu.id)
+                        expanded = false
+                    },
+                    contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding,
+                )
+            }
+            if (businessUnits.isEmpty()) {
+                DropdownMenuItem(
+                    text = { Text("Sin unidades de negocio", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    onClick = {},
+                    enabled = false,
+                    contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding,
+                )
+            }
+        }
     }
 }

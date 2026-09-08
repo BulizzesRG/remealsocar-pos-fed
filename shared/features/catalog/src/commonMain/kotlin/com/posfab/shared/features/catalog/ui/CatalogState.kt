@@ -1,5 +1,6 @@
 package com.posfab.shared.features.catalog.ui
 
+import com.posfab.shared.features.catalog.domain.BusinessUnit
 import com.posfab.shared.features.catalog.domain.CatalogProductDetail
 import com.posfab.shared.features.catalog.domain.CatalogProductSummary
 import com.posfab.shared.features.catalog.domain.CatalogUnit
@@ -38,6 +39,10 @@ data class CatalogState(
     val form: ProductFormState = ProductFormState(),
     val hasUnsavedChanges: Boolean = false,
     val units: List<CatalogUnit> = emptyList(),
+    val isLoadingBusinessUnits: Boolean = false,
+    val businessUnits: List<BusinessUnit> = emptyList(),
+    /** Business unit that receives new prices. Defaults to the terminal's unit. */
+    val selectedBusinessUnitId: Long? = null,
     val newUomUnit: String = "",
     val newUomFactorInput: String = "1",
     val newPriceInput: String = "",

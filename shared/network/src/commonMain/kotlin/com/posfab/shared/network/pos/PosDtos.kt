@@ -82,11 +82,6 @@ data class UpdateLineRequestDto(
 )
 
 @Serializable
-data class DeleteLineRequestDto(
-    @SerialName("expectedVersion") val expectedVersion: Int,
-)
-
-@Serializable
 data class CheckoutRequestDto(
     @SerialName("paymentStatus") val paymentStatus: String? = null,
     @SerialName("customerId") val customerId: Long? = null,
@@ -146,7 +141,8 @@ data class BarcodeLookupProductDto(
     @SerialName("baseUnitId") val baseUnitId: Long,
     @SerialName("requiresLotTracking") val requiresLotTracking: Boolean,
     val active: Boolean,
-    @SerialName("currentPrice") val currentPrice: Double? = null,
+    /** Decimal string from the backend (BigDecimal), e.g. "12.50". */
+    @SerialName("currentPrice") val currentPrice: String? = null,
 )
 
 @Serializable
