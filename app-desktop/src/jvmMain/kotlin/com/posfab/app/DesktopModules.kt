@@ -92,7 +92,7 @@ fun desktopModule(config: PosConfig): Module = module {
         SaleRepositoryImpl(get<PosApi>(), get<CatalogApi>(), device.terminalId, device.businessUnitId, get())
     }
     single<CatalogRepository> { CatalogRepositoryImpl(get(), get()) }
-    single<OperationsRepository> { OperationsRepositoryImpl(get(), get()) }
+    single<OperationsRepository> { OperationsRepositoryImpl(get<OperationsApi>(), get<CatalogApi>(), get()) }
     single<CashRepository> { CashRepositoryImpl(get(), get()) }
     single<ReportsRepositoryImpl> { ReportsRepositoryImpl(get(), get(), get()) }
     single<DailyHistoryRepository> { get<ReportsRepositoryImpl>() }

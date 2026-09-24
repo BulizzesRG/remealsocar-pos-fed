@@ -6,6 +6,7 @@ import com.posfab.shared.core.logging.AppLogger
 import com.posfab.shared.core.result.AppError
 import io.ktor.client.call.body
 import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.isSuccess
 import kotlin.time.Clock
 
@@ -28,7 +29,8 @@ suspend inline fun <reified T> safeCall(block: suspend () -> HttpResponse): AppR
                 AppResult.Success(response.body())
             }
         } else {
-            val error = ApiErrorMapper.fromStatus(response.status)
+            val errorBody = runCatching { response.bodyAsText() }.getOrNull()
+            val error = ApiErrorMapper.fromStatus(response.status, errorBody)
             AppLogger.w("http.request request_id=$requestId method=$method endpoint=$endpoint status=${response.status.value} elapsed_ms=$elapsedMs error_category=${error::class.simpleName}")
             AppResult.Failure(error)
         }

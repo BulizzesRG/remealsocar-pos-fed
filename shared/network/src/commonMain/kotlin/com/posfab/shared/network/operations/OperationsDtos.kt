@@ -1,105 +1,138 @@
 package com.posfab.shared.network.operations
 
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
+/*
+ * Wire format of the backend (bed) for purchases, internal requisitions, inventory and suppliers.
+ * IDs are Long, quantities/money are decimal strings (BigDecimal on the server), field names are camelCase.
+ */
+
+// ---- Suppliers ------------------------------------------------------------
+
 @Serializable
-data class PurchaseRequestDto(
-    val supplier: String,
-    @SerialName("terminal_id") val terminalId: String,
-    @SerialName("business_unit") val businessUnit: String,
-    @SerialName("paid_cash") val paidCash: Boolean,
-    @SerialName("paid_from_terminal_id") val paidFromTerminalId: String? = null,
-    val lines: List<PurchaseLineDto>,
+data class SupplierDto(
+    val id: Long,
+    val name: String,
+    val phone: String? = null,
+    val taxId: String? = null,
+    val active: Boolean = true,
 )
 
 @Serializable
-data class PurchaseLineDto(
-    @SerialName("product_id") val productId: String,
-    val unit: String,
-    val qty: Double,
-    @SerialName("unit_cost") val unitCost: Double,
-    @SerialName("lot_code") val lotCode: String? = null,
-    @SerialName("lot_expiry") val lotExpiry: String? = null,
+data class SupplierCreateRequestDto(
+    val name: String,
+    val phone: String? = null,
+    val taxId: String? = null,
+    val active: Boolean = true,
+)
+
+// ---- Purchases ------------------------------------------------------------
+
+@Serializable
+data class PurchaseLineRequestDto(
+    val productId: Long,
+    val unitId: Long,
+    /** Decimal string, e.g. "3.000". */
+    val qty: String,
+    /** Decimal string, e.g. "18.20". */
+    val unitCost: String,
+    val lotCode: String? = null,
+    /** ISO date (yyyy-MM-dd). */
+    val expiryDate: String? = null,
 )
 
 @Serializable
-data class PurchaseResponseDto(
-    @SerialName("purchase_id") val purchaseId: String? = null,
-    val folio: String? = null,
-    val message: String? = null,
+data class PurchaseCreateRequestDto(
+    val businessUnitId: Long,
+    val terminalId: Long? = null,
+    val supplierId: Long,
+    val supplierDocNo: String? = null,
+    val paidCash: Boolean = false,
+    /** Required by the backend when [paidCash] is true; that terminal needs an open cash session. */
+    val paidFromTerminalId: Long? = null,
+    val items: List<PurchaseLineRequestDto>,
+)
+
+// ---- Internal requisitions ------------------------------------------------
+
+@Serializable
+data class InternalRequisitionLineRequestDto(
+    val productId: Long,
+    val unitId: Long,
+    val qty: String,
+    val lotId: Long? = null,
 )
 
 @Serializable
-data class InternalRequisitionRequestDto(
-    @SerialName("source_business_unit") val sourceBusinessUnit: String,
-    @SerialName("target_business_unit") val targetBusinessUnit: String,
-    @SerialName("terminal_id") val terminalId: String,
-    val lines: List<InternalRequisitionLineDto>,
+data class InternalRequisitionCreateRequestDto(
+    /** Business unit that consumes the stock. The backend only accepts FONDA or TORTERIA. */
+    val businessUnitId: Long,
+    val terminalId: Long? = null,
+    val items: List<InternalRequisitionLineRequestDto>,
+)
+
+// ---- Inventory ------------------------------------------------------------
+
+@Serializable
+data class OnHandResponseDto(
+    val productId: Long,
+    val businessUnitId: Long,
+    /** Quantity in the product's base unit, decimal string. */
+    val qtyBase: String,
 )
 
 @Serializable
-data class InternalRequisitionLineDto(
-    @SerialName("product_id") val productId: String,
-    val unit: String,
-    val qty: Double,
-    @SerialName("lot_id") val lotId: String? = null,
+data class InventoryLotResponseDto(
+    val lotId: Long,
+    val productId: Long,
+    val lotCode: String,
+    val expiryDate: String? = null,
+    val qtyBase: String,
 )
 
 @Serializable
-data class InternalRequisitionResponseDto(
-    @SerialName("requisition_id") val requisitionId: String? = null,
-    val folio: String? = null,
-    val message: String? = null,
-)
-
-@Serializable
-data class OnHandItemDto(
-    @SerialName("product_id") val productId: String,
-    @SerialName("product_name") val productName: String? = null,
-    @SerialName("business_unit") val businessUnit: String,
-    val unit: String,
-    @SerialName("on_hand") val onHand: Double,
-)
-
-@Serializable
-data class InventoryLotDto(
-    @SerialName("product_id") val productId: String,
-    @SerialName("lot_id") val lotId: String? = null,
-    @SerialName("lot_code") val lotCode: String? = null,
-    @SerialName("expiry_date") val expiryDate: String? = null,
-    @SerialName("on_hand") val onHand: Double,
-    val unit: String? = null,
+data class WasteLineRequestDto(
+    val productId: Long,
+    val unitId: Long,
+    val qty: String,
+    val lotId: Long? = null,
+    /** One of EXPIRED, DAMAGED, SPOILED, LOST. */
+    val reasonCode: String,
+    val notes: String? = null,
 )
 
 @Serializable
 data class WasteRequestDto(
-    @SerialName("product_id") val productId: String,
-    @SerialName("business_unit") val businessUnit: String,
-    val unit: String,
-    val qty: Double,
-    @SerialName("reason_code") val reasonCode: String,
-    @SerialName("lot_id") val lotId: String? = null,
+    val terminalId: Long,
+    /** Must be the TIENDA business unit. */
+    val businessUnitId: Long,
+    val lines: List<WasteLineRequestDto>,
 )
 
 @Serializable
-data class WasteResponseDto(
-    @SerialName("waste_id") val wasteId: String? = null,
-    val message: String? = null,
+data class AdjustmentLineRequestDto(
+    val productId: Long,
+    val unitId: Long,
+    /** Non-zero decimal string; positive adds stock, negative removes it. */
+    val qtyDelta: String,
+    val lotId: Long? = null,
+    /** One of COUNT_DIFFERENCE, DATA_FIX, OTHER. */
+    val reasonCode: String,
+    val notes: String? = null,
 )
 
 @Serializable
 data class AdjustmentRequestDto(
-    @SerialName("product_id") val productId: String,
-    @SerialName("business_unit") val businessUnit: String,
-    val unit: String,
-    @SerialName("qty_delta") val qtyDelta: Double,
-    @SerialName("reason_code") val reasonCode: String,
-    @SerialName("lot_id") val lotId: String? = null,
+    val terminalId: Long,
+    /** Must be the TIENDA business unit. */
+    val businessUnitId: Long,
+    val lines: List<AdjustmentLineRequestDto>,
 )
 
+// ---- Generic responses ----------------------------------------------------
+
 @Serializable
-data class AdjustmentResponseDto(
-    @SerialName("adjustment_id") val adjustmentId: String? = null,
-    val message: String? = null,
-)
+data class IdResponseDto(val id: Long)
+
+@Serializable
+data class IdWithFolioResponseDto(val id: Long, val folio: String? = null)

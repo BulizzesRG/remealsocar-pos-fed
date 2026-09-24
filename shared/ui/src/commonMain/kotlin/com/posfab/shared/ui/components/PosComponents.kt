@@ -24,6 +24,10 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -34,6 +38,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -506,4 +514,66 @@ private fun formatMoney(value: Double): String {
     val suffix = if (fraction < 10) "0$fraction" else "$fraction"
     val sign = if (cents < 0) "-" else ""
     return "$sign$whole.$suffix"
+}
+
+/**
+ * Read-only outlined field that opens a menu with [options]. [label] names the field and
+ * [optionLabel] renders each option (and the selected one). When [selected] is null the
+ * [placeholder] is shown.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun <T> PosDropdownField(
+    options: List<T>,
+    selected: T?,
+    onSelect: (T) -> Unit,
+    label: String,
+    optionLabel: (T) -> String,
+    modifier: Modifier = Modifier,
+    placeholder: String = "Seleccionar...",
+    emptyText: String = "Sin opciones disponibles",
+    enabled: Boolean = true,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val displayText = selected?.let(optionLabel) ?: placeholder
+
+    ExposedDropdownMenuBox(
+        expanded = expanded && enabled,
+        onExpandedChange = { if (enabled) expanded = it },
+        modifier = modifier,
+    ) {
+        OutlinedTextField(
+            value = displayText,
+            onValueChange = {},
+            readOnly = true,
+            enabled = enabled,
+            label = { Text(label) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
+            modifier = Modifier.fillMaxWidth().menuAnchor(),
+        )
+        ExposedDropdownMenu(
+            expanded = expanded && enabled,
+            onDismissRequest = { expanded = false },
+        ) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(optionLabel(option)) },
+                    onClick = {
+                        onSelect(option)
+                        expanded = false
+                    },
+                    contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding,
+                )
+            }
+            if (options.isEmpty()) {
+                DropdownMenuItem(
+                    text = { Text(emptyText, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    onClick = {},
+                    enabled = false,
+                    contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding,
+                )
+            }
+        }
+    }
 }

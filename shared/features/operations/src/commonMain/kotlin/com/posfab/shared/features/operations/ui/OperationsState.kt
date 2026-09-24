@@ -1,9 +1,15 @@
 package com.posfab.shared.features.operations.ui
 
+import com.posfab.shared.features.operations.domain.AdjustmentReason
 import com.posfab.shared.features.operations.domain.InventoryLotItem
 import com.posfab.shared.features.operations.domain.InventoryOnHandItem
+import com.posfab.shared.features.operations.domain.OperationsBusinessUnit
+import com.posfab.shared.features.operations.domain.OperationsProduct
+import com.posfab.shared.features.operations.domain.ProductUnitOption
 import com.posfab.shared.features.operations.domain.PurchaseLineInput
 import com.posfab.shared.features.operations.domain.RequisitionLineInput
+import com.posfab.shared.features.operations.domain.Supplier
+import com.posfab.shared.features.operations.domain.WasteReason
 
 enum class OperationsTab {
     PURCHASES,
@@ -29,78 +35,119 @@ data class OperationsConfirmDialogState(
     val cancelLabel: String = "Cancelar",
 )
 
+/**
+ * Product picker shared by the tab that is currently visible: search, selected product,
+ * the units it can be captured in and (for lot-tracked products) its lots.
+ */
+data class ProductPickerState(
+    val query: String = "",
+    val results: List<OperationsProduct> = emptyList(),
+    val isSearching: Boolean = false,
+    val selectedProduct: OperationsProduct? = null,
+    val unitOptions: List<ProductUnitOption> = emptyList(),
+    val selectedUnit: ProductUnitOption? = null,
+    val isLoadingUnits: Boolean = false,
+    val lots: List<InventoryLotItem> = emptyList(),
+    val selectedLot: InventoryLotItem? = null,
+    val isLoadingLots: Boolean = false,
+)
+
 data class OperationsState(
     val selectedTab: OperationsTab = OperationsTab.PURCHASES,
+    /** ADMIN or MANAGER: the backend requires one of these roles for every mutation here. */
     val canManageOperations: Boolean = false,
-    val canManageWasteAdjustments: Boolean = false,
-    val terminalId: String = "",
-    val businessUnit: String = "TIENDA",
+    val terminalId: Long = 0L,
+    val terminalCode: String = "",
+    /** Business unit of the registered device (normally TIENDA). */
+    val defaultBusinessUnitId: Long = 0L,
 
+    val isLoadingReferenceData: Boolean = false,
+    val businessUnits: List<OperationsBusinessUnit> = emptyList(),
+    val suppliers: List<Supplier> = emptyList(),
+
+    val picker: ProductPickerState = ProductPickerState(),
+
+    // Purchases
     val isSubmittingPurchase: Boolean = false,
-    val purchaseSupplier: String = "",
-    val purchasePaidCash: Boolean = true,
-    val purchasePaidFromTerminalId: String = "",
-    val purchaseLineProductId: String = "",
-    val purchaseLineUnit: String = "EA",
+    val purchaseBusinessUnitId: Long? = null,
+    val purchaseSupplierId: Long? = null,
+    val purchaseSupplierDocNo: String = "",
+    val purchasePaidCash: Boolean = false,
     val purchaseLineQtyInput: String = "1",
-    val purchaseLineUnitCostInput: String = "0",
+    val purchaseLineUnitCostInput: String = "",
     val purchaseLineLotCode: String = "",
-    val purchaseLineLotExpiry: String = "",
+    val purchaseLineExpiryDate: String = "",
     val purchaseLines: List<PurchaseLineInput> = emptyList(),
     val purchaseIdempotencyKey: String? = null,
     val lastPurchaseResult: String? = null,
+    val showNewSupplierForm: Boolean = false,
+    val newSupplierName: String = "",
+    val newSupplierPhone: String = "",
+    val newSupplierTaxId: String = "",
+    val isCreatingSupplier: Boolean = false,
 
+    // Internal requisitions (consumption in FONDA / TORTERIA)
     val isSubmittingRequisition: Boolean = false,
-    val requisitionSourceBu: String = "TIENDA",
-    val requisitionTargetBu: String = "FONDA",
-    val requisitionLineProductId: String = "",
-    val requisitionLineUnit: String = "EA",
+    val requisitionBusinessUnitId: Long? = null,
     val requisitionLineQtyInput: String = "1",
-    val requisitionLineLotId: String = "",
     val requisitionLines: List<RequisitionLineInput> = emptyList(),
     val requisitionIdempotencyKey: String? = null,
     val lastRequisitionResult: String? = null,
 
+    // On hand
     val isLoadingOnHand: Boolean = false,
-    val onHandProductFilter: String = "",
-    val onHandBusinessUnitFilter: String = "",
+    val onHandBusinessUnitId: Long? = null,
     val onHandQuickSearch: String = "",
     val onHandItems: List<InventoryOnHandItem> = emptyList(),
 
-    val isLoadingLots: Boolean = false,
-    val lotsProductId: String = "",
-    val lotItems: List<InventoryLotItem> = emptyList(),
-
+    // Waste (TIENDA only)
     val isSubmittingWaste: Boolean = false,
-    val wasteProductId: String = "",
-    val wasteBusinessUnit: String = "TIENDA",
-    val wasteUnit: String = "EA",
     val wasteQtyInput: String = "",
-    val wasteReasonCode: String = "CADUCADO",
-    val wasteLotId: String = "",
+    val wasteReason: WasteReason = WasteReason.EXPIRED,
+    val wasteNotes: String = "",
     val wasteIdempotencyKey: String? = null,
 
+    // Adjustments (TIENDA only)
     val isSubmittingAdjustment: Boolean = false,
-    val adjustmentProductId: String = "",
-    val adjustmentBusinessUnit: String = "TIENDA",
-    val adjustmentUnit: String = "EA",
     val adjustmentQtyDeltaInput: String = "",
-    val adjustmentReasonCode: String = "CONTEO",
-    val adjustmentLotId: String = "",
+    val adjustmentReason: AdjustmentReason = AdjustmentReason.COUNT_DIFFERENCE,
+    val adjustmentNotes: String = "",
     val adjustmentIdempotencyKey: String? = null,
 
     val confirmDialog: OperationsConfirmDialogState? = null,
     val notice: String? = null,
     val errorMessage: String? = null,
 ) {
+    val tiendaBusinessUnit: OperationsBusinessUnit?
+        get() = businessUnits.firstOrNull { it.code.equals("TIENDA", ignoreCase = true) }
+
+    /** Units that may consume stock through an internal requisition. */
+    val consumptionBusinessUnits: List<OperationsBusinessUnit>
+        get() = businessUnits.filter { it.code.equals("FONDA", true) || it.code.equals("TORTERIA", true) }
+
+    val selectedPurchaseBusinessUnit: OperationsBusinessUnit?
+        get() = businessUnits.firstOrNull { it.id == purchaseBusinessUnitId }
+
+    val selectedSupplier: Supplier?
+        get() = suppliers.firstOrNull { it.id == purchaseSupplierId }
+
+    val selectedRequisitionBusinessUnit: OperationsBusinessUnit?
+        get() = businessUnits.firstOrNull { it.id == requisitionBusinessUnitId }
+
+    val selectedOnHandBusinessUnit: OperationsBusinessUnit?
+        get() = businessUnits.firstOrNull { it.id == onHandBusinessUnitId }
+
+    val purchaseTotal: Double
+        get() = purchaseLines.sumOf { it.lineTotal }
+
     val visibleOnHandItems: List<InventoryOnHandItem>
         get() {
             val query = onHandQuickSearch.trim().lowercase()
             if (query.isEmpty()) return onHandItems
             return onHandItems.filter {
-                it.productId.lowercase().contains(query) ||
+                it.productId.toString() == query ||
                     it.productName.lowercase().contains(query) ||
-                    it.businessUnit.lowercase().contains(query)
+                    it.businessUnitCode.lowercase().contains(query)
             }
         }
 }
