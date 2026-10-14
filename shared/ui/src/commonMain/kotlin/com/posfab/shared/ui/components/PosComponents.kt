@@ -130,7 +130,7 @@ fun PosPrimaryButton(
                 Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(PosSpacing.xs))
             }
-            Text(text, style = MaterialTheme.typography.labelLarge)
+            Text(text, style = MaterialTheme.typography.labelLarge, maxLines = 1, softWrap = false)
         }
     }
 }
@@ -152,7 +152,7 @@ fun PosSecondaryButton(
             Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(PosSpacing.xs))
         }
-        Text(text, style = MaterialTheme.typography.labelLarge)
+        Text(text, style = MaterialTheme.typography.labelLarge, maxLines = 1, softWrap = false)
     }
 }
 
@@ -177,7 +177,7 @@ fun PosDestructiveButton(
             Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(PosSpacing.xs))
         }
-        Text(text, style = MaterialTheme.typography.labelLarge)
+        Text(text, style = MaterialTheme.typography.labelLarge, maxLines = 1, softWrap = false)
     }
 }
 

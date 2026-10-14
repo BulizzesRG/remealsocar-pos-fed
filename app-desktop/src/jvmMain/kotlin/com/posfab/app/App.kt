@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -54,104 +55,108 @@ fun PosApp(controller: AppStateController) {
     val current by controller.screen.collectAsState()
 
     PosTheme {
-        when (val screen = current) {
-            AppScreen.Loading -> {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(PosSpacing.md),
-                    ) {
-                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                        Text(
-                            "Iniciando sistema...",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        // Root surface: paints the theme background and sets the default content color
+        // for every screen (the desktop window is otherwise white with black text).
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            when (val screen = current) {
+                AppScreen.Loading -> {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(PosSpacing.md),
+                        ) {
+                            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                            Text(
+                                "Iniciando sistema...",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+                AppScreen.DeviceSetup -> {
+                    val koin = GlobalContext.get()
+                    val setupViewModel = remember {
+                        DeviceSetupViewModel(koin.get<DeviceApi>(), koin.get<DeviceStorage>())
+                    }
+                    LaunchedEffect(setupViewModel) {
+                        setupViewModel.registrationComplete.collect { registration ->
+                            controller.onDeviceRegistered(registration)
+                        }
+                    }
+                    DeviceSetupScreen(setupViewModel)
+                }
+                AppScreen.Login -> {
+                    val koin = GlobalContext.get()
+                    val device = controller.deviceRegistration.value
+                        ?: error("Login screen reached before device registration")
+                    val loginViewModel = remember {
+                        LoginViewModel(koin.get<LoginUseCase>(), device)
+                    }
+                    LaunchedEffect(loginViewModel) {
+                        loginViewModel.loggedIn.collect { session ->
+                            controller.onLoggedIn(session)
+                        }
+                    }
+                    LoginScreen(loginViewModel)
+                }
+                is AppScreen.Shell -> {
+                    val koin = GlobalContext.get()
+                    val device = controller.deviceRegistration.value
+                        ?: error("Shell screen reached before device registration")
+                    val logoutUseCase: LogoutUseCase = koin.get()
+                    val shellViewModel = remember(screen.session) {
+                        ShellViewModel(screen.session, logoutUseCase)
+                    }
+                    val saleViewModel = remember(screen.session) {
+                        CashierSaleViewModel(
+                            saleUseCases = koin.get<SaleUseCases>(),
+                            saleUiStateStore = koin.get(),
+                            cardPaymentAdapter = koin.get<CardPaymentAdapter>(),
+                            receiptPrinterAdapter = koin.get<ReceiptPrinterAdapter>(),
+                            onNavigateToCash = { shellViewModel.select(com.posfab.shared.features.shell.ShellRoute.CASH) },
                         )
                     }
-                }
-            }
-            AppScreen.DeviceSetup -> {
-                val koin = GlobalContext.get()
-                val setupViewModel = remember {
-                    DeviceSetupViewModel(koin.get<DeviceApi>(), koin.get<DeviceStorage>())
-                }
-                LaunchedEffect(setupViewModel) {
-                    setupViewModel.registrationComplete.collect { registration ->
-                        controller.onDeviceRegistered(registration)
+                    val cashViewModel = remember(screen.session) {
+                        CashSessionViewModel(
+                            terminalId = device.terminalId,
+                            businessUnitId = device.businessUnitId,
+                            cashUseCases = koin.get<CashUseCases>(),
+                            onNavigateToPos = { shellViewModel.select(com.posfab.shared.features.shell.ShellRoute.POS) },
+                        )
                     }
-                }
-                DeviceSetupScreen(setupViewModel)
-            }
-            AppScreen.Login -> {
-                val koin = GlobalContext.get()
-                val device = controller.deviceRegistration.value
-                    ?: error("Login screen reached before device registration")
-                val loginViewModel = remember {
-                    LoginViewModel(koin.get<LoginUseCase>(), device)
-                }
-                LaunchedEffect(loginViewModel) {
-                    loginViewModel.loggedIn.collect { session ->
-                        controller.onLoggedIn(session)
+                    val historyViewModel = remember(screen.session) {
+                        DailyHistoryViewModel(screen.session, koin.get<ReportsUseCases>())
                     }
-                }
-                LoginScreen(loginViewModel)
-            }
-            is AppScreen.Shell -> {
-                val koin = GlobalContext.get()
-                val device = controller.deviceRegistration.value
-                    ?: error("Shell screen reached before device registration")
-                val logoutUseCase: LogoutUseCase = koin.get()
-                val shellViewModel = remember(screen.session) {
-                    ShellViewModel(screen.session, logoutUseCase)
-                }
-                val saleViewModel = remember(screen.session) {
-                    CashierSaleViewModel(
-                        saleUseCases = koin.get<SaleUseCases>(),
-                        saleUiStateStore = koin.get(),
-                        cardPaymentAdapter = koin.get<CardPaymentAdapter>(),
-                        receiptPrinterAdapter = koin.get<ReceiptPrinterAdapter>(),
-                        onNavigateToCash = { shellViewModel.select(com.posfab.shared.features.shell.ShellRoute.CASH) },
+                    val managerViewModel = remember {
+                        ManagerPanelViewModel(koin.get<ReportsUseCases>())
+                    }
+                    val diagnosticsViewModel = remember(screen.session) {
+                        DiagnosticsViewModel(screen.session, koin.get(), koin.get())
+                    }
+                    val catalogViewModel = remember(device.businessUnitId) {
+                        CatalogViewModel(koin.get<CatalogUseCases>(), defaultBusinessUnitId = device.businessUnitId)
+                    }
+                    val operationsViewModel = remember(screen.session, device.terminalId) {
+                        OperationsViewModel(
+                            session = screen.session,
+                            terminalId = device.terminalId,
+                            defaultBusinessUnitId = device.businessUnitId,
+                            useCases = koin.get<OperationsUseCases>(),
+                        )
+                    }
+                    ShellScreen(
+                        viewModel = shellViewModel,
+                        onLoggedOut = controller::onLoggedOut,
+                        posContent = { CashierSaleScreen(saleViewModel) },
+                        cashContent = { CashSessionScreen(cashViewModel) },
+                        historyContent = { DailyHistoryScreen(historyViewModel) },
+                        catalogContent = { CatalogScreen(catalogViewModel) },
+                        operationsContent = { OperationsScreen(operationsViewModel) },
+                        reportsContent = { ManagerPanelScreen(managerViewModel) },
+                        diagnosticsContent = { DiagnosticsScreen(diagnosticsViewModel) },
                     )
                 }
-                val cashViewModel = remember(screen.session) {
-                    CashSessionViewModel(
-                        terminalId = device.terminalId,
-                        businessUnitId = device.businessUnitId,
-                        cashUseCases = koin.get<CashUseCases>(),
-                        onNavigateToPos = { shellViewModel.select(com.posfab.shared.features.shell.ShellRoute.POS) },
-                    )
-                }
-                val historyViewModel = remember(screen.session) {
-                    DailyHistoryViewModel(screen.session, koin.get<ReportsUseCases>())
-                }
-                val managerViewModel = remember {
-                    ManagerPanelViewModel(koin.get<ReportsUseCases>())
-                }
-                val diagnosticsViewModel = remember(screen.session) {
-                    DiagnosticsViewModel(screen.session, koin.get(), koin.get())
-                }
-                val catalogViewModel = remember(device.businessUnitId) {
-                    CatalogViewModel(koin.get<CatalogUseCases>(), defaultBusinessUnitId = device.businessUnitId)
-                }
-                val operationsViewModel = remember(screen.session, device.terminalId) {
-                    OperationsViewModel(
-                        session = screen.session,
-                        terminalId = device.terminalId,
-                        defaultBusinessUnitId = device.businessUnitId,
-                        useCases = koin.get<OperationsUseCases>(),
-                    )
-                }
-                ShellScreen(
-                    viewModel = shellViewModel,
-                    onLoggedOut = controller::onLoggedOut,
-                    posContent = { CashierSaleScreen(saleViewModel) },
-                    cashContent = { CashSessionScreen(cashViewModel) },
-                    historyContent = { DailyHistoryScreen(historyViewModel) },
-                    catalogContent = { CatalogScreen(catalogViewModel) },
-                    operationsContent = { OperationsScreen(operationsViewModel) },
-                    reportsContent = { ManagerPanelScreen(managerViewModel) },
-                    diagnosticsContent = { DiagnosticsScreen(diagnosticsViewModel) },
-                )
             }
         }
     }

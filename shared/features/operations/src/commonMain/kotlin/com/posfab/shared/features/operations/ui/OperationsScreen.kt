@@ -56,7 +56,7 @@ fun OperationsScreen(viewModel: OperationsViewModel) {
     val state by viewModel.state.collectAsState()
 
     Column(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().padding(PosSpacing.lg),
         verticalArrangement = Arrangement.spacedBy(PosSpacing.md),
     ) {
         Row(
@@ -345,8 +345,8 @@ private fun PurchasesTab(state: OperationsState, viewModel: OperationsViewModel)
                 PosTextField(
                     value = state.purchaseLineExpiryDate,
                     onValueChange = viewModel::onPurchaseLineExpiryDateChange,
-                    label = "Caducidad AAAA-MM-DD",
-                    modifier = Modifier.width(190.dp),
+                    label = "Caducidad (AAAA-MM-DD)",
+                    modifier = Modifier.width(230.dp),
                 )
                 PosSecondaryButton(
                     text = "Agregar",
@@ -436,7 +436,7 @@ private fun NewSupplierForm(state: OperationsState, viewModel: OperationsViewMod
                     value = state.newSupplierPhone,
                     onValueChange = viewModel::onNewSupplierPhoneChange,
                     label = "Teléfono (opcional)",
-                    modifier = Modifier.width(170.dp),
+                    modifier = Modifier.width(200.dp),
                 )
                 PosTextField(
                     value = state.newSupplierTaxId,
