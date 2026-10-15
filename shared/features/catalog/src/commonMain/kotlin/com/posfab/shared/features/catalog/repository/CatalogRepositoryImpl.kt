@@ -3,152 +3,128 @@ package com.posfab.shared.features.catalog.repository
 import com.posfab.shared.auth.refresh.AuthorizedApiExecutor
 import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
-import com.posfab.shared.features.catalog.domain.BusinessUnit
+import com.posfab.shared.core.result.map
 import com.posfab.shared.features.catalog.domain.CatalogProductDetail
 import com.posfab.shared.features.catalog.domain.CatalogProductSummary
-import com.posfab.shared.features.catalog.domain.CatalogUnit
-import com.posfab.shared.features.catalog.domain.CreateProductInput
-import com.posfab.shared.features.catalog.domain.PriceHistoryEntry
+import com.posfab.shared.features.catalog.domain.KitchenKind
+import com.posfab.shared.features.catalog.domain.PriceType
+import com.posfab.shared.features.catalog.domain.PricesInput
+import com.posfab.shared.features.catalog.domain.ProductInput
 import com.posfab.shared.features.catalog.domain.ProductPage
-import com.posfab.shared.features.catalog.domain.ProductUomConversion
-import com.posfab.shared.features.catalog.domain.UpdateProductInput
-import com.posfab.shared.network.catalog.AddProductUomRequestDto
-import com.posfab.shared.network.catalog.BusinessUnitDto
+import com.posfab.shared.features.catalog.domain.ProductPrices
 import com.posfab.shared.network.catalog.CatalogApi
-import com.posfab.shared.network.catalog.CreatePriceHistoryRequestDto
 import com.posfab.shared.network.catalog.CreateProductRequestDto
-import com.posfab.shared.network.catalog.PriceHistoryDto
 import com.posfab.shared.network.catalog.ProductDetailDto
-import com.posfab.shared.network.catalog.ProductListResponseDto
-import com.posfab.shared.network.catalog.ProductUomDto
-import com.posfab.shared.network.catalog.UnitDto
+import com.posfab.shared.network.catalog.ProductListItemDto
+import com.posfab.shared.network.catalog.ProductPricesDto
+import com.posfab.shared.network.catalog.SetProductPricesRequestDto
 import com.posfab.shared.network.catalog.UpdateProductRequestDto
 
 class CatalogRepositoryImpl(
     private val catalogApi: CatalogApi,
     private val executor: AuthorizedApiExecutor,
 ) : CatalogRepository {
-    override suspend fun listProducts(query: String?, limit: Int, offset: Int, active: Boolean?): AppResult<ProductPage> {
-        return when (val result = authorized { catalogApi.listProducts(it, query, limit, offset, active) }) {
-            is AppResult.Success -> AppResult.Success(result.value.toDomain())
-            is AppResult.Failure -> result
-        }
-    }
-
-    override suspend fun createProduct(input: CreateProductInput): AppResult<CatalogProductDetail> {
-        return when (
-            val result = authorized {
-                catalogApi.createProduct(
-                    it,
-                    CreateProductRequestDto(
-                        name = input.name,
-                        sku = input.sku,
-                        barcode = input.barcode,
-                        baseUnit = input.baseUnit,
-                        lotTracked = input.lotTracked,
-                        active = input.active,
-                    ),
-                )
-            }
-        ) {
-            is AppResult.Success -> AppResult.Success(result.value.toDomain())
-            is AppResult.Failure -> result
-        }
-    }
-
-    override suspend fun getProduct(productId: String): AppResult<CatalogProductDetail> {
-        return when (val result = authorized { catalogApi.getProduct(it, productId) }) {
-            is AppResult.Success -> AppResult.Success(result.value.toDomain())
-            is AppResult.Failure -> result
-        }
-    }
-
-    override suspend fun updateProduct(productId: String, input: UpdateProductInput): AppResult<CatalogProductDetail> {
-        return when (
-            val result = authorized {
-                catalogApi.updateProduct(
-                    it,
-                    productId,
-                    UpdateProductRequestDto(
-                        name = input.name,
-                        sku = input.sku,
-                        barcode = input.barcode,
-                        baseUnit = input.baseUnit,
-                        lotTracked = input.lotTracked,
-                        active = input.active,
-                    ),
-                )
-            }
-        ) {
-            is AppResult.Success -> AppResult.Success(result.value.toDomain())
-            is AppResult.Failure -> result
-        }
-    }
-
-    override suspend fun addUom(productId: String, unit: String, factorToBase: Double): AppResult<Unit> =
+    override suspend fun listProducts(query: String?, activeOnly: Boolean, offset: Int): AppResult<ProductPage> =
         authorized {
-            catalogApi.addProductUom(
+            catalogApi.listProducts(
                 accessToken = it,
-                productId = productId,
-                request = AddProductUomRequestDto(unit = unit, factorToBase = factorToBase.toDecimalString()),
+                query = query?.trim()?.ifBlank { null },
+                limit = PAGE_LIMIT,
+                offset = offset.coerceAtLeast(0),
+                active = if (activeOnly) true else null,
             )
-        }
+        }.map { page -> ProductPage(items = page.items.map { it.toSummary() }, total = page.total) }
 
-    override suspend fun listUnits(): AppResult<List<CatalogUnit>> {
-        return when (val result = authorized { catalogApi.listUnits(it) }) {
-            is AppResult.Success -> AppResult.Success(result.value.map { it.toDomainUnit() })
-            is AppResult.Failure -> result
-        }
-    }
+    override suspend fun getProduct(productId: String): AppResult<CatalogProductDetail> =
+        authorized { catalogApi.getProduct(it, productId) }.map { it.toDomain() }
 
-    override suspend fun listBusinessUnits(): AppResult<List<BusinessUnit>> {
-        return when (val result = authorized { catalogApi.listBusinessUnits(it) }) {
-            is AppResult.Success -> AppResult.Success(result.value.filter { it.active }.map { it.toDomainBusinessUnit() })
-            is AppResult.Failure -> result
-        }
-    }
-
-    override suspend fun addPrice(productId: String, businessUnitId: Long, price: Double): AppResult<Unit> =
+    override suspend fun createProduct(input: ProductInput): AppResult<CatalogProductDetail> =
         authorized {
-            catalogApi.addPriceHistory(
-                accessToken = it,
-                request = CreatePriceHistoryRequestDto(
-                    productId = productId,
-                    businessUnitId = businessUnitId,
-                    price = price.toDecimalString(),
+            catalogApi.createProduct(
+                it,
+                CreateProductRequestDto(
+                    name = input.name,
+                    sku = input.sku,
+                    barcode = input.barcode,
+                    baseUnit = input.priceType.baseUnit(),
+                    lotTracked = input.lotTracked,
+                    active = input.active,
+                    priceType = input.priceType.name,
+                    counted = input.counted,
+                    piecesPerPack = input.piecesPerPack,
+                    kitchenKind = input.kitchenKind?.name,
                 ),
             )
-        }
+        }.map { it.toDomain() }
 
-    override suspend fun findByBarcode(barcode: String): AppResult<CatalogProductDetail?> {
-        // The backend answers with a lightweight lookup (product summary + matched UOM). The catalog
-        // screen needs the full detail (UOMs, price history), so resolve it with a second call by id.
-        return when (val lookup = authorized { catalogApi.findByBarcode(it, barcode) }) {
+    override suspend fun updateProduct(productId: String, input: ProductInput): AppResult<CatalogProductDetail> =
+        authorized {
+            catalogApi.updateProduct(
+                it,
+                productId,
+                UpdateProductRequestDto(
+                    name = input.name,
+                    sku = input.sku,
+                    barcode = input.barcode,
+                    baseUnit = input.priceType.baseUnit(),
+                    lotTracked = input.lotTracked,
+                    active = input.active,
+                    priceType = input.priceType.name,
+                    counted = input.counted,
+                    piecesPerPack = input.piecesPerPack ?: 0,
+                    kitchenKind = input.kitchenKind?.name ?: "",
+                ),
+            )
+        }.map { it.toDomain() }
+
+    override suspend fun setPrices(productId: String, input: PricesInput): AppResult<CatalogProductDetail> =
+        authorized {
+            catalogApi.setPrices(
+                it,
+                productId,
+                SetProductPricesRequestDto(
+                    cashTakeaway = input.cashTakeaway.toDecimalString(),
+                    listTakeaway = input.listTakeaway.toDecimalString(),
+                    cashOnsite = input.cashOnsite?.toDecimalString(),
+                    listOnsite = input.listOnsite?.toDecimalString(),
+                    suggestedPrice = input.suggestedPrice,
+                ),
+            )
+        }.map { it.toDomain() }
+
+    override suspend fun assignInternalCode(productId: String): AppResult<CatalogProductDetail> =
+        authorized { catalogApi.assignInternalCode(it, productId) }.map { it.toDomain() }
+
+    override suspend fun findByBarcode(barcode: String): AppResult<CatalogProductDetail?> =
+        when (val lookup = authorized { catalogApi.findByBarcode(it, barcode) }) {
             is AppResult.Success -> getProduct(lookup.value.product.id.toString())
             is AppResult.Failure ->
-                // 404 (unknown barcode) is mapped to AppError.Validation by ApiErrorMapper.
-                if (lookup.error is AppError.Validation) AppResult.Success(null) else lookup
+                if (lookup.error.isBarcodeNotFound()) AppResult.Success(null) else lookup
         }
-    }
+
+    override suspend fun cashDiscountPct(): AppResult<Double> =
+        when (val result = authorized { catalogApi.getBusinessConfig(it) }) {
+            is AppResult.Success -> result.value.cashDiscountPct.toDoubleOrNull()
+                ?.let { AppResult.Success(it) }
+                ?: AppResult.Failure(AppError.Unknown("cashDiscountPct"))
+            is AppResult.Failure -> result
+        }
 
     private suspend fun <T> authorized(block: suspend (String) -> AppResult<T>): AppResult<T> = executor.execute(block)
 
-    private fun ProductListResponseDto.toDomain() = ProductPage(
-        items = items.map {
-            CatalogProductSummary(
-                id = it.id,
-                name = it.name,
-                sku = it.sku,
-                barcode = it.barcode,
-                baseUnit = it.baseUnit,
-                lotTracked = it.lotTracked,
-                active = it.active,
-                currentPrice = it.currentPrice?.toDoubleOrNull(),
-            )
-        },
-        total = total,
-        limit = limit,
-        offset = offset,
+    private fun AppError.isBarcodeNotFound(): Boolean =
+        this is AppError.Validation && message.contains(BARCODE_NOT_FOUND, ignoreCase = true)
+
+    private fun PriceType.baseUnit(): String = if (this == PriceType.WEIGHT) WEIGHT_UNIT else PIECE_UNIT
+
+    private fun ProductListItemDto.toSummary() = CatalogProductSummary(
+        id = id,
+        name = name,
+        barcode = barcode,
+        priceType = PriceType.fromRaw(priceType),
+        kitchenKind = KitchenKind.fromRaw(kitchenKind),
+        active = active,
+        cashTakeaway = prices?.cashTakeaway?.toDoubleOrNull() ?: currentPrice?.toDoubleOrNull(),
     )
 
     private fun ProductDetailDto.toDomain() = CatalogProductDetail(
@@ -156,36 +132,32 @@ class CatalogRepositoryImpl(
         name = name,
         sku = sku,
         barcode = barcode,
-        baseUnit = baseUnit,
         lotTracked = lotTracked,
         active = active,
-        currentPrice = currentPrice?.toDoubleOrNull(),
-        uoms = uoms.map { it.toDomainUom() },
-        priceHistory = priceHistory.map { it.toDomainPriceHistory() },
+        priceType = PriceType.fromRaw(priceType),
+        counted = counted,
+        piecesPerPack = piecesPerPack,
+        kitchenKind = KitchenKind.fromRaw(kitchenKind),
+        prices = prices?.toDomain(),
     )
 
-    private fun ProductUomDto.toDomainUom() = ProductUomConversion(
-        unit = unit,
-        factorToBase = factorToBase.toDoubleOrNull() ?: 1.0,
-    )
+    private fun ProductPricesDto.toDomain(): ProductPrices? {
+        val cash = cashTakeaway.toDoubleOrNull() ?: return null
+        return ProductPrices(
+            cashTakeaway = cash,
+            listTakeaway = listTakeaway.toDoubleOrNull() ?: cash,
+            cashOnsite = cashOnsite?.toDoubleOrNull(),
+            listOnsite = listOnsite?.toDoubleOrNull(),
+            suggestedPrice = suggestedPrice,
+        )
+    }
 
-    private fun PriceHistoryDto.toDomainPriceHistory() = PriceHistoryEntry(
-        productId = productId,
-        price = price.toDoubleOrNull() ?: 0.0,
-        effectiveAt = effectiveAt,
-    )
-
-    private fun UnitDto.toDomainUnit() = CatalogUnit(
-        code = code,
-        name = name,
-    )
-
-    private fun BusinessUnitDto.toDomainBusinessUnit() = BusinessUnit(
-        id = id,
-        code = code,
-        name = name,
-    )
-
-    /** Backend money/factor contract is a plain decimal string (BigDecimal on the server). */
     private fun Double.toDecimalString(): String = toBigDecimal().toPlainString()
+
+    private companion object {
+        const val PAGE_LIMIT = 50
+        const val WEIGHT_UNIT = "KG"
+        const val PIECE_UNIT = "PZA"
+        const val BARCODE_NOT_FOUND = "Barcode not found"
+    }
 }

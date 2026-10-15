@@ -4,6 +4,15 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
+data class ProductPricesDto(
+    @SerialName("cashTakeaway") val cashTakeaway: String,
+    @SerialName("listTakeaway") val listTakeaway: String,
+    @SerialName("cashOnsite") val cashOnsite: String? = null,
+    @SerialName("listOnsite") val listOnsite: String? = null,
+    @SerialName("suggestedPrice") val suggestedPrice: Boolean = false,
+)
+
+@Serializable
 data class ProductListItemDto(
     val id: String,
     val sku: String? = null,
@@ -13,8 +22,12 @@ data class ProductListItemDto(
     @SerialName("baseUnitId") val baseUnitId: Long,
     @SerialName("lotTracked") val lotTracked: Boolean,
     val active: Boolean,
-    /** Decimal string from the backend (BigDecimal), e.g. "34.50". */
     @SerialName("currentPrice") val currentPrice: String? = null,
+    @SerialName("priceType") val priceType: String = "PIECE",
+    val counted: Boolean = false,
+    @SerialName("piecesPerPack") val piecesPerPack: Int? = null,
+    @SerialName("kitchenKind") val kitchenKind: String? = null,
+    val prices: ProductPricesDto? = null,
 )
 
 @Serializable
@@ -36,21 +49,18 @@ data class ProductDetailDto(
     @SerialName("lotTracked") val lotTracked: Boolean,
     val active: Boolean,
     @SerialName("currentPrice") val currentPrice: String? = null,
+    @SerialName("priceType") val priceType: String = "PIECE",
+    val counted: Boolean = false,
+    @SerialName("piecesPerPack") val piecesPerPack: Int? = null,
+    @SerialName("kitchenKind") val kitchenKind: String? = null,
+    val prices: ProductPricesDto? = null,
     val uoms: List<ProductUomDto> = emptyList(),
-    @SerialName("priceHistory") val priceHistory: List<PriceHistoryDto> = emptyList(),
 )
 
 @Serializable
 data class ProductUomDto(
     val unit: String,
     @SerialName("factorToBase") val factorToBase: String,
-)
-
-@Serializable
-data class PriceHistoryDto(
-    @SerialName("productId") val productId: String,
-    val price: String,
-    @SerialName("effectiveAt") val effectiveAt: String,
 )
 
 @Serializable
@@ -69,6 +79,10 @@ data class CreateProductRequestDto(
     @SerialName("baseUnit") val baseUnit: String,
     @SerialName("lotTracked") val lotTracked: Boolean,
     val active: Boolean = true,
+    @SerialName("priceType") val priceType: String,
+    val counted: Boolean,
+    @SerialName("piecesPerPack") val piecesPerPack: Int? = null,
+    @SerialName("kitchenKind") val kitchenKind: String? = null,
 )
 
 @Serializable
@@ -79,19 +93,25 @@ data class UpdateProductRequestDto(
     @SerialName("baseUnit") val baseUnit: String,
     @SerialName("lotTracked") val lotTracked: Boolean,
     val active: Boolean,
+    @SerialName("priceType") val priceType: String,
+    val counted: Boolean,
+    @SerialName("piecesPerPack") val piecesPerPack: Int?,
+    @SerialName("kitchenKind") val kitchenKind: String?,
 )
 
 @Serializable
-data class AddProductUomRequestDto(
-    val unit: String,
-    @SerialName("factorToBase") val factorToBase: String,
+data class SetProductPricesRequestDto(
+    @SerialName("cashTakeaway") val cashTakeaway: String,
+    @SerialName("listTakeaway") val listTakeaway: String? = null,
+    @SerialName("cashOnsite") val cashOnsite: String? = null,
+    @SerialName("listOnsite") val listOnsite: String? = null,
+    @SerialName("suggestedPrice") val suggestedPrice: Boolean,
 )
 
 @Serializable
-data class CreatePriceHistoryRequestDto(
-    @SerialName("productId") val productId: String,
-    @SerialName("businessUnitId") val businessUnitId: Long,
-    val price: String,
+data class BusinessConfigDto(
+    @SerialName("cashDiscountPct") val cashDiscountPct: String,
+    val timezone: String,
 )
 
 @Serializable

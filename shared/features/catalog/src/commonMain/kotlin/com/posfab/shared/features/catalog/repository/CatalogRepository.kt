@@ -1,21 +1,18 @@
 package com.posfab.shared.features.catalog.repository
 
 import com.posfab.shared.core.result.AppResult
-import com.posfab.shared.features.catalog.domain.BusinessUnit
 import com.posfab.shared.features.catalog.domain.CatalogProductDetail
-import com.posfab.shared.features.catalog.domain.CatalogUnit
-import com.posfab.shared.features.catalog.domain.CreateProductInput
+import com.posfab.shared.features.catalog.domain.PricesInput
+import com.posfab.shared.features.catalog.domain.ProductInput
 import com.posfab.shared.features.catalog.domain.ProductPage
-import com.posfab.shared.features.catalog.domain.UpdateProductInput
 
 interface CatalogRepository {
-    suspend fun listProducts(query: String?, limit: Int, offset: Int, active: Boolean?): AppResult<ProductPage>
-    suspend fun createProduct(input: CreateProductInput): AppResult<CatalogProductDetail>
+    suspend fun listProducts(query: String?, activeOnly: Boolean, offset: Int): AppResult<ProductPage>
     suspend fun getProduct(productId: String): AppResult<CatalogProductDetail>
-    suspend fun updateProduct(productId: String, input: UpdateProductInput): AppResult<CatalogProductDetail>
-    suspend fun addUom(productId: String, unit: String, factorToBase: Double): AppResult<Unit>
-    suspend fun listUnits(): AppResult<List<CatalogUnit>>
-    suspend fun listBusinessUnits(): AppResult<List<BusinessUnit>>
-    suspend fun addPrice(productId: String, businessUnitId: Long, price: Double): AppResult<Unit>
+    suspend fun createProduct(input: ProductInput): AppResult<CatalogProductDetail>
+    suspend fun updateProduct(productId: String, input: ProductInput): AppResult<CatalogProductDetail>
+    suspend fun setPrices(productId: String, input: PricesInput): AppResult<CatalogProductDetail>
+    suspend fun assignInternalCode(productId: String): AppResult<CatalogProductDetail>
     suspend fun findByBarcode(barcode: String): AppResult<CatalogProductDetail?>
+    suspend fun cashDiscountPct(): AppResult<Double>
 }

@@ -1,13 +1,17 @@
 package com.posfab.shared.features.catalog.ui
 
 import com.posfab.shared.core.BaseViewModel
+import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
 import com.posfab.shared.features.catalog.common.CatalogErrorText
 import com.posfab.shared.features.catalog.common.CatalogUseCases
+import com.posfab.shared.features.catalog.common.moneyInput
+import com.posfab.shared.features.catalog.common.proposeListPrice
 import com.posfab.shared.features.catalog.domain.CatalogProductDetail
-import com.posfab.shared.features.catalog.domain.CatalogProductSummary
-import com.posfab.shared.features.catalog.domain.CreateProductInput
-import com.posfab.shared.features.catalog.domain.UpdateProductInput
+import com.posfab.shared.features.catalog.domain.KitchenKind
+import com.posfab.shared.features.catalog.domain.PriceType
+import com.posfab.shared.features.catalog.domain.PricesInput
+import com.posfab.shared.features.catalog.domain.ProductInput
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -15,582 +19,539 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.getAndUpdate
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 class CatalogViewModel(
     private val useCases: CatalogUseCases,
     dispatcher: CoroutineDispatcher = Dispatchers.Default,
-    /** Business unit of the terminal running the app; preselected for new prices. */
-    private val defaultBusinessUnitId: Long? = null,
 ) : BaseViewModel(dispatcher) {
-    private val _state = MutableStateFlow(
-        CatalogState(
-            isLoadingList = true,
-            isLoadingUnits = true,
-            isLoadingBusinessUnits = true,
-            selectedBusinessUnitId = defaultBusinessUnitId,
-        )
-    )
+    private val _state = MutableStateFlow(CatalogState())
     val state: StateFlow<CatalogState> = _state.asStateFlow()
 
+    private val repository get() = useCases.repository
     private var listDebounceJob: Job? = null
+    private var listJob: Job? = null
+    private var selectJob: Job? = null
+    private var lookupJob: Job? = null
+    private var loadMoreJob: Job? = null
 
     init {
-        refreshList(resetOffset = true)
-        loadUnits()
-        loadBusinessUnits()
-    }
-
-    fun onBusinessUnitChange(businessUnitId: Long) {
-        _state.value = _state.value.copy(selectedBusinessUnitId = businessUnitId)
+        loadCashDiscountPct()
+        refreshList()
     }
 
     fun onQueryChange(value: String) {
-        _state.value = _state.value.copy(query = value)
-        debounceListReload()
+        _state.update { it.copy(query = value) }
+        listDebounceJob?.cancel()
+        listDebounceJob = scope.launch {
+            delay(SEARCH_DEBOUNCE_MS)
+            refreshList()
+        }
     }
 
-    fun onLimitChange(value: String) {
-        val parsed = value.toIntOrNull() ?: return
-        if (parsed <= 0) return
-        _state.value = _state.value.copy(limit = parsed.coerceIn(1, 100), offset = 0)
-        refreshList(resetOffset = false)
+    fun onActiveOnlyChange(activeOnly: Boolean) {
+        _state.update { it.copy(activeOnly = activeOnly) }
+        refreshList()
     }
 
-    fun onActiveFilterChange(filter: ActiveFilter) {
-        _state.value = _state.value.copy(activeFilter = filter, offset = 0)
-        refreshList(resetOffset = false)
-    }
-
-    fun goNextPage() {
+    fun refreshList() {
+        listDebounceJob?.cancel()
+        listJob?.cancel()
+        loadMoreJob?.cancel()
         val snapshot = _state.value
-        if (!snapshot.canGoNextPage) return
-        _state.value = snapshot.copy(offset = snapshot.offset + snapshot.limit)
-        refreshList(resetOffset = false)
+        val query = snapshot.query.trim().ifBlank { null }
+        _state.update { it.copy(isLoadingList = true, isLoadingMore = false) }
+        listJob = scope.launch {
+            when (val result = repository.listProducts(query, snapshot.activeOnly, 0)) {
+                is AppResult.Success -> _state.update {
+                    it.copy(isLoadingList = false, products = result.value.items, total = result.value.total)
+                }
+                is AppResult.Failure -> _state.update {
+                    it.copy(isLoadingList = false, errorMessage = CatalogErrorText.from(result.error))
+                }
+            }
+        }
     }
 
-    fun goPrevPage() {
-        val snapshot = _state.value
-        if (!snapshot.canGoPrevPage) return
-        _state.value = snapshot.copy(offset = (snapshot.offset - snapshot.limit).coerceAtLeast(0))
-        refreshList(resetOffset = false)
-    }
-
-    fun refreshList(resetOffset: Boolean = false) {
-        val snapshot = _state.value
-        scope.launch {
-            val offset = if (resetOffset) 0 else snapshot.offset
-            _state.value = _state.value.copy(isLoadingList = true, offset = offset, errorMessage = null)
-            when (
-                val result = useCases.repository.listProducts(
-                    query = snapshot.query.trim().ifBlank { null },
-                    limit = snapshot.limit,
-                    offset = offset,
-                    active = snapshot.activeFilter.toQuery(),
-                )
-            ) {
-                is AppResult.Success -> {
-                    val emptyNotice = if (result.value.items.isEmpty()) "Sin productos para el filtro actual" else null
-                    _state.value = _state.value.copy(
-                        isLoadingList = false,
-                        products = result.value.items,
+    fun loadMore() {
+        val before = _state.getAndUpdate {
+            if (it.isLoadingMore || it.isLoadingList || !it.canLoadMore) it else it.copy(isLoadingMore = true)
+        }
+        if (before.isLoadingMore || before.isLoadingList || !before.canLoadMore) return
+        val query = before.query.trim().ifBlank { null }
+        val offset = before.products.size
+        loadMoreJob = scope.launch {
+            when (val result = repository.listProducts(query, before.activeOnly, offset)) {
+                is AppResult.Success -> _state.update { current ->
+                    val known = current.products.map { it.id }.toSet()
+                    current.copy(
+                        isLoadingMore = false,
+                        products = current.products + result.value.items.filterNot { it.id in known },
                         total = result.value.total,
-                        offset = result.value.offset,
-                        notice = emptyNotice ?: _state.value.notice,
                     )
                 }
-                is AppResult.Failure -> {
-                    _state.value = _state.value.copy(
-                        isLoadingList = false,
-                        errorMessage = CatalogErrorText.from(result.error),
-                    )
+                is AppResult.Failure -> _state.update {
+                    it.copy(isLoadingMore = false, errorMessage = CatalogErrorText.from(result.error))
                 }
             }
         }
     }
 
-    fun selectProduct(productId: String) {
-        scope.launch {
-            _state.value = _state.value.copy(isLoadingDetail = true, errorMessage = null, notice = null)
-            when (val result = useCases.repository.getProduct(productId)) {
-                is AppResult.Success -> {
-                    applySelectedProduct(result.value)
-                }
-                is AppResult.Failure -> {
-                    _state.value = _state.value.copy(
-                        isLoadingDetail = false,
-                        errorMessage = CatalogErrorText.from(result.error),
-                    )
-                }
-            }
-        }
-    }
-
-    fun startCreateProduct() {
-        val defaultUnit = _state.value.units.firstOrNull()?.code ?: "EA"
-        _state.value = _state.value.copy(
-            selectedProduct = null,
-            formMode = CatalogFormMode.CREATING,
-            form = ProductFormState(baseUnit = defaultUnit, active = true),
-            hasUnsavedChanges = false,
-            newUomUnit = defaultUnit,
-            newUomFactorInput = "1",
-            newPriceInput = "",
-            showAdvancedFields = false,
-            notice = null,
-            errorMessage = null,
-        )
-    }
-
-    fun cancelForm() {
-        _state.value = _state.value.copy(
-            formMode = CatalogFormMode.IDLE,
-            selectedProduct = null,
-            form = ProductFormState(),
-            hasUnsavedChanges = false,
-            notice = null,
-            errorMessage = null,
-        )
-    }
-
-    fun onFormNameChange(value: String) = updateForm { copy(name = value) }
-    fun onFormSkuChange(value: String) = updateForm { copy(sku = value) }
-    fun onFormBarcodeChange(value: String) = updateForm { copy(barcode = value) }
-    fun onFormBaseUnitChange(value: String) = updateForm { copy(baseUnit = value) }
-    fun onFormActiveChange(value: Boolean) = updateForm { copy(active = value) }
-    fun onFormInitialPriceChange(value: String) = updateForm { copy(initialPrice = value) }
-
-    fun onFormLotTrackedChange(value: Boolean) {
-        if (value && !_state.value.form.lotTracked) {
-            _state.value = _state.value.copy(showLotTrackingWarning = true)
-        } else {
-            updateForm { copy(lotTracked = value) }
-        }
-    }
-
-    fun confirmLotTracking() {
-        _state.value = _state.value.copy(showLotTrackingWarning = false)
-        updateForm { copy(lotTracked = true) }
-    }
-
-    fun dismissLotTrackingWarning() {
-        _state.value = _state.value.copy(showLotTrackingWarning = false)
-    }
-
-    fun toggleAdvancedFields() {
-        _state.value = _state.value.copy(showAdvancedFields = !_state.value.showAdvancedFields)
-    }
-
-    fun saveProduct() {
-        val snapshot = _state.value
-        val form = snapshot.form
-        val validationError = validateProductForm(form)
-        if (validationError != null) {
-            _state.value = snapshot.copy(errorMessage = validationError)
+    fun onSearchSubmit() {
+        val query = _state.value.query.trim()
+        if (!query.isScanCode()) {
+            refreshList()
             return
         }
-
-        val initialPrice = form.initialPrice.toDoubleOrNull()
-        val wantsInitialPrice = snapshot.selectedProduct == null && initialPrice != null && initialPrice > 0.0
-        val priceBusinessUnitId = snapshot.selectedBusinessUnitId
-        if (wantsInitialPrice && priceBusinessUnitId == null) {
-            _state.value = snapshot.copy(errorMessage = BUSINESS_UNIT_REQUIRED)
-            return
-        }
-
-        scope.launch {
-            _state.value = _state.value.copy(isSaving = true, errorMessage = null, notice = null)
-            val result = if (snapshot.selectedProduct == null) {
-                useCases.repository.createProduct(
-                    CreateProductInput(
-                        name = form.name.trim(),
-                        sku = form.sku.trim().ifBlank { null },
-                        barcode = form.barcode.trim().ifBlank { null },
-                        baseUnit = form.baseUnit.trim(),
-                        lotTracked = form.lotTracked,
-                        active = form.active,
-                    )
-                )
-            } else {
-                useCases.repository.updateProduct(
-                    snapshot.selectedProduct.id,
-                    UpdateProductInput(
-                        name = form.name.trim(),
-                        sku = form.sku.trim().ifBlank { null },
-                        barcode = form.barcode.trim().ifBlank { null },
-                        baseUnit = form.baseUnit.trim(),
-                        lotTracked = form.lotTracked,
-                        active = form.active,
-                    )
-                )
-            }
-
-            when (result) {
-                is AppResult.Success -> {
-                    val isCreating = snapshot.selectedProduct == null
-                    val parsedPrice = initialPrice
-
-                    if (isCreating && parsedPrice != null && parsedPrice > 0.0 && priceBusinessUnitId != null) {
-                        when (useCases.repository.addPrice(result.value.id, priceBusinessUnitId, parsedPrice)) {
-                            is AppResult.Success -> {
-                                // Refresh product to get updated price
-                                when (val refreshed = useCases.repository.getProduct(result.value.id)) {
-                                    is AppResult.Success -> applySelectedProduct(refreshed.value)
-                                    is AppResult.Failure -> applySelectedProduct(result.value)
-                                }
-                                _state.value = _state.value.copy(
-                                    isSaving = false,
-                                    notice = "Producto creado con precio $${"%.2f".format(parsedPrice)}",
-                                )
-                            }
-                            is AppResult.Failure -> {
-                                applySelectedProduct(result.value)
-                                _state.value = _state.value.copy(
-                                    isSaving = false,
-                                    notice = "Producto creado",
-                                    errorMessage = "No se pudo registrar el precio. Registralo manualmente.",
-                                )
-                            }
-                        }
-                    } else {
-                        applySelectedProduct(result.value)
-                        _state.value = _state.value.copy(
-                            isSaving = false,
-                            notice = if (isCreating) "Producto creado" else "Producto actualizado",
-                        )
-                    }
-                    refreshList(resetOffset = false)
-                }
-                is AppResult.Failure -> {
-                    _state.value = _state.value.copy(
-                        isSaving = false,
-                        errorMessage = CatalogErrorText.from(result.error),
-                    )
-                }
-            }
-        }
-    }
-
-    fun onNewUomUnitChange(value: String) {
-        _state.value = _state.value.copy(newUomUnit = value)
-    }
-
-    fun onNewUomFactorChange(value: String) {
-        _state.value = _state.value.copy(newUomFactorInput = value)
-    }
-
-    fun addUomConversion() {
-        val snapshot = _state.value
-        val productId = snapshot.selectedProduct?.id
-        if (productId == null) {
-            _state.value = snapshot.copy(errorMessage = "Selecciona un producto para agregar UOM")
-            return
-        }
-        val factor = snapshot.newUomFactorInput.toDoubleOrNull()
-        if (factor == null || factor <= 0.0) {
-            _state.value = snapshot.copy(errorMessage = "factor_to_base debe ser mayor a 0")
-            return
-        }
-        val unit = snapshot.newUomUnit.trim()
-        if (unit.isEmpty()) {
-            _state.value = snapshot.copy(errorMessage = "Unidad requerida")
-            return
-        }
-
-        scope.launch {
-            _state.value = _state.value.copy(isSaving = true, errorMessage = null)
-            when (val result = useCases.repository.addUom(productId, unit, factor)) {
-                is AppResult.Success -> {
-                    _state.value = _state.value.copy(
-                        isSaving = false,
-                        notice = "UOM agregada",
-                        newUomFactorInput = "1",
-                    )
-                    refreshCurrentProduct()
-                }
-                is AppResult.Failure -> {
-                    _state.value = _state.value.copy(
-                        isSaving = false,
-                        errorMessage = CatalogErrorText.from(result.error),
-                    )
-                }
-            }
-        }
-    }
-
-    fun onNewPriceChange(value: String) {
-        _state.value = _state.value.copy(newPriceInput = value)
-    }
-
-    fun addPriceEntry() {
-        val snapshot = _state.value
-        val productId = snapshot.selectedProduct?.id
-        if (productId == null) {
-            _state.value = snapshot.copy(errorMessage = "Selecciona un producto para registrar precio")
-            return
-        }
-        val price = snapshot.newPriceInput.toDoubleOrNull()
-        if (price == null || price <= 0.0) {
-            _state.value = snapshot.copy(errorMessage = "Precio invalido")
-            return
-        }
-        val businessUnitId = snapshot.selectedBusinessUnitId
-        if (businessUnitId == null) {
-            _state.value = snapshot.copy(errorMessage = BUSINESS_UNIT_REQUIRED)
-            return
-        }
-
-        scope.launch {
-            _state.value = _state.value.copy(isSaving = true, errorMessage = null)
-            when (val result = useCases.repository.addPrice(productId, businessUnitId, price)) {
-                is AppResult.Success -> {
-                    _state.value = _state.value.copy(
-                        isSaving = false,
-                        newPriceInput = "",
-                        notice = "Precio registrado",
-                    )
-                    refreshCurrentProduct()
-                    refreshList(resetOffset = false)
-                }
-                is AppResult.Failure -> {
-                    _state.value = _state.value.copy(
-                        isSaving = false,
-                        errorMessage = CatalogErrorText.from(result.error),
-                    )
-                }
-            }
-        }
-    }
-
-    fun onBarcodeCheckInputChange(value: String) {
-        _state.value = _state.value.copy(barcodeCheckInput = value)
-    }
-
-    fun checkBarcode() {
-        val barcode = _state.value.barcodeCheckInput.trim()
-        if (barcode.isEmpty()) return
-
-        scope.launch {
-            _state.value = _state.value.copy(isSaving = true, errorMessage = null)
-            when (val result = useCases.repository.findByBarcode(barcode)) {
+        listDebounceJob?.cancel()
+        lookupJob?.cancel()
+        selectJob?.cancel()
+        _state.update { it.copy(query = "") }
+        lookupJob = scope.launch {
+            when (val result = repository.findByBarcode(query)) {
                 is AppResult.Success -> {
                     val detail = result.value
                     if (detail != null) {
-                        applySelectedProduct(detail)
-                        _state.value = _state.value.copy(
-                            isSaving = false,
-                            barcodeCheckInput = "",
-                            barcodeCheckResult = detail.toSummary(),
-                            notice = "Producto encontrado: ${detail.name}",
-                        )
+                        leaveTo(PendingAction.ScanOpen(detail))
                     } else {
-                        _state.value = _state.value.copy(
-                            isSaving = false,
-                            barcodeCheckResult = null,
-                            notice = "Codigo de barras no encontrado",
-                        )
+                        _state.update { it.copy(errorMessage = CatalogStrings.notFoundWithCode(query), notice = null) }
+                    }
+                    refreshList()
+                }
+                is AppResult.Failure -> _state.update { it.copy(errorMessage = CatalogErrorText.from(result.error)) }
+            }
+        }
+    }
+
+    fun selectProduct(id: String) = leaveTo(PendingAction.Select(id))
+
+    fun startCreate() = leaveTo(PendingAction.Create)
+
+    fun cancel() = leaveTo(PendingAction.Cancel)
+
+    fun confirmDiscard() {
+        val confirm = _state.value.confirm as? CatalogConfirm.Discard ?: return
+        _state.update { it.copy(confirm = null, hasUnsavedChanges = false) }
+        perform(confirm.next)
+    }
+
+    fun confirmSave() {
+        if (_state.value.confirm != CatalogConfirm.Save) return
+        _state.update { it.copy(confirm = null) }
+        runSave()
+    }
+
+    fun dismissConfirm() {
+        _state.update { it.copy(confirm = null) }
+    }
+
+    private fun leaveTo(next: PendingAction) {
+        val snapshot = _state.value
+        if (snapshot.mode != CatalogFormMode.IDLE && snapshot.hasUnsavedChanges) {
+            _state.update { it.copy(confirm = CatalogConfirm.Discard(next)) }
+        } else {
+            perform(next)
+        }
+    }
+
+    private fun perform(next: PendingAction) {
+        when (next) {
+            PendingAction.Cancel -> closeForm()
+            PendingAction.Create -> openCreate()
+            is PendingAction.Select -> loadProduct(next.id)
+            is PendingAction.ScanOpen -> openProduct(next.detail)
+        }
+    }
+
+    private fun loadProduct(id: String) {
+        selectJob?.cancel()
+        lookupJob?.cancel()
+        selectJob = scope.launch {
+            when (val result = repository.getProduct(id)) {
+                is AppResult.Success -> openProduct(result.value)
+                is AppResult.Failure -> _state.update { it.copy(errorMessage = CatalogErrorText.from(result.error)) }
+            }
+        }
+    }
+
+    private fun openCreate() {
+        _state.update {
+            it.copy(
+                mode = CatalogFormMode.CREATING,
+                selected = null,
+                form = ProductForm(),
+                hasUnsavedChanges = false,
+                isSaving = false,
+                isGeneratingCode = false,
+                showCountSection = false,
+                notice = null,
+                errorMessage = null,
+            )
+        }
+    }
+
+    fun onNameChange(value: String) = updateForm { copy(name = value) }
+
+    fun onBarcodeChange(value: String) = updateForm {
+        val barcode = value.trim()
+        copy(barcode = barcode, generateCodeOnSave = generateCodeOnSave && barcode.isBlank())
+    }
+
+    fun onPriceTypeChange(type: PriceType) = updateForm {
+        copy(
+            priceType = type,
+            counted = if (type == PriceType.OPEN) false else counted,
+            piecesPerPack = if (type == PriceType.PIECE) piecesPerPack else "",
+        )
+    }
+
+    fun onCashTakeawayChange(value: String) {
+        val pct = _state.value.cashDiscountPct
+        updateForm {
+            val cash = value.moneyChars()
+            copy(cashTakeaway = cash, listTakeaway = derivedList(cash, listTakeaway, listTakeawayEdited, suggestedPrice, pct))
+        }
+    }
+
+    fun onListTakeawayChange(value: String) = updateForm {
+        if (suggestedPrice) this else copy(listTakeaway = value.moneyChars(), listTakeawayEdited = true)
+    }
+
+    fun onCashOnsiteChange(value: String) {
+        val pct = _state.value.cashDiscountPct
+        updateForm {
+            val cash = value.moneyChars()
+            if (cash.isBlank()) {
+                copy(cashOnsite = cash, listOnsite = "", listOnsiteEdited = false)
+            } else {
+                copy(cashOnsite = cash, listOnsite = derivedList(cash, listOnsite, listOnsiteEdited, suggestedPrice, pct))
+            }
+        }
+    }
+
+    fun onListOnsiteChange(value: String) = updateForm {
+        if (suggestedPrice || cashOnsite.isBlank()) this else copy(listOnsite = value.moneyChars(), listOnsiteEdited = true)
+    }
+
+    fun onSuggestedPriceChange(checked: Boolean) {
+        val pct = _state.value.cashDiscountPct
+        updateForm {
+            copy(
+                suggestedPrice = checked,
+                listTakeaway = derivedList(cashTakeaway, listTakeaway, edited = false, suggested = checked, pct = pct),
+                listOnsite = if (cashOnsite.isBlank()) "" else derivedList(cashOnsite, listOnsite, edited = false, suggested = checked, pct = pct),
+                listTakeawayEdited = false,
+                listOnsiteEdited = false,
+            )
+        }
+    }
+
+    fun onKitchenKindChange(kind: KitchenKind?) = updateForm { copy(kitchenKind = kind) }
+
+    fun onCountedChange(counted: Boolean) = updateForm {
+        copy(counted = if (priceType == PriceType.OPEN) false else counted)
+    }
+
+    fun onPiecesPerPackChange(value: String) = updateForm {
+        copy(piecesPerPack = value.filterIndexed { index, c -> c.isDigit() || (index == 0 && c == '-') })
+    }
+
+    fun onActiveChange(active: Boolean) = updateForm { copy(active = active) }
+
+    fun toggleCountSection() {
+        _state.update { it.copy(showCountSection = !it.showCountSection) }
+    }
+
+    fun requestGenerateCode() {
+        val snapshot = _state.value
+        if (snapshot.isGeneratingCode || snapshot.isSaving) return
+        when (snapshot.mode) {
+            CatalogFormMode.IDLE -> Unit
+            CatalogFormMode.CREATING -> updateForm { copy(generateCodeOnSave = !generateCodeOnSave, barcode = "") }
+            CatalogFormMode.EDITING -> {
+                val productId = snapshot.selected?.id ?: return
+                val before = _state.getAndUpdate {
+                    if (it.isGeneratingCode || it.isSaving) it else it.copy(isGeneratingCode = true, errorMessage = null, notice = null)
+                }
+                if (before.isGeneratingCode || before.isSaving) return
+                scope.launch {
+                    when (val result = repository.assignInternalCode(productId)) {
+                        is AppResult.Success -> _state.update {
+                            it.copy(
+                                isGeneratingCode = false,
+                                selected = result.value,
+                                form = it.form.copy(barcode = result.value.barcode.orEmpty(), generateCodeOnSave = false),
+                                notice = CatalogStrings.CODE_GENERATED,
+                            )
+                        }
+                        is AppResult.Failure -> _state.update {
+                            it.copy(isGeneratingCode = false, errorMessage = CatalogErrorText.from(result.error))
+                        }
                     }
                 }
-                is AppResult.Failure -> {
-                    _state.value = _state.value.copy(
-                        isSaving = false,
-                        errorMessage = CatalogErrorText.from(result.error),
-                    )
-                }
             }
         }
     }
 
-    // ── Quick-add dialog ──
-
-    fun openQuickAdd() {
-        val defaultUnit = _state.value.units.firstOrNull()?.code ?: "EA"
-        _state.value = _state.value.copy(
-            showQuickAddDialog = true,
-            quickAddName = "",
-            quickAddPrice = "",
-            quickAddUnit = defaultUnit,
-            errorMessage = null,
-        )
-    }
-
-    fun closeQuickAdd() {
-        _state.value = _state.value.copy(showQuickAddDialog = false, errorMessage = null)
-    }
-
-    fun onQuickAddNameChange(value: String) {
-        _state.value = _state.value.copy(quickAddName = value)
-    }
-
-    fun onQuickAddPriceChange(value: String) {
-        _state.value = _state.value.copy(quickAddPrice = value)
-    }
-
-    fun onQuickAddUnitChange(value: String) {
-        _state.value = _state.value.copy(quickAddUnit = value)
-    }
-
-    fun submitQuickAdd() {
-        val s = _state.value
-        val name = s.quickAddName.trim()
-        if (name.isEmpty()) {
-            _state.value = s.copy(errorMessage = "Nombre requerido")
+    fun save() {
+        val snapshot = _state.value
+        if (snapshot.mode == CatalogFormMode.IDLE || snapshot.isSaving || snapshot.isGeneratingCode) return
+        val validation = validate(snapshot.form)
+        if (validation is FormValidation.Invalid) {
+            _state.update { it.copy(errorMessage = validation.message, notice = null) }
             return
         }
-        val price = s.quickAddPrice.toDoubleOrNull()
-        if (price == null || price <= 0.0) {
-            _state.value = s.copy(errorMessage = "Precio invalido")
+        _state.update { it.copy(confirm = CatalogConfirm.Save, errorMessage = null) }
+    }
+
+    private fun runSave() {
+        val snapshot = _state.value
+        if (snapshot.mode == CatalogFormMode.IDLE || snapshot.isSaving) return
+        val form = snapshot.form
+        val validation = validate(form)
+        if (validation is FormValidation.Invalid) {
+            _state.update { it.copy(errorMessage = validation.message, notice = null) }
             return
         }
-        val businessUnitId = s.selectedBusinessUnitId
-        if (businessUnitId == null) {
-            _state.value = s.copy(errorMessage = BUSINESS_UNIT_REQUIRED)
-            return
+        val valid = validation as FormValidation.Valid
+        val before = _state.getAndUpdate {
+            if (it.isSaving || it.isGeneratingCode) it else it.copy(isSaving = true, errorMessage = null, notice = null)
         }
+        if (before.isSaving || before.isGeneratingCode) return
         scope.launch {
-            _state.value = _state.value.copy(isQuickAdding = true, errorMessage = null)
-            val createResult = useCases.repository.createProduct(
-                CreateProductInput(
-                    name = name,
-                    sku = null,
-                    barcode = null,
-                    baseUnit = s.quickAddUnit,
-                    lotTracked = false,
-                    active = true,
+            val existing = _state.value.selected?.takeIf { _state.value.mode == CatalogFormMode.EDITING }
+            val saved = if (existing == null) {
+                repository.createProduct(valid.product)
+            } else {
+                repository.updateProduct(existing.id, valid.product)
+            }
+            var detail = saved.valueOrStop() ?: return@launch
+            _state.update { it.copy(selected = detail, mode = CatalogFormMode.EDITING) }
+            if (existing == null) refreshList()
+
+            if (valid.prices != null) {
+                detail = repository.setPrices(detail.id, valid.prices).valueOrStop() ?: return@launch
+                _state.update { it.copy(selected = detail) }
+            }
+
+            if (form.generateCodeOnSave && valid.product.barcode == null) {
+                detail = repository.assignInternalCode(detail.id).valueOrStop() ?: return@launch
+                _state.update { it.copy(selected = detail, form = it.form.copy(generateCodeOnSave = false)) }
+            }
+
+            _state.update {
+                it.copy(
+                    selected = detail,
+                    form = formFrom(detail, it.cashDiscountPct),
+                    hasUnsavedChanges = false,
+                    isSaving = false,
+                    notice = CatalogStrings.SAVED,
                 )
+            }
+            refreshList()
+        }
+    }
+
+    private fun closeForm() {
+        _state.update {
+            it.copy(
+                mode = CatalogFormMode.IDLE,
+                selected = null,
+                form = ProductForm(),
+                hasUnsavedChanges = false,
+                isSaving = false,
+                isGeneratingCode = false,
+                showCountSection = false,
+                notice = null,
+                errorMessage = null,
             )
-            when (createResult) {
-                is AppResult.Success -> {
-                    useCases.repository.addPrice(createResult.value.id, businessUnitId, price)
-                    _state.value = _state.value.copy(
-                        isQuickAdding = false,
-                        showQuickAddDialog = false,
-                        notice = "Producto \"$name\" creado con precio $${"%.2f".format(price)}",
-                        errorMessage = null,
-                    )
-                    refreshList(resetOffset = false)
-                }
-                is AppResult.Failure -> {
-                    _state.value = _state.value.copy(
-                        isQuickAdding = false,
-                        errorMessage = CatalogErrorText.from(createResult.error),
-                    )
-                }
-            }
         }
     }
 
-    private fun refreshCurrentProduct() {
-        val selectedId = _state.value.selectedProduct?.id ?: return
-        selectProduct(selectedId)
-    }
-
-    private fun loadUnits() {
+    private fun loadCashDiscountPct() {
         scope.launch {
-            _state.value = _state.value.copy(isLoadingUnits = true, errorMessage = null)
-            when (val result = useCases.repository.listUnits()) {
-                is AppResult.Success -> {
-                    val firstUnit = result.value.firstOrNull()?.code.orEmpty()
-                    _state.value = _state.value.copy(
-                        isLoadingUnits = false,
-                        units = result.value,
-                        newUomUnit = _state.value.newUomUnit.ifBlank { firstUnit },
-                        form = _state.value.form.copy(
-                            baseUnit = if (_state.value.form.baseUnit.isBlank()) firstUnit else _state.value.form.baseUnit,
-                        ),
-                    )
-                }
-                is AppResult.Failure -> {
-                    _state.value = _state.value.copy(
-                        isLoadingUnits = false,
-                        errorMessage = CatalogErrorText.from(result.error),
-                    )
-                }
+            val result = repository.cashDiscountPct()
+            if (result is AppResult.Success) {
+                _state.update { it.copy(cashDiscountPct = result.value) }
             }
         }
     }
 
-    private fun loadBusinessUnits() {
-        scope.launch {
-            _state.value = _state.value.copy(isLoadingBusinessUnits = true)
-            when (val result = useCases.repository.listBusinessUnits()) {
-                is AppResult.Success -> {
-                    val units = result.value
-                    val current = _state.value.selectedBusinessUnitId
-                    val selected = current?.takeIf { id -> units.any { it.id == id } } ?: units.firstOrNull()?.id
-                    _state.value = _state.value.copy(
-                        isLoadingBusinessUnits = false,
-                        businessUnits = units,
-                        selectedBusinessUnitId = selected,
-                    )
-                }
-                is AppResult.Failure -> {
-                    _state.value = _state.value.copy(
-                        isLoadingBusinessUnits = false,
-                        errorMessage = CatalogErrorText.from(result.error),
-                    )
-                }
-            }
+    private fun openProduct(detail: CatalogProductDetail) {
+        _state.update {
+            it.copy(
+                mode = CatalogFormMode.EDITING,
+                selected = detail,
+                form = formFrom(detail, it.cashDiscountPct),
+                hasUnsavedChanges = false,
+                isSaving = false,
+                isGeneratingCode = false,
+                notice = null,
+                errorMessage = null,
+            )
         }
     }
 
-    private fun debounceListReload() {
-        listDebounceJob?.cancel()
-        listDebounceJob = scope.launch {
-            delay(300)
-            _state.value = _state.value.copy(offset = 0)
-            refreshList(resetOffset = false)
-        }
-    }
-
-    private fun applySelectedProduct(detail: CatalogProductDetail) {
-        _state.value = _state.value.copy(
-            isLoadingDetail = false,
-            formMode = CatalogFormMode.EDITING,
-            selectedProduct = detail,
-            form = ProductFormState(
-                name = detail.name,
-                sku = detail.sku.orEmpty(),
-                barcode = detail.barcode.orEmpty(),
-                baseUnit = detail.baseUnit,
-                lotTracked = detail.lotTracked,
-                active = detail.active,
-            ),
-            hasUnsavedChanges = false,
-            newUomUnit = _state.value.newUomUnit.ifBlank { detail.baseUnit },
-            newUomFactorInput = "1",
+    private fun formFrom(detail: CatalogProductDetail, pct: Double): ProductForm {
+        val prices = detail.prices
+        val suggested = prices?.suggestedPrice ?: false
+        val takeawayEdited = prices != null && !suggested &&
+            prices.listTakeaway != proposeListPrice(prices.cashTakeaway, pct)
+        val onsiteCash = prices?.cashOnsite
+        val onsiteList = prices?.listOnsite
+        val onsiteEdited = !suggested && onsiteCash != null && onsiteList != null &&
+            onsiteList != proposeListPrice(onsiteCash, pct)
+        return ProductForm(
+            name = detail.name,
+            barcode = detail.barcode.orEmpty(),
+            priceType = detail.priceType,
+            cashTakeaway = moneyInput(prices?.cashTakeaway),
+            listTakeaway = moneyInput(prices?.listTakeaway),
+            cashOnsite = moneyInput(prices?.cashOnsite),
+            listOnsite = moneyInput(prices?.listOnsite),
+            listTakeawayEdited = takeawayEdited,
+            listOnsiteEdited = onsiteEdited,
+            suggestedPrice = suggested,
+            kitchenKind = detail.kitchenKind,
+            counted = detail.counted,
+            piecesPerPack = detail.piecesPerPack?.toString().orEmpty(),
+            active = detail.active,
+            sku = detail.sku,
+            lotTracked = detail.lotTracked,
+            generateCodeOnSave = false,
         )
     }
 
-    private fun updateForm(block: ProductFormState.() -> ProductFormState) {
-        val updated = _state.value.form.block()
-        _state.value = _state.value.copy(form = updated, hasUnsavedChanges = true)
+    private fun updateForm(block: ProductForm.() -> ProductForm) {
+        _state.update {
+            if (it.mode == CatalogFormMode.IDLE) it else it.copy(form = it.form.block(), hasUnsavedChanges = true, notice = null)
+        }
     }
 
-    private fun validateProductForm(form: ProductFormState): String? {
-        if (form.name.trim().isEmpty()) return "Nombre requerido"
-        if (form.baseUnit.trim().isEmpty()) return "Unidad base requerida"
-        return null
+    private fun <T> AppResult<T>.valueOrStop(): T? = when (this) {
+        is AppResult.Success -> value
+        is AppResult.Failure -> {
+            stopSaving(error)
+            null
+        }
     }
 
-    private fun ActiveFilter.toQuery(): Boolean? = when (this) {
-        ActiveFilter.ALL -> null
-        ActiveFilter.ACTIVE_ONLY -> true
-        ActiveFilter.INACTIVE_ONLY -> false
+    private fun stopSaving(error: AppError) {
+        _state.update { it.copy(isSaving = false, errorMessage = CatalogErrorText.from(error)) }
+    }
+
+    private fun validate(form: ProductForm): FormValidation {
+        val name = form.name.trim()
+        if (name.isEmpty()) return FormValidation.Invalid(CatalogStrings.NAME_REQUIRED)
+
+        val prices = if (form.priceType == PriceType.OPEN) {
+            null
+        } else {
+            when (val result = validatePrices(form)) {
+                is PricesValidation.Invalid -> return FormValidation.Invalid(result.message)
+                is PricesValidation.Valid -> result.prices
+            }
+        }
+
+        val piecesPerPack = if (form.priceType == PriceType.WEIGHT) {
+            null
+        } else {
+            when (val raw = form.piecesPerPack.trim()) {
+                "" -> null
+                else -> {
+                    val parsed = raw.toIntOrNull() ?: return FormValidation.Invalid(CatalogStrings.PIECES_INVALID)
+                    when {
+                        parsed < 0 -> return FormValidation.Invalid(CatalogStrings.PIECES_INVALID)
+                        parsed <= 1 -> null
+                        else -> parsed
+                    }
+                }
+            }
+        }
+
+        val product = ProductInput(
+            name = name,
+            barcode = form.barcode.trim().ifBlank { null },
+            priceType = form.priceType,
+            counted = form.counted && form.priceType != PriceType.OPEN,
+            piecesPerPack = piecesPerPack,
+            kitchenKind = form.kitchenKind,
+            active = form.active,
+            sku = form.sku,
+            lotTracked = form.lotTracked,
+        )
+        return FormValidation.Valid(product, prices)
+    }
+
+    private fun validatePrices(form: ProductForm): PricesValidation {
+        val pct = _state.value.cashDiscountPct
+        val cashTakeaway = form.cashTakeaway.toDoubleOrNull()?.takeIf { it > 0 }
+            ?: return PricesValidation.Invalid(CatalogStrings.CASH_REQUIRED)
+        val listTakeaway = resolveList(form.listTakeaway, cashTakeaway, form.suggestedPrice, pct)
+            ?: return PricesValidation.Invalid(CatalogStrings.CARD_REQUIRED)
+        if (listTakeaway < cashTakeaway) return PricesValidation.Invalid(CatalogStrings.CARD_BELOW_CASH)
+
+        var cashOnsite: Double? = null
+        var listOnsite: Double? = null
+        if (form.cashOnsite.isNotBlank()) {
+            val cash = form.cashOnsite.toDoubleOrNull()?.takeIf { it > 0 }
+                ?: return PricesValidation.Invalid(CatalogStrings.ONSITE_INVALID)
+            val list = resolveList(form.listOnsite, cash, form.suggestedPrice, pct)
+                ?: return PricesValidation.Invalid(CatalogStrings.CARD_REQUIRED)
+            if (list < cash) return PricesValidation.Invalid(CatalogStrings.CARD_BELOW_CASH)
+            cashOnsite = cash
+            listOnsite = list
+        }
+
+        return PricesValidation.Valid(
+            PricesInput(
+                cashTakeaway = cashTakeaway,
+                listTakeaway = listTakeaway,
+                cashOnsite = cashOnsite,
+                listOnsite = listOnsite,
+                suggestedPrice = form.suggestedPrice,
+            ),
+        )
+    }
+
+    private fun resolveList(raw: String, cash: Double, suggested: Boolean, pct: Double): Double? = when {
+        suggested -> cash
+        raw.isBlank() -> proposeListPrice(cash, pct)
+        else -> raw.toDoubleOrNull()
+    }
+
+    private fun derivedList(cash: String, current: String, edited: Boolean, suggested: Boolean, pct: Double): String = when {
+        suggested -> cash
+        edited -> current
+        else -> cash.toDoubleOrNull()?.takeIf { it > 0 }?.let { moneyInput(proposeListPrice(it, pct)) } ?: ""
+    }
+
+    private fun String.moneyChars(): String {
+        val cleaned = filter { it.isDigit() || it == '.' }
+        val dot = cleaned.indexOf('.')
+        if (dot < 0) return cleaned
+        val decimals = cleaned.substring(dot + 1).filter { it.isDigit() }.take(MAX_DECIMALS)
+        return "${cleaned.substring(0, dot)}.$decimals"
+    }
+
+    private fun String.isScanCode(): Boolean = length in SCAN_MIN_LENGTH..SCAN_MAX_LENGTH && all { it.isDigit() }
+
+    private sealed interface FormValidation {
+        data class Valid(val product: ProductInput, val prices: PricesInput?) : FormValidation
+        data class Invalid(val message: String) : FormValidation
+    }
+
+    private sealed interface PricesValidation {
+        data class Valid(val prices: PricesInput) : PricesValidation
+        data class Invalid(val message: String) : PricesValidation
     }
 
     private companion object {
-        const val BUSINESS_UNIT_REQUIRED = "Selecciona la unidad de negocio para el precio"
+        const val SEARCH_DEBOUNCE_MS = 300L
+        const val SCAN_MIN_LENGTH = 6
+        const val SCAN_MAX_LENGTH = 80
+        const val MAX_DECIMALS = 2
     }
-
-    private fun CatalogProductDetail.toSummary() = CatalogProductSummary(
-        id = id,
-        name = name,
-        sku = sku,
-        barcode = barcode,
-        baseUnit = baseUnit,
-        lotTracked = lotTracked,
-        active = active,
-        currentPrice = currentPrice,
-    )
 }

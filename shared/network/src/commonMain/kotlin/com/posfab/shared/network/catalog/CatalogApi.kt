@@ -27,11 +27,11 @@ interface CatalogApi {
     suspend fun createProduct(accessToken: String, request: CreateProductRequestDto): AppResult<ProductDetailDto>
     suspend fun getProduct(accessToken: String, productId: String): AppResult<ProductDetailDto>
     suspend fun updateProduct(accessToken: String, productId: String, request: UpdateProductRequestDto): AppResult<ProductDetailDto>
-    suspend fun addProductUom(accessToken: String, productId: String, request: AddProductUomRequestDto): AppResult<Unit>
+    suspend fun setPrices(accessToken: String, productId: String, request: SetProductPricesRequestDto): AppResult<ProductDetailDto>
+    suspend fun assignInternalCode(accessToken: String, productId: String): AppResult<ProductDetailDto>
+    suspend fun getBusinessConfig(accessToken: String): AppResult<BusinessConfigDto>
     suspend fun listUnits(accessToken: String): AppResult<List<UnitDto>>
     suspend fun listBusinessUnits(accessToken: String): AppResult<List<BusinessUnitDto>>
-    suspend fun addPriceHistory(accessToken: String, request: CreatePriceHistoryRequestDto): AppResult<Unit>
-    /** GET /products/by-barcode returns a lookup envelope (product summary + matched UOM), not a product detail. */
     suspend fun findByBarcode(accessToken: String, barcode: String): AppResult<BarcodeLookupResponseDto>
 }
 
@@ -77,11 +77,27 @@ class CatalogApiClient(
         }
     }
 
-    override suspend fun addProductUom(accessToken: String, productId: String, request: AddProductUomRequestDto): AppResult<Unit> = safeCall {
-        httpClient.post("${config.apiBaseUrl}/products/$productId/uoms") {
+    override suspend fun setPrices(
+        accessToken: String,
+        productId: String,
+        request: SetProductPricesRequestDto,
+    ): AppResult<ProductDetailDto> = safeCall {
+        httpClient.put("${config.apiBaseUrl}/products/$productId/prices") {
             bearer(accessToken)
             contentType(ContentType.Application.Json)
             setBody(request)
+        }
+    }
+
+    override suspend fun assignInternalCode(accessToken: String, productId: String): AppResult<ProductDetailDto> = safeCall {
+        httpClient.post("${config.apiBaseUrl}/products/$productId/internal-code") {
+            bearer(accessToken)
+        }
+    }
+
+    override suspend fun getBusinessConfig(accessToken: String): AppResult<BusinessConfigDto> = safeCall {
+        httpClient.get("${config.apiBaseUrl}/config/business") {
+            bearer(accessToken)
         }
     }
 
@@ -94,14 +110,6 @@ class CatalogApiClient(
     override suspend fun listBusinessUnits(accessToken: String): AppResult<List<BusinessUnitDto>> = safeCall {
         httpClient.get("${config.apiBaseUrl}/business-units") {
             bearer(accessToken)
-        }
-    }
-
-    override suspend fun addPriceHistory(accessToken: String, request: CreatePriceHistoryRequestDto): AppResult<Unit> = safeCall {
-        httpClient.post("${config.apiBaseUrl}/price-history") {
-            bearer(accessToken)
-            contentType(ContentType.Application.Json)
-            setBody(request)
         }
     }
 

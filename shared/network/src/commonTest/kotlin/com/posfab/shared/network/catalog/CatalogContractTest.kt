@@ -37,16 +37,39 @@ class CatalogContractTest {
     }
 
     @Test
-    fun product_detail_decodes_decimal_strings() {
+    fun product_detail_decodes_prices_and_classification() {
+        val body = """
+            {"id":"3","sku":null,"barcode":"750","name":"Jamon","baseUnit":"KG","baseUnitId":2,
+             "lotTracked":false,"active":true,"currentPrice":"120.00",
+             "priceType":"WEIGHT","kitchenKind":"FONDA","counted":true,"piecesPerPack":20,
+             "prices":{"cashTakeaway":"120.00","listTakeaway":"126.00","cashOnsite":"110.00",
+             "listOnsite":"116.00","suggestedPrice":true},
+             "uoms":[{"unit":"KG","factorToBase":"1.000000"}]}
+        """.trimIndent()
+        val dto = json.decodeFromString<ProductDetailDto>(body)
+        assertEquals("WEIGHT", dto.priceType)
+        assertEquals("FONDA", dto.kitchenKind)
+        assertEquals(true, dto.counted)
+        assertEquals(20, dto.piecesPerPack)
+        assertEquals("126.00", dto.prices?.listTakeaway)
+        assertEquals("110.00", dto.prices?.cashOnsite)
+        assertEquals(true, dto.prices?.suggestedPrice)
+    }
+
+    @Test
+    fun old_shape_product_detail_decodes_with_defaults() {
         val body = """
             {"id":"3","sku":null,"barcode":"750","name":"Aceite 1L","baseUnit":"PZA","baseUnitId":1,
              "lotTracked":false,"active":true,"currentPrice":"34.50",
-             "uoms":[{"unit":"CAJA","factorToBase":"24.000000"}],
-             "priceHistory":[{"productId":"3","price":"34.50","effectiveAt":"2026-09-07T10:00:00Z"}]}
+             "uoms":[{"unit":"CAJA","factorToBase":"24.000000"}]}
         """.trimIndent()
         val dto = json.decodeFromString<ProductDetailDto>(body)
         assertEquals("34.50", dto.currentPrice)
+        assertEquals("PIECE", dto.priceType)
+        assertEquals(false, dto.counted)
+        assertNull(dto.piecesPerPack)
+        assertNull(dto.kitchenKind)
+        assertNull(dto.prices)
         assertEquals("24.000000", dto.uoms.single().factorToBase)
-        assertEquals("34.50", dto.priceHistory.single().price)
     }
 }
