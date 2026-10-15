@@ -7,8 +7,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
@@ -103,12 +101,11 @@ fun DailyHistoryScreen(viewModel: DailyHistoryViewModel) {
             } else if (state.sales.isEmpty()) {
                 EmptyDailyText("Sin ventas para la fecha seleccionada.")
             } else {
-                LazyColumn(
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    userScrollEnabled = false,
                     verticalArrangement = Arrangement.spacedBy(PosSpacing.sm),
                 ) {
-                    items(state.sales) { item ->
+                    state.sales.forEach { item ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,

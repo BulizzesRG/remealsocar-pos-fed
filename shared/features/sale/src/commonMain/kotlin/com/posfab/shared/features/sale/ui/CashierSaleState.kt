@@ -1,36 +1,49 @@
 package com.posfab.shared.features.sale.ui
 
-import com.posfab.shared.features.sale.domain.CheckoutResult
-import com.posfab.shared.features.sale.domain.DraftIssue
+import com.posfab.shared.features.sale.domain.CashCheckoutResult
 import com.posfab.shared.features.sale.domain.SaleDraft
+import com.posfab.shared.features.sale.domain.SaleLine
 import com.posfab.shared.features.sale.domain.SaleProduct
+import com.posfab.shared.features.sale.domain.roundMoney
 
-data class SaleConfirmDialogState(
-    val title: String,
-    val message: String,
-    val confirmLabel: String = "Confirmar",
-    val cancelLabel: String = "Cancelar",
-    val isDestructive: Boolean = false,
-)
+sealed interface SalePhase {
+    data object Loading : SalePhase
+    data object CashClosed : SalePhase
+    data class CashUnavailable(val message: String) : SalePhase
+    data object Selling : SalePhase
+    data object Charging : SalePhase
+    data object Done : SalePhase
+}
+
+sealed interface SaleConfirm {
+    data object ClearCart : SaleConfirm
+}
 
 data class CashierSaleState(
-    val isInitializing: Boolean = true,
-    val cashSessionMissing: Boolean = false,
-    val isBusy: Boolean = false,
-    val isCheckoutInFlight: Boolean = false,
-    val searchQuery: String = "",
-    val barcodeInput: String = "",
-    val searchResults: List<SaleProduct> = emptyList(),
+    val phase: SalePhase = SalePhase.Loading,
     val draft: SaleDraft? = null,
+    val query: String = "",
+    val searchResults: List<SaleProduct> = emptyList(),
+    val kitchenProducts: List<SaleProduct> = emptyList(),
     val selectedLineId: Long? = null,
-    val editQtyInput: String = "",
-    val editUnitInput: String = "",
-    val editPriceInput: String = "",
-    val editLotInput: String = "",
-    val validationIssues: List<DraftIssue> = emptyList(),
-    val checkoutResult: CheckoutResult? = null,
+    val qtyInput: String = "",
+    val pendingMutations: Int = 0,
+    val isCheckoutInFlight: Boolean = false,
     val checkoutIdempotencyKey: String? = null,
-    val confirmDialog: SaleConfirmDialogState? = null,
+    val paidInput: String = "",
+    val lastResult: CashCheckoutResult? = null,
+    val confirm: SaleConfirm? = null,
     val notice: String? = null,
     val errorMessage: String? = null,
-)
+) {
+    val isBusy: Boolean get() = pendingMutations > 0
+    val isPaidLocked: Boolean get() = checkoutIdempotencyKey != null
+    val cashTotal: Double get() = draft?.totals?.cashTotal ?: 0.0
+    val paidAmount: Double? get() = paidInput.toDoubleOrNull()
+    val change: Double? get() = paidAmount?.let { roundMoney(it - cashTotal) }
+    val canConfirmCharge: Boolean
+        get() = paidAmount?.let { roundMoney(it) >= roundMoney(cashTotal) } == true && !isCheckoutInFlight
+    val canCharge: Boolean
+        get() = phase == SalePhase.Selling && draft?.lines?.isNotEmpty() == true && cashTotal > 0 && !isBusy
+    val selectedLine: SaleLine? get() = selectedLineId?.let { id -> draft?.lines?.firstOrNull { it.id == id } }
+}

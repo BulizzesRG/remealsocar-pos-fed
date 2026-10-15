@@ -2,7 +2,9 @@ package com.posfab.shared.network.pos
 
 import com.posfab.shared.config.PosConfig
 import com.posfab.shared.core.result.AppResult
+import com.posfab.shared.network.cash.CashSessionResponseDto
 import com.posfab.shared.network.http.safeCall
+import com.posfab.shared.network.http.safeCallOrNull
 import io.ktor.client.HttpClient
 import io.ktor.client.request.delete
 import io.ktor.client.request.get
@@ -16,7 +18,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
 
 interface PosApi {
-    suspend fun isCashSessionOpen(accessToken: String, terminalId: Long): AppResult<Boolean>
+    suspend fun currentCashSession(accessToken: String, terminalId: Long): AppResult<Boolean>
     suspend fun getCurrentSaleDraft(accessToken: String): AppResult<DraftDto>
     suspend fun createDraft(accessToken: String, request: DraftCreateRequestDto): AppResult<DraftCreateResponseDto>
     suspend fun getDraft(accessToken: String, draftId: Long): AppResult<DraftDto>
@@ -40,6 +42,7 @@ interface PosApi {
         draftId: Long,
         request: CheckoutRequestDto,
     ): AppResult<CheckoutResponseDto>
+    suspend fun cancelDraft(accessToken: String, draftId: Long, request: CancelDraftRequestDto): AppResult<Unit>
     suspend fun findByBarcode(accessToken: String, barcode: String): AppResult<BarcodeLookupResponseDto>
 }
 
@@ -47,15 +50,16 @@ class PosApiClient(
     private val httpClient: HttpClient,
     private val config: PosConfig,
 ) : PosApi {
-    override suspend fun isCashSessionOpen(accessToken: String, terminalId: Long): AppResult<Boolean> {
-        return when (val result = safeCall<Any?> {
+    override suspend fun currentCashSession(accessToken: String, terminalId: Long): AppResult<Boolean> {
+        val result = safeCallOrNull<CashSessionResponseDto> {
             httpClient.get("${config.apiBaseUrl}/cash/sessions/current") {
                 bearer(accessToken)
                 parameter("terminal_id", terminalId)
             }
-        }) {
-            is AppResult.Success -> AppResult.Success(true)
-            is AppResult.Failure -> AppResult.Success(false)
+        }
+        return when (result) {
+            is AppResult.Success -> AppResult.Success(result.value != null)
+            is AppResult.Failure -> result
         }
     }
 
@@ -133,6 +137,18 @@ class PosApiClient(
         request: CheckoutRequestDto,
     ): AppResult<CheckoutResponseDto> = safeCall {
         httpClient.post("${config.apiBaseUrl}/pos/drafts/$draftId/checkout") {
+            bearer(accessToken)
+            contentType(ContentType.Application.Json)
+            setBody(request)
+        }
+    }
+
+    override suspend fun cancelDraft(
+        accessToken: String,
+        draftId: Long,
+        request: CancelDraftRequestDto,
+    ): AppResult<Unit> = safeCall {
+        httpClient.post("${config.apiBaseUrl}/pos/drafts/$draftId/cancel") {
             bearer(accessToken)
             contentType(ContentType.Application.Json)
             setBody(request)

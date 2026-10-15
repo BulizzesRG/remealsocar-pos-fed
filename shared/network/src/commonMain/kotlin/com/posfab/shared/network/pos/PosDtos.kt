@@ -1,5 +1,6 @@
 package com.posfab.shared.network.pos
 
+import com.posfab.shared.network.catalog.ProductPricesDto
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -25,6 +26,7 @@ data class DraftLineDto(
     val qty: String,
     @SerialName("unitPrice") val unitPrice: String? = null,
     @SerialName("unitCost") val unitCost: String? = null,
+    @SerialName("cashUnitPrice") val cashUnitPrice: String? = null,
     @SerialName("productName") val productName: String,
     @SerialName("productBarcode") val productBarcode: String? = null,
     @SerialName("unitCode") val unitCode: String,
@@ -40,13 +42,15 @@ data class DraftTotalsDto(
     val subtotal: String,
     val tax: String,
     val total: String,
+    @SerialName("cashDiscount") val cashDiscount: String = "0",
+    @SerialName("cashTotal") val cashTotal: String? = null,
 )
 
 @Serializable
 data class DraftCreateRequestDto(
     val type: String,
     @SerialName("terminalId") val terminalId: Long,
-    @SerialName("businessUnitId") val businessUnitId: Long,
+    @SerialName("businessUnitId") val businessUnitId: Long? = null,
     @SerialName("customerId") val customerId: Long? = null,
     @SerialName("supplierId") val supplierId: Long? = null,
     val notes: String? = null,
@@ -84,6 +88,8 @@ data class UpdateLineRequestDto(
 @Serializable
 data class CheckoutRequestDto(
     @SerialName("paymentStatus") val paymentStatus: String? = null,
+    @SerialName("paymentType") val paymentType: String? = null,
+    @SerialName("paidAmount") val paidAmount: String? = null,
     @SerialName("customerId") val customerId: Long? = null,
     @SerialName("idempotencyKey") val idempotencyKey: String? = null,
 )
@@ -92,6 +98,14 @@ data class CheckoutRequestDto(
 data class CheckoutResponseDto(
     val id: Long,
     val folio: String? = null,
+    val subtotal: String? = null,
+    @SerialName("cashDiscount") val cashDiscount: String? = null,
+    @SerialName("totalAmount") val totalAmount: String? = null,
+)
+
+@Serializable
+data class CancelDraftRequestDto(
+    @SerialName("expectedVersion") val expectedVersion: Int,
 )
 
 @Serializable
@@ -141,8 +155,10 @@ data class BarcodeLookupProductDto(
     @SerialName("baseUnitId") val baseUnitId: Long,
     @SerialName("requiresLotTracking") val requiresLotTracking: Boolean,
     val active: Boolean,
-    /** Decimal string from the backend (BigDecimal), e.g. "12.50". */
     @SerialName("currentPrice") val currentPrice: String? = null,
+    @SerialName("priceType") val priceType: String = "PIECE",
+    @SerialName("kitchenKind") val kitchenKind: String? = null,
+    val prices: ProductPricesDto? = null,
 )
 
 @Serializable

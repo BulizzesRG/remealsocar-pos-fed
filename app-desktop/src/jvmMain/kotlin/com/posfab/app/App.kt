@@ -105,7 +105,6 @@ fun PosApp(controller: AppStateController) {
                     val saleViewModel = remember(screen.session) {
                         CashierSaleViewModel(
                             saleUseCases = koin.get<SaleUseCases>(),
-                            saleUiStateStore = koin.get(),
                             cardPaymentAdapter = koin.get<CardPaymentAdapter>(),
                             receiptPrinterAdapter = koin.get<ReceiptPrinterAdapter>(),
                             onNavigateToCash = { shellViewModel.select(ShellRoute.CASH) },

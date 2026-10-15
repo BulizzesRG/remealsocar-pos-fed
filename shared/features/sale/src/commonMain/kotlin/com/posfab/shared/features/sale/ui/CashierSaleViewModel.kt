@@ -4,23 +4,30 @@ import com.posfab.shared.core.BaseViewModel
 import com.posfab.shared.core.logging.AppLogger
 import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
-import com.posfab.shared.features.sale.domain.CheckoutMode
+import com.posfab.shared.features.sale.domain.CashCheckoutResult
+import com.posfab.shared.features.sale.domain.CashSessionCheck
 import com.posfab.shared.features.sale.domain.SaleDraft
 import com.posfab.shared.features.sale.domain.SaleLine
 import com.posfab.shared.features.sale.domain.SaleMutationResult
 import com.posfab.shared.features.sale.domain.SaleProduct
 import com.posfab.shared.features.sale.usecase.SaleUseCases
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.getAndUpdate
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.random.Random
+import kotlin.time.Clock
 
 class CashierSaleViewModel(
     private val saleUseCases: SaleUseCases,
-    private val saleUiStateStore: SaleUiStateStore = NoOpSaleUiStateStore,
     private val cardPaymentAdapter: CardPaymentAdapter = NoOpCardPaymentAdapter,
     private val receiptPrinterAdapter: ReceiptPrinterAdapter = NoOpReceiptPrinterAdapter,
     val onNavigateToCash: () -> Unit = {},
@@ -29,451 +36,520 @@ class CashierSaleViewModel(
     private val _state = MutableStateFlow(CashierSaleState())
     val state: StateFlow<CashierSaleState> = _state.asStateFlow()
 
+    private val mutations = Channel<suspend () -> Unit>(Channel.UNLIMITED)
+    private var loadJob: Job? = null
+    private var searchJob: Job? = null
+
     init {
         scope.launch {
-            restoreUiState()
+            for (mutation in mutations) {
+                try {
+                    mutation()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Exception) {
+                    AppLogger.w("sale.mutation_failed reason=${failure::class.simpleName}")
+                }
+                _state.update { it.copy(pendingMutations = (it.pendingMutations - 1).coerceAtLeast(0)) }
+            }
         }
     }
 
-    private suspend fun checkCashSessionThenLoad() {
-        _state.value = _state.value.copy(isInitializing = true, cashSessionMissing = false, errorMessage = null)
-        when (val result = saleUseCases.isCashSessionOpen()) {
-            is AppResult.Success -> {
-                if (result.value) {
-                    openOrCreateDraft()
-                } else {
-                    _state.value = _state.value.copy(isInitializing = false, cashSessionMissing = true)
+    fun load() {
+        if (_state.value.isCheckoutInFlight) return
+        loadJob?.cancel()
+        searchJob?.cancel()
+        loadJob = scope.launch {
+            _state.update { CashierSaleState(phase = SalePhase.Loading, pendingMutations = it.pendingMutations) }
+            val phaseAfterCheck = when (val session = saleUseCases.cashSession()) {
+                is AppResult.Failure -> SalePhase.CashUnavailable(SaleErrorText.from(session.error))
+                is AppResult.Success -> when (val check = session.value) {
+                    CashSessionCheck.Open -> null
+                    CashSessionCheck.Closed -> SalePhase.CashClosed
+                    is CashSessionCheck.Unavailable -> SalePhase.CashUnavailable(SaleErrorText.from(check.error))
                 }
             }
-            is AppResult.Failure -> {
-                // Network error — still try to load the draft; checkout will fail later with a clear message
-                openOrCreateDraft()
+            if (phaseAfterCheck != null) {
+                _state.update { it.copy(phase = phaseAfterCheck) }
+                return@launch
             }
-        }
-    }
-
-    fun retryCashSessionCheck() {
-        scope.launch {
-            // Full state reset — clear ALL stale data from previous session
-            _state.value = CashierSaleState()
-            restoreUiState()
-            checkCashSessionThenLoad()
-        }
-    }
-
-    fun openOrCreateDraft() {
-        scope.launch {
-            _state.value = _state.value.copy(
-                isInitializing = true,
-                isBusy = false,
-                isCheckoutInFlight = false,
-                cashSessionMissing = false,
-                errorMessage = null,
-                notice = null,
-                draft = null,
-                checkoutResult = null,
-                checkoutIdempotencyKey = null,
-                validationIssues = emptyList(),
-                searchResults = emptyList(),
-            )
-            when (val result = saleUseCases.openDraft()) {
+            when (val draft = saleUseCases.currentOrNewDraft()) {
+                is AppResult.Failure -> _state.update {
+                    it.copy(phase = SalePhase.CashUnavailable(SaleErrorText.from(draft.error)))
+                }
                 is AppResult.Success -> {
-                    val recoveredSelectedId = _state.value.selectedLineId
-                    val firstLine = result.value.lines.firstOrNull { it.id == recoveredSelectedId }
-                        ?: result.value.lines.firstOrNull()
-                    _state.value = _state.value.copy(
-                        isInitializing = false,
-                        draft = result.value,
-                        selectedLineId = firstLine?.id,
-                        editQtyInput = firstLine?.qty?.toString().orEmpty(),
-                        editUnitInput = firstLine?.unit.orEmpty(),
-                        editPriceInput = firstLine?.unitPrice?.toString().orEmpty(),
-                        editLotInput = firstLine?.lotId?.toString().orEmpty(),
-                        validationIssues = emptyList(),
-                        checkoutResult = null,
-                        checkoutIdempotencyKey = null,
-                    )
-                }
-                is AppResult.Failure -> {
-                    _state.value = _state.value.copy(
-                        isInitializing = false,
-                        errorMessage = SaleErrorText.from(result.error),
-                    )
-                }
-            }
-        }
-    }
-
-    fun onSearchQueryChange(value: String) {
-        _state.value = _state.value.copy(searchQuery = value)
-        persistUiState()
-    }
-
-    fun onBarcodeChange(value: String) {
-        _state.value = _state.value.copy(barcodeInput = value)
-        persistUiState()
-    }
-
-    fun searchProducts() {
-        val query = _state.value.searchQuery.trim()
-        if (query.isEmpty()) return
-
-        scope.launch {
-            _state.value = _state.value.copy(isBusy = true, errorMessage = null)
-            when (val result = saleUseCases.searchProducts(query, limit = 12)) {
-                is AppResult.Success -> {
-                    _state.value = _state.value.copy(isBusy = false, searchResults = result.value)
-                }
-                is AppResult.Failure -> {
-                    _state.value = _state.value.copy(
-                        isBusy = false,
-                        errorMessage = SaleErrorText.from(result.error),
-                    )
-                }
-            }
-        }
-    }
-
-    fun addByBarcode() {
-        val barcode = _state.value.barcodeInput.trim()
-        if (barcode.isEmpty()) return
-
-        scope.launch {
-            _state.value = _state.value.copy(isBusy = true, errorMessage = null)
-            when (val lookup = saleUseCases.barcodeLookup(barcode)) {
-                is AppResult.Success -> {
-                    val product = lookup.value
-                    if (product == null) {
-                        _state.value = _state.value.copy(isBusy = false, errorMessage = "Codigo no encontrado")
-                    } else {
-                        addProductInternal(product)
-                        _state.value = _state.value.copy(barcodeInput = "")
+                    val kitchen = saleUseCases.kitchenProducts()
+                    _state.update {
+                        it.copy(
+                            phase = SalePhase.Selling,
+                            draft = draft.value,
+                            kitchenProducts = (kitchen as? AppResult.Success)?.value.orEmpty(),
+                            notice = if (kitchen is AppResult.Failure) SaleStrings.KITCHEN_UNAVAILABLE else null,
+                        )
                     }
                 }
-                is AppResult.Failure -> {
-                    _state.value = _state.value.copy(
-                        isBusy = false,
-                        errorMessage = SaleErrorText.from(lookup.error),
-                    )
-                }
             }
+        }
+    }
+
+    fun retry() = load()
+
+    fun onQueryChange(value: String) {
+        _state.update { it.copy(query = value, errorMessage = null) }
+        searchJob?.cancel()
+        val query = value.trim()
+        if (query.length < MIN_QUERY_LENGTH) {
+            _state.update { it.copy(searchResults = emptyList()) }
+            return
+        }
+        searchJob = scope.launch {
+            delay(SEARCH_DEBOUNCE_MS)
+            search(query)
+        }
+    }
+
+    fun onSubmit() {
+        val query = _state.value.query.trim()
+        if (query.isEmpty()) return
+        searchJob?.cancel()
+        if (query.isBarcode()) {
+            _state.update { it.copy(query = "", searchResults = emptyList(), errorMessage = null, notice = null) }
+            scope.launch { lookupBarcode(query) }
+        } else {
+            searchJob = scope.launch { search(query) }
         }
     }
 
     fun addProduct(product: SaleProduct) {
-        scope.launch { addProductInternal(product) }
+        if (!product.isSellable) {
+            _state.update { it.copy(errorMessage = SaleStrings.NOT_SELLABLE_YET) }
+            return
+        }
+        when (_state.value.phase) {
+            SalePhase.Done -> {
+                startNextSale()
+                enqueue { addOrIncrement(product) }
+            }
+            SalePhase.Selling -> enqueue { addOrIncrement(product) }
+            SalePhase.Charging, SalePhase.Loading -> _state.update { it.copy(notice = SaleStrings.FINISH_CHARGE_FIRST) }
+            else -> Unit
+        }
     }
 
     fun selectLine(lineId: Long) {
-        val line = _state.value.draft?.lines?.firstOrNull { it.id == lineId } ?: return
-        _state.value = _state.value.copy(
-            selectedLineId = lineId,
-            editQtyInput = line.qty.toString(),
-            editUnitInput = line.unit,
-            editPriceInput = line.unitPrice.toString(),
-            editLotInput = line.lotId?.toString().orEmpty(),
-        )
-        persistUiState()
+        _state.update { current ->
+            val line = current.draft?.lines?.firstOrNull { it.id == lineId } ?: return@update current
+            current.copy(selectedLineId = line.id, qtyInput = SaleStrings.qtyText(line.qty))
+        }
     }
 
-    fun incrementSelectedLineQty() {
-        val currentLine = selectedLine() ?: return
-        updateLine(currentLine.copy(qty = currentLine.qty + 1.0))
+    fun incrementQty() {
+        if (!isSelling()) return
+        enqueueWhileSelling {
+            val line = _state.value.selectedLine ?: return@enqueueWhileSelling
+            changeQty(line, line.qty + 1)
+        }
     }
 
-    fun decrementSelectedLineQty() {
-        val currentLine = selectedLine() ?: return
-        val nextQty = (currentLine.qty - 1.0).coerceAtLeast(1.0)
-        updateLine(currentLine.copy(qty = nextQty))
+    fun decrementQty() {
+        if (!isSelling()) return
+        enqueueWhileSelling {
+            val line = _state.value.selectedLine ?: return@enqueueWhileSelling
+            if (line.qty > 1) changeQty(line, (line.qty - 1).coerceAtLeast(1.0))
+        }
     }
 
-    fun updateSelectedLineUnit(unit: String) {
-        val currentLine = selectedLine() ?: return
-        updateLine(currentLine.copy(unit = unit.trim().ifBlank { currentLine.unit }))
+    fun onQtyInputChange(value: String) {
+        _state.update { it.copy(qtyInput = value.filter(Char::isDigit).take(MAX_QTY_DIGITS)) }
     }
 
-    fun updateSelectedLinePrice(price: Double) {
-        val currentLine = selectedLine() ?: return
-        updateLine(currentLine.copy(unitPrice = price.coerceAtLeast(0.0)))
-    }
-
-    fun updateSelectedLineLot(lotId: Long?) {
-        val currentLine = selectedLine() ?: return
-        updateLine(currentLine.copy(lotId = lotId))
-    }
-
-    fun onEditQtyChange(value: String) {
-        _state.value = _state.value.copy(editQtyInput = value)
-    }
-
-    fun onEditUnitChange(value: String) {
-        _state.value = _state.value.copy(editUnitInput = value)
-    }
-
-    fun onEditPriceChange(value: String) {
-        _state.value = _state.value.copy(editPriceInput = value)
-    }
-
-    fun onEditLotChange(value: String) {
-        _state.value = _state.value.copy(editLotInput = value)
-    }
-
-    fun applySelectedLineEdits() {
-        val currentLine = selectedLine() ?: return
+    fun applyQty() {
+        if (!isSelling()) return
         val snapshot = _state.value
-        val qty = snapshot.editQtyInput.toDoubleOrNull() ?: currentLine.qty
-        val unit = snapshot.editUnitInput.trim().ifBlank { currentLine.unit }
-        val price = snapshot.editPriceInput.toDoubleOrNull() ?: currentLine.unitPrice
-        val lot = snapshot.editLotInput.trim().toLongOrNull()
-        updateLine(currentLine.copy(qty = qty.coerceAtLeast(1.0), unit = unit, unitPrice = price.coerceAtLeast(0.0), lotId = lot))
+        val line = snapshot.selectedLine ?: return
+        val qty = snapshot.qtyInput.toIntOrNull()
+        if (qty == null || qty < 1) {
+            _state.update { it.copy(qtyInput = SaleStrings.qtyText(line.qty)) }
+            return
+        }
+        if (qty.toDouble() == line.qty) return
+        enqueueWhileSelling {
+            val current = _state.value.selectedLine ?: return@enqueueWhileSelling
+            changeQty(current, qty.toDouble())
+        }
     }
 
     fun removeSelectedLine() {
-        val snapshot = _state.value
-        val draft = snapshot.draft ?: return
-        val lineId = snapshot.selectedLineId ?: return
-
-        scope.launch {
-            _state.value = snapshot.copy(isBusy = true, errorMessage = null, notice = null)
-            val result = saleUseCases.removeLine(draft.id, lineId, draft.version)
-            applyMutationResult(result)
+        if (!isSelling()) return
+        enqueueWhileSelling {
+            val snapshot = _state.value
+            val draft = snapshot.draft ?: return@enqueueWhileSelling
+            val line = snapshot.selectedLine ?: return@enqueueWhileSelling
+            val result = saleUseCases.removeLine(draft.id, line.id, draft.version)
+            applyMutationResult(result, selectLine = { null })
         }
     }
 
-    fun validateDraft() {
-        val draft = _state.value.draft ?: return
-
-        scope.launch {
-            _state.value = _state.value.copy(isBusy = true, errorMessage = null, notice = null)
-            when (val result = saleUseCases.validateDraft(draft.id)) {
-                is AppResult.Success -> {
-                    _state.value = _state.value.copy(
-                        isBusy = false,
-                        validationIssues = result.value.issues,
-                        notice = if (result.value.hasIssues) "Se encontraron observaciones." else "Borrador valido.",
-                    )
-                }
-                is AppResult.Failure -> {
-                    _state.value = _state.value.copy(
-                        isBusy = false,
-                        errorMessage = SaleErrorText.from(result.error),
-                    )
-                }
+    fun requestClear() {
+        _state.update {
+            if (it.phase == SalePhase.Selling && it.draft?.lines?.isNotEmpty() == true) {
+                it.copy(confirm = SaleConfirm.ClearCart)
+            } else {
+                it
             }
         }
     }
 
-    fun resolveLots() {
-        val draft = _state.value.draft ?: return
-
-        scope.launch {
-            _state.value = _state.value.copy(isBusy = true, errorMessage = null, notice = null)
-            when (val result = saleUseCases.resolveLots(draft.id)) {
-                is AppResult.Success -> {
-                    _state.value = _state.value.copy(
-                        isBusy = false,
-                        draft = result.value,
-                        validationIssues = emptyList(),
-                        notice = "Lotes resueltos.",
-                    )
-                }
-                is AppResult.Failure -> {
-                    _state.value = _state.value.copy(
-                        isBusy = false,
-                        errorMessage = SaleErrorText.from(result.error),
-                    )
-                }
+    fun confirmClear() {
+        _state.update { it.copy(confirm = null) }
+        enqueueWhileSelling {
+            val draft = _state.value.draft ?: return@enqueueWhileSelling
+            when (val cancelled = saleUseCases.cancelDraft(draft.id, draft.version)) {
+                is AppResult.Failure ->
+                    if (cancelled.error is AppError.Conflict) {
+                        replaceDraft(saleUseCases.currentOrNewDraft(), SaleStrings.SALE_CHANGED)
+                    } else {
+                        _state.update { it.copy(errorMessage = SaleErrorText.from(cancelled.error)) }
+                    }
+                is AppResult.Success -> replaceDraft(saleUseCases.newDraft(), null)
             }
         }
     }
 
-    fun checkoutCash() = checkout(CheckoutMode.CASH)
+    fun dismissConfirm() {
+        _state.update { it.copy(confirm = null) }
+    }
 
-    fun checkoutCredit() = checkout(CheckoutMode.ON_CREDIT)
-
-    fun startNewSale() {
-        val snapshot = _state.value
-        val shouldConfirm = snapshot.draft?.lines?.isNotEmpty() == true &&
-            snapshot.draft.status != "COMPLETED"
-        if (!shouldConfirm) {
-            openOrCreateDraft()
-            return
+    fun startCharge() {
+        _state.update {
+            if (it.canCharge) {
+                it.copy(phase = SalePhase.Charging, paidInput = "", errorMessage = null, notice = null)
+            } else {
+                it
+            }
         }
-        _state.value = snapshot.copy(
-            confirmDialog = SaleConfirmDialogState(
-                title = "Descartar venta actual",
-                message = "Hay lineas pendientes en la venta actual. Si continuas, se abrira una venta nueva.",
-                confirmLabel = "Nueva venta",
-                cancelLabel = "Seguir editando",
-                isDestructive = false,
-            )
-        )
     }
 
-    fun confirmStartNewSale() {
-        _state.value = _state.value.copy(confirmDialog = null)
-        openOrCreateDraft()
+    fun payExact() {
+        if (_state.value.isPaidLocked) return
+        _state.update { it.copy(paidInput = formatAmount(it.cashTotal)) }
+        confirmCharge()
     }
 
-    fun dismissConfirmDialog() {
-        _state.value = _state.value.copy(confirmDialog = null)
+    fun payWith(amount: Int) {
+        if (_state.value.isPaidLocked) return
+        _state.update { it.copy(paidInput = amount.toString(), errorMessage = null) }
     }
 
-    private fun checkout(mode: CheckoutMode) {
+    fun onPaidInputChange(value: String) {
+        if (_state.value.isPaidLocked) return
+        _state.update { it.copy(paidInput = sanitizeAmount(value), errorMessage = null) }
+    }
+
+    fun cancelCharge() {
+        _state.update {
+            if (it.phase == SalePhase.Charging && !it.isCheckoutInFlight) {
+                it.copy(
+                    phase = SalePhase.Selling,
+                    paidInput = "",
+                    checkoutIdempotencyKey = null,
+                    errorMessage = null,
+                )
+            } else {
+                it
+            }
+        }
+    }
+
+    fun confirmCharge() {
         val snapshot = _state.value
+        if (snapshot.phase != SalePhase.Charging || !snapshot.canConfirmCharge || snapshot.isBusy) return
         val draft = snapshot.draft ?: return
-        if (snapshot.isCheckoutInFlight) return
-        if (draft.status != "OPEN") return  // guard: don't checkout a completed/cancelled draft
+        val paid = snapshot.paidAmount ?: return
+        val key = snapshot.checkoutIdempotencyKey ?: buildCheckoutKey(draft.id)
+        val previous = _state.getAndUpdate {
+            if (it.isCheckoutInFlight) {
+                it
+            } else {
+                it.copy(isCheckoutInFlight = true, checkoutIdempotencyKey = key, errorMessage = null)
+            }
+        }
+        if (previous.isCheckoutInFlight) return
+        scope.launch { runCheckout(draft, paid, key) }
+    }
 
-        val checkoutKey = snapshot.checkoutIdempotencyKey ?: buildCheckoutKey(draft.id)
-        _state.value = snapshot.copy(
-            isCheckoutInFlight = true,
-            errorMessage = null,
-            notice = null,
-            checkoutIdempotencyKey = checkoutKey,
-        )
-
-        scope.launch {
-            when (val result = saleUseCases.checkout(draft.id, mode, draft.version, checkoutKey)) {
-                is AppResult.Success -> {
-                    _state.value = _state.value.copy(
-                        isCheckoutInFlight = false,
-                        checkoutResult = result.value,
-                        notice = "Venta cerrada. Folio ${result.value.folio}",
-                        draft = draft.copy(status = "COMPLETED"),
-                        validationIssues = emptyList(),
+    fun startNextSale() {
+        enqueue {
+            if (_state.value.phase != SalePhase.Done) return@enqueue
+            when (val next = saleUseCases.newDraft()) {
+                is AppResult.Failure -> _state.update { it.copy(errorMessage = SaleErrorText.from(next.error)) }
+                is AppResult.Success -> _state.update {
+                    it.copy(
+                        phase = SalePhase.Selling,
+                        draft = next.value,
+                        lastResult = null,
+                        query = "",
                         searchResults = emptyList(),
+                        selectedLineId = null,
+                        qtyInput = "",
+                        paidInput = "",
+                        checkoutIdempotencyKey = null,
+                        notice = null,
+                        errorMessage = null,
                     )
-                    persistUiState()
-                    runHardwareHooks(result.value, draft.lines)
                 }
+            }
+        }
+    }
+
+    private suspend fun runCheckout(draft: SaleDraft, paid: Double, key: String) {
+        try {
+            checkout(draft, paid, key)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            failCheckout(AppError.Unknown(failure.message ?: failure::class.simpleName.orEmpty()), key)
+        }
+    }
+
+    private suspend fun checkout(draft: SaleDraft, paid: Double, key: String) {
+        var chargedDraft = draft
+        if (draft.lines.any { it.lotTracked }) {
+            when (val resolved = saleUseCases.resolveLots(draft.id)) {
                 is AppResult.Failure -> {
-                    // On a network failure the server may have processed the request: keep the same
-                    // Idempotency-Key so the retry replays instead of creating a second sale.
-                    val keepKey = result.error is AppError.Network
-                    _state.value = _state.value.copy(
+                    failCheckout(resolved.error, key)
+                    return
+                }
+                is AppResult.Success -> {
+                    chargedDraft = resolved.value
+                    _state.update { it.copy(draft = resolved.value) }
+                }
+            }
+        }
+        when (val result = saleUseCases.checkoutCash(chargedDraft.id, paid, key)) {
+            is AppResult.Failure ->
+                if (result.error is AppError.Conflict) {
+                    recoverFromCheckoutConflict()
+                } else {
+                    failCheckout(result.error, key)
+                }
+            is AppResult.Success -> {
+                val charged = if (result.value.cashTotal <= 0.0) {
+                    result.value.copy(cashTotal = chargedDraft.totals.cashTotal)
+                } else {
+                    result.value
+                }
+                _state.update {
+                    it.copy(
+                        phase = SalePhase.Done,
+                        draft = null,
+                        lastResult = charged,
                         isCheckoutInFlight = false,
-                        checkoutIdempotencyKey = if (keepKey) checkoutKey else null,
-                        errorMessage = SaleErrorText.from(result.error),
+                        checkoutIdempotencyKey = null,
+                        paidInput = "",
+                        selectedLineId = null,
+                        qtyInput = "",
+                        confirm = null,
+                        notice = null,
+                        errorMessage = null,
+                    )
+                }
+                runHardwareHooks(charged, chargedDraft.lines)
+            }
+        }
+    }
+
+    private suspend fun recoverFromCheckoutConflict() {
+        when (val refreshed = saleUseCases.currentOrNewDraft()) {
+            is AppResult.Failure -> _state.update {
+                it.copy(
+                    isCheckoutInFlight = false,
+                    checkoutIdempotencyKey = null,
+                    errorMessage = SaleErrorText.from(refreshed.error),
+                )
+            }
+            is AppResult.Success -> {
+                val possiblyCharged = refreshed.value.lines.isEmpty()
+                _state.update {
+                    it.copy(
+                        phase = SalePhase.Selling,
+                        draft = refreshed.value,
+                        isCheckoutInFlight = false,
+                        checkoutIdempotencyKey = null,
+                        paidInput = "",
+                        selectedLineId = null,
+                        qtyInput = "",
+                        notice = if (possiblyCharged) SaleStrings.POSSIBLY_CHARGED else null,
+                        errorMessage = if (possiblyCharged) null else SaleStrings.CHECKOUT_CONFLICT,
                     )
                 }
             }
         }
     }
 
-    private suspend fun addProductInternal(product: SaleProduct) {
-        val draft = _state.value.draft ?: return
-        val result = saleUseCases.addLine(
-            draftId = draft.id,
-            product = product,
-            qty = 1.0,
-            unitId = product.baseUnitId,
-            price = product.unitPrice,
-            lotId = null,
-            expectedVersion = draft.version,
-        )
-        applyMutationResult(result)
-    }
-
-    private fun selectedLine(): SaleLine? {
-        val snapshot = _state.value
-        val lineId = snapshot.selectedLineId ?: return null
-        return snapshot.draft?.lines?.firstOrNull { it.id == lineId }
-    }
-
-    private fun updateLine(line: SaleLine) {
-        val draft = _state.value.draft ?: return
-
-        scope.launch {
-            _state.value = _state.value.copy(isBusy = true, errorMessage = null, notice = null)
-            // unitId 0L signals the repository to pass null in UpdateLineRequestDto (leave unchanged on backend)
-            val result = saleUseCases.updateLine(
-                draftId = draft.id,
-                lineId = line.id,
-                qty = line.qty,
-                unitId = 0L,
-                price = line.unitPrice,
-                lotId = line.lotId,
-                expectedVersion = draft.version,
+    private fun failCheckout(error: AppError, key: String) {
+        val keepKey = error is AppError.Network
+        _state.update {
+            it.copy(
+                isCheckoutInFlight = false,
+                checkoutIdempotencyKey = if (keepKey) key else null,
+                errorMessage = SaleErrorText.from(error),
             )
-            applyMutationResult(result)
         }
     }
 
-    private fun applyMutationResult(result: SaleMutationResult) {
+    private suspend fun search(query: String) {
+        when (val result = saleUseCases.searchProducts(query, SEARCH_LIMIT)) {
+            is AppResult.Success -> _state.update { it.copy(searchResults = result.value) }
+            is AppResult.Failure -> _state.update { it.copy(errorMessage = SaleErrorText.from(result.error)) }
+        }
+    }
+
+    private suspend fun lookupBarcode(code: String) {
+        when (val lookup = saleUseCases.findProductByBarcode(code)) {
+            is AppResult.Failure -> _state.update { it.copy(errorMessage = SaleErrorText.from(lookup.error)) }
+            is AppResult.Success -> {
+                val product = lookup.value
+                when {
+                    product == null -> _state.update { it.copy(errorMessage = SaleStrings.notFoundWithCode(code)) }
+                    !product.isSellable -> _state.update { it.copy(errorMessage = SaleStrings.NOT_SELLABLE_YET) }
+                    else -> addProduct(product)
+                }
+            }
+        }
+    }
+
+    private suspend fun addOrIncrement(product: SaleProduct) {
+        val first = mutateForProduct(product) ?: return
+        val result = if (first is SaleMutationResult.ConflictRefetched) {
+            applyDraft(first.draft, _state.value.selectedLineId, null)
+            when (val retry = mutateForProduct(product) ?: return) {
+                is SaleMutationResult.ConflictRefetched -> {
+                    applyDraft(retry.draft, _state.value.selectedLineId, SaleStrings.notAdded(product.name))
+                    return
+                }
+                else -> retry
+            }
+        } else {
+            first
+        }
+        applyMutationResult(
+            result = result,
+            selectLine = { updated ->
+                updated.lines
+                    .filter { it.productId == product.id && it.unitId == product.unitId }
+                    .maxByOrNull { it.id }
+                    ?.id
+            },
+            successNotice = SaleStrings.added(product.name),
+        )
+    }
+
+    private suspend fun mutateForProduct(product: SaleProduct): SaleMutationResult? {
+        val snapshot = _state.value
+        if (snapshot.phase != SalePhase.Selling) return null
+        val draft = snapshot.draft ?: return null
+        val existing = draft.lines.firstOrNull { it.productId == product.id && it.unitId == product.unitId }
+        return if (existing != null) {
+            saleUseCases.updateLineQty(draft.id, existing.id, existing.qty + 1, draft.version)
+        } else {
+            saleUseCases.addLine(draft.id, product, 1.0, draft.version)
+        }
+    }
+
+    private suspend fun changeQty(line: SaleLine, qty: Double) {
+        val draft = _state.value.draft ?: return
+        val result = saleUseCases.updateLineQty(draft.id, line.id, qty, draft.version)
+        applyMutationResult(result, selectLine = { line.id })
+    }
+
+    private fun replaceDraft(refreshed: AppResult<SaleDraft>, notice: String?) {
+        when (refreshed) {
+            is AppResult.Failure -> _state.update { it.copy(errorMessage = SaleErrorText.from(refreshed.error)) }
+            is AppResult.Success -> _state.update {
+                it.copy(
+                    draft = refreshed.value,
+                    selectedLineId = null,
+                    qtyInput = "",
+                    notice = notice,
+                    errorMessage = null,
+                )
+            }
+        }
+    }
+
+    private fun applyMutationResult(
+        result: SaleMutationResult,
+        selectLine: (SaleDraft) -> Long?,
+        successNotice: String? = null,
+    ) {
         when (result) {
-            is SaleMutationResult.Success -> {
-                val selected = result.draft.lines.firstOrNull { it.id == _state.value.selectedLineId }
-                    ?: result.draft.lines.firstOrNull()
-                _state.value = _state.value.copy(
-                    isBusy = false,
-                    draft = result.draft,
-                    selectedLineId = selected?.id,
-                    editQtyInput = selected?.qty?.toString().orEmpty(),
-                    editUnitInput = selected?.unit.orEmpty(),
-                    editPriceInput = selected?.unitPrice?.toString().orEmpty(),
-                    editLotInput = selected?.lotId?.toString().orEmpty(),
-                    notice = null,
-                )
-                persistUiState()
-            }
-            is SaleMutationResult.ConflictRefetched -> {
-                val selected = result.draft.lines.firstOrNull()
-                _state.value = _state.value.copy(
-                    isBusy = false,
-                    draft = result.draft,
-                    selectedLineId = selected?.id,
-                    editQtyInput = selected?.qty?.toString().orEmpty(),
-                    editUnitInput = selected?.unit.orEmpty(),
-                    editPriceInput = selected?.unitPrice?.toString().orEmpty(),
-                    editLotInput = selected?.lotId?.toString().orEmpty(),
-                    notice = "Otro usuario modifico el borrador. Se recargo la ultima version.",
-                )
-                persistUiState()
-            }
-            is SaleMutationResult.Failure -> {
-                _state.value = _state.value.copy(
-                    isBusy = false,
-                    errorMessage = SaleErrorText.from(result.error),
-                )
+            is SaleMutationResult.Success -> applyDraft(result.draft, selectLine(result.draft), successNotice)
+            is SaleMutationResult.ConflictRefetched ->
+                applyDraft(result.draft, _state.value.selectedLineId, SaleStrings.SALE_CHANGED)
+            is SaleMutationResult.Failure -> _state.update {
+                it.copy(errorMessage = SaleErrorText.from(result.error), notice = null)
             }
         }
     }
 
-    private fun buildCheckoutKey(draftId: Long): String {
-        return "sale-$draftId-${kotlin.time.Clock.System.now().toEpochMilliseconds()}-${Random.nextInt(1_000, 9_999)}"
-    }
-
-    private suspend fun restoreUiState() {
-        val restored = saleUiStateStore.load() ?: return
-        _state.value = _state.value.copy(
-            searchQuery = restored.searchQuery,
-            barcodeInput = restored.barcodeInput,
-            selectedLineId = restored.selectedLineId,
-        )
-    }
-
-    private fun persistUiState() {
-        val snapshot = _state.value
-        scope.launch {
-            saleUiStateStore.save(
-                SaleUiRecoveryState(
-                    searchQuery = snapshot.searchQuery,
-                    barcodeInput = snapshot.barcodeInput,
-                    selectedLineId = snapshot.selectedLineId,
-                    draftId = snapshot.draft?.id,
-                    savedAtEpochMs = kotlin.time.Clock.System.now().toEpochMilliseconds(),
-                )
+    private fun applyDraft(draft: SaleDraft, preferredLineId: Long?, notice: String?) {
+        val selected = draft.lines.firstOrNull { it.id == preferredLineId }
+        _state.update {
+            it.copy(
+                draft = draft,
+                selectedLineId = selected?.id,
+                qtyInput = selected?.let { line -> SaleStrings.qtyText(line.qty) }.orEmpty(),
+                notice = notice,
+                errorMessage = null,
             )
         }
     }
 
-    private fun runHardwareHooks(checkout: com.posfab.shared.features.sale.domain.CheckoutResult, lines: List<SaleLine>) {
-        scope.launch {
-            runCatching { cardPaymentAdapter.onSaleCompleted(checkout) }
-                .onFailure { AppLogger.w("hardware.card_adapter_failed sale_id=${checkout.saleId}") }
-            runCatching { receiptPrinterAdapter.printSaleReceipt(checkout, lines) }
-                .onFailure { AppLogger.w("hardware.printer_adapter_failed sale_id=${checkout.saleId}") }
+    private fun enqueue(mutation: suspend () -> Unit) {
+        _state.update { it.copy(pendingMutations = it.pendingMutations + 1) }
+        mutations.trySend(mutation)
+    }
+
+    private fun enqueueWhileSelling(mutation: suspend () -> Unit) {
+        enqueue {
+            if (_state.value.phase == SalePhase.Selling) mutation()
         }
+    }
+
+    private fun isSelling(): Boolean = _state.value.phase == SalePhase.Selling
+
+    private fun runHardwareHooks(result: CashCheckoutResult, lines: List<SaleLine>) {
+        scope.launch {
+            runCatching { cardPaymentAdapter.onSaleCompleted(result) }
+                .onFailure { AppLogger.w("hardware.card_adapter_failed sale_id=${result.saleId}") }
+            runCatching { receiptPrinterAdapter.printSaleReceipt(result, lines) }
+                .onFailure { AppLogger.w("hardware.printer_adapter_failed sale_id=${result.saleId}") }
+        }
+    }
+
+    private fun buildCheckoutKey(draftId: Long): String =
+        "sale-$draftId-${Clock.System.now().toEpochMilliseconds()}-${Random.nextInt(1_000, 9_999)}"
+
+    private fun String.isBarcode(): Boolean = length in BARCODE_LENGTH && all(Char::isDigit)
+
+    private fun formatAmount(amount: Double): String = SaleStrings.money(amount).removePrefix("$").replace(",", "")
+
+    private fun sanitizeAmount(value: String): String {
+        val filtered = value.filter { it.isDigit() || it == '.' }
+        val dot = filtered.indexOf('.')
+        if (dot < 0) return filtered.take(MAX_AMOUNT_DIGITS)
+        val whole = filtered.substring(0, dot).take(MAX_AMOUNT_DIGITS)
+        val decimals = filtered.substring(dot + 1).replace(".", "").take(2)
+        return "$whole.$decimals"
+    }
+
+    private companion object {
+        const val MIN_QUERY_LENGTH = 2
+        const val SEARCH_DEBOUNCE_MS = 300L
+        const val SEARCH_LIMIT = 8
+        const val MAX_QTY_DIGITS = 4
+        const val MAX_AMOUNT_DIGITS = 6
+        val BARCODE_LENGTH = 6..80
     }
 }

@@ -1,6 +1,5 @@
 package com.posfab.app
 
-import com.posfab.app.sale.DesktopSaleUiStateStore
 import com.posfab.shared.auth.refresh.AuthorizedApiExecutor
 import com.posfab.shared.auth.repository.AuthRepository
 import com.posfab.shared.auth.repository.AuthRepositoryImpl
@@ -31,7 +30,6 @@ import com.posfab.shared.features.sale.ui.CardPaymentAdapter
 import com.posfab.shared.features.sale.ui.NoOpCardPaymentAdapter
 import com.posfab.shared.features.sale.ui.NoOpReceiptPrinterAdapter
 import com.posfab.shared.features.sale.ui.ReceiptPrinterAdapter
-import com.posfab.shared.features.sale.ui.SaleUiStateStore
 import com.posfab.shared.features.sale.usecase.SaleUseCases
 import com.posfab.shared.network.auth.AuthApi
 import com.posfab.shared.network.auth.AuthApiClient
@@ -69,10 +67,6 @@ fun desktopModule(config: PosConfig): Module = module {
         val home = System.getProperty("user.home")
         DesktopDeviceStorage(Paths.get(home, ".pos-fab-fed", "device.json"))
     }
-    single<SaleUiStateStore> {
-        val home = System.getProperty("user.home")
-        DesktopSaleUiStateStore(Paths.get(home, ".pos-fab-fed", "sale-ui-state.json"))
-    }
     single<CardPaymentAdapter> { NoOpCardPaymentAdapter }
     single<ReceiptPrinterAdapter> { NoOpReceiptPrinterAdapter }
     single { SessionManager(get()) }
@@ -89,7 +83,7 @@ fun desktopModule(config: PosConfig): Module = module {
         val controller = get<AppStateController>()
         val device = controller.deviceRegistration.value
             ?: error("SaleRepository created before device registration")
-        SaleRepositoryImpl(get<PosApi>(), get<CatalogApi>(), device.terminalId, device.businessUnitId, get())
+        SaleRepositoryImpl(get<PosApi>(), get<CatalogApi>(), device.terminalId, get())
     }
     single<CatalogRepository> { CatalogRepositoryImpl(get(), get()) }
     single<OperationsRepository> { OperationsRepositoryImpl(get<OperationsApi>(), get<CatalogApi>(), get()) }
