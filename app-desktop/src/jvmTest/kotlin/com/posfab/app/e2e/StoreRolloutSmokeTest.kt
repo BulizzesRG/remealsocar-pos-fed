@@ -55,7 +55,7 @@ class StoreRolloutSmokeTest {
 
         assertEquals(CashSessionCheck.Open, (sale.cashSession() as AppResult.Success).value)
 
-        val draft = (sale.currentOrNewDraft() as AppResult.Success).value
+        val draft = (sale.openDrafts() as AppResult.Success).value.first()
         val product = (sale.searchProducts("cafe", 5) as AppResult.Success).value.first()
         val add = sale.addLine(draft.id, product, 1.0, draft.version)
         assertIs<SaleMutationResult.Success>(add)
@@ -81,7 +81,7 @@ class StoreRolloutSmokeTest {
         val backend = FakeStoreBackend().apply { failFirstCheckout = true }
         val sale = SaleUseCases(backend)
 
-        val draft = (sale.currentOrNewDraft() as AppResult.Success).value
+        val draft = (sale.openDrafts() as AppResult.Success).value.first()
         val product = (sale.searchProducts("cafe", 5) as AppResult.Success).value.first()
         sale.addLine(draft.id, product, 1.0, draft.version)
 
@@ -197,7 +197,14 @@ private class FakeStoreBackend :
 
     override suspend fun cashSession(): AppResult<CashSessionCheck> = AppResult.Success(CashSessionCheck.Open)
 
-    override suspend fun currentOrNewDraft(): AppResult<SaleDraft> {
+    override suspend fun draft(draftId: Long): AppResult<SaleDraft> =
+        if (draftId == currentDraft.id) {
+            AppResult.Success(currentDraft)
+        } else {
+            AppResult.Failure(AppError.Validation("Request rejected: 404"))
+        }
+
+    override suspend fun openDrafts(): AppResult<List<SaleDraft>> {
         if (currentDraft.status == "CHECKED_OUT") {
             draftCounter += 1
             currentDraft = SaleDraft(
@@ -208,7 +215,7 @@ private class FakeStoreBackend :
                 totals = SaleTotals(cashTotal = 0.0),
             )
         }
-        return AppResult.Success(currentDraft)
+        return AppResult.Success(listOf(currentDraft))
     }
 
     override suspend fun searchProducts(query: String, limit: Int): AppResult<List<SaleProduct>> = AppResult.Success(listOf(product))

@@ -9,10 +9,14 @@ internal object SaleStrings {
     const val CASH_CLOSED_BODY = "Abre el día para empezar a vender"
     const val OPEN_DAY = "Abrir día"
     const val RETRY = "Reintentar"
-    const val CART_TITLE = "Venta"
     const val EMPTY_CART = "Escanea o busca un producto"
     const val TOTAL = "Total"
     const val CLEAR = "Vaciar"
+    const val NEW_ACCOUNT = "Nueva cuenta"
+    const val CLOSE_ACCOUNT = "Cerrar cuenta"
+    const val EMPTY_ACCOUNT = "Vacía"
+    const val EMPTY_ACCOUNT_DESCRIPTION = "Cuenta vacía"
+    const val ACCOUNT_SELECTED = "seleccionada"
     const val REMOVE = "Quitar"
     const val QTY_LABEL = "Cantidad"
     const val DECREASE = "Quitar uno"
@@ -45,12 +49,18 @@ internal object SaleStrings {
     const val NOT_ALLOWED = "No tienes permiso para hacer esto"
     const val TOO_MANY_REQUESTS = "Demasiados intentos. Espera unos segundos"
     const val FINISH_CHARGE_FIRST = "Termina el cobro primero"
+    const val ACCOUNT_CLOSED = "Esta cuenta ya se cerró"
     const val CHECKOUT_CONFLICT = "No se pudo cobrar. La venta se volvió a cargar, revísala y cobra de nuevo"
     const val POSSIBLY_CHARGED = "Es posible que la venta ya se haya cobrado. Revisa Ventas del día"
     const val RETRY_WITH_DONE = "Vuelve a intentar con Listo"
     val QUICK_BILLS: List<Int> = listOf(20, 50, 100, 200, 500)
 
     fun notFoundWithCode(code: String): String = "No hay ningún producto con el código $code"
+
+    fun accountChip(total: Double, count: Int): String = "${money(total)} · $count"
+
+    fun accountDescription(total: Double, count: Int): String =
+        "Cuenta con ${money(total)}, $count ${if (count == 1) "producto" else "productos"}"
 
     fun chargeLabel(total: Double): String = "Cobrar ${money(total)}"
 

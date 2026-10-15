@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
 import kotlin.random.Random
 import kotlin.time.Clock
@@ -73,16 +74,17 @@ class CashierSaleViewModel(
                 _state.update { it.copy(phase = phaseAfterCheck) }
                 return@launch
             }
-            when (val draft = saleUseCases.currentOrNewDraft()) {
+            when (val accounts = openAccountsOrNew()) {
                 is AppResult.Failure -> _state.update {
-                    it.copy(phase = SalePhase.CashUnavailable(SaleErrorText.from(draft.error)))
+                    it.copy(phase = SalePhase.CashUnavailable(SaleErrorText.from(accounts.error)))
                 }
                 is AppResult.Success -> {
                     val kitchen = saleUseCases.kitchenProducts()
                     _state.update {
                         it.copy(
                             phase = SalePhase.Selling,
-                            draft = draft.value,
+                            accounts = accounts.value,
+                            activeDraftId = accounts.value.first().id,
                             kitchenProducts = (kitchen as? AppResult.Success)?.value.orEmpty(),
                             notice = if (kitchen is AppResult.Failure) SaleStrings.KITCHEN_UNAVAILABLE else null,
                         )
@@ -93,6 +95,40 @@ class CashierSaleViewModel(
     }
 
     fun retry() = load()
+
+    fun selectAccount(draftId: Long) {
+        _state.update { current ->
+            when {
+                current.accountById(draftId) == null -> current
+                current.phase == SalePhase.Charging -> current.copy(notice = SaleStrings.FINISH_CHARGE_FIRST)
+                current.phase != SalePhase.Selling && current.phase != SalePhase.Done -> current
+                current.confirm != null -> current
+                else -> current.copy(
+                    phase = SalePhase.Selling,
+                    activeDraftId = draftId,
+                    lastResult = null,
+                    selectedLineId = null,
+                    qtyInput = "",
+                    notice = null,
+                    errorMessage = null,
+                )
+            }
+        }
+    }
+
+    fun openAccount() {
+        if (!_state.value.canOpenAccount) return
+        enqueue {
+            if (!_state.value.canOpenAccount) return@enqueue
+            when (val created = saleUseCases.newDraft()) {
+                is AppResult.Failure -> _state.update { it.copy(errorMessage = SaleErrorText.from(created.error)) }
+                is AppResult.Success -> {
+                    upsertAccount(created.value)
+                    _state.update { it.activating(created.value.id) }
+                }
+            }
+        }
+    }
 
     fun onQueryChange(value: String) {
         _state.update { it.copy(query = value, errorMessage = null) }
@@ -127,10 +163,15 @@ class CashierSaleViewModel(
         }
         when (_state.value.phase) {
             SalePhase.Done -> {
-                startNextSale()
-                enqueue { addOrIncrement(product) }
+                val target = _state.value.activeDraftId
+                enqueue {
+                    resumeSelling()
+                    val current = _state.value
+                    val draftId = target?.takeIf { current.accountById(it) != null } ?: current.activeDraftId
+                    if (current.phase == SalePhase.Selling && draftId != null) addOrIncrement(draftId, product)
+                }
             }
-            SalePhase.Selling -> enqueue { addOrIncrement(product) }
+            SalePhase.Selling -> enqueueOnAccount { draftId -> addOrIncrement(draftId, product) }
             SalePhase.Charging, SalePhase.Loading -> _state.update { it.copy(notice = SaleStrings.FINISH_CHARGE_FIRST) }
             else -> Unit
         }
@@ -145,17 +186,19 @@ class CashierSaleViewModel(
 
     fun incrementQty() {
         if (!isSelling()) return
-        enqueueWhileSelling {
-            val line = _state.value.selectedLine ?: return@enqueueWhileSelling
-            changeQty(line, line.qty + 1)
+        val lineId = _state.value.selectedLineId ?: return
+        enqueueOnAccount { draftId ->
+            val line = lineIn(draftId, lineId) ?: return@enqueueOnAccount
+            changeQty(draftId, line, line.qty + 1)
         }
     }
 
     fun decrementQty() {
         if (!isSelling()) return
-        enqueueWhileSelling {
-            val line = _state.value.selectedLine ?: return@enqueueWhileSelling
-            if (line.qty > 1) changeQty(line, (line.qty - 1).coerceAtLeast(1.0))
+        val lineId = _state.value.selectedLineId ?: return
+        enqueueOnAccount { draftId ->
+            val line = lineIn(draftId, lineId) ?: return@enqueueOnAccount
+            if (line.qty > 1) changeQty(draftId, line, (line.qty - 1).coerceAtLeast(1.0))
         }
     }
 
@@ -173,24 +216,29 @@ class CashierSaleViewModel(
             return
         }
         if (qty.toDouble() == line.qty) return
-        enqueueWhileSelling {
-            val current = _state.value.selectedLine ?: return@enqueueWhileSelling
-            changeQty(current, qty.toDouble())
+        enqueueOnAccount { draftId ->
+            val current = lineIn(draftId, line.id) ?: return@enqueueOnAccount
+            changeQty(draftId, current, qty.toDouble())
         }
     }
 
     fun removeSelectedLine() {
         if (!isSelling()) return
-        enqueueWhileSelling {
-            val snapshot = _state.value
-            val draft = snapshot.draft ?: return@enqueueWhileSelling
-            val line = snapshot.selectedLine ?: return@enqueueWhileSelling
-            val result = saleUseCases.removeLine(draft.id, line.id, draft.version)
-            applyMutationResult(result, selectLine = { null })
+        val lineId = _state.value.selectedLineId ?: return
+        enqueueOnAccount { draftId ->
+            val account = _state.value.accountById(draftId) ?: return@enqueueOnAccount
+            if (account.lines.none { it.id == lineId }) return@enqueueOnAccount
+            val result = saleUseCases.removeLine(draftId, lineId, account.version)
+            applyMutationResult(draftId, result, selectLine = { null })
         }
     }
 
     fun requestClear() {
+        val snapshot = _state.value
+        if (snapshot.canCloseEmptyAccount) {
+            confirmClear()
+            return
+        }
         _state.update {
             if (it.phase == SalePhase.Selling && it.draft?.lines?.isNotEmpty() == true) {
                 it.copy(confirm = SaleConfirm.ClearCart)
@@ -202,16 +250,16 @@ class CashierSaleViewModel(
 
     fun confirmClear() {
         _state.update { it.copy(confirm = null) }
-        enqueueWhileSelling {
-            val draft = _state.value.draft ?: return@enqueueWhileSelling
-            when (val cancelled = saleUseCases.cancelDraft(draft.id, draft.version)) {
+        enqueueOnAccount { draftId ->
+            val account = _state.value.accountById(draftId) ?: return@enqueueOnAccount
+            when (val cancelled = saleUseCases.cancelDraft(draftId, account.version)) {
                 is AppResult.Failure ->
                     if (cancelled.error is AppError.Conflict) {
-                        replaceDraft(saleUseCases.currentOrNewDraft(), SaleStrings.SALE_CHANGED)
+                        refreshAfterClearConflict(draftId)
                     } else {
-                        _state.update { it.copy(errorMessage = SaleErrorText.from(cancelled.error)) }
+                        showErrorOn(draftId, cancelled.error)
                     }
-                is AppResult.Success -> replaceDraft(saleUseCases.newDraft(), null)
+                is AppResult.Success -> closeAccount(draftId, null)
             }
         }
     }
@@ -279,27 +327,7 @@ class CashierSaleViewModel(
     }
 
     fun startNextSale() {
-        enqueue {
-            if (_state.value.phase != SalePhase.Done) return@enqueue
-            when (val next = saleUseCases.newDraft()) {
-                is AppResult.Failure -> _state.update { it.copy(errorMessage = SaleErrorText.from(next.error)) }
-                is AppResult.Success -> _state.update {
-                    it.copy(
-                        phase = SalePhase.Selling,
-                        draft = next.value,
-                        lastResult = null,
-                        query = "",
-                        searchResults = emptyList(),
-                        selectedLineId = null,
-                        qtyInput = "",
-                        paidInput = "",
-                        checkoutIdempotencyKey = null,
-                        notice = null,
-                        errorMessage = null,
-                    )
-                }
-            }
-        }
+        enqueue { resumeSelling() }
     }
 
     private suspend fun runCheckout(draft: SaleDraft, paid: Double, key: String) {
@@ -322,14 +350,14 @@ class CashierSaleViewModel(
                 }
                 is AppResult.Success -> {
                     chargedDraft = resolved.value
-                    _state.update { it.copy(draft = resolved.value) }
+                    upsertAccount(resolved.value)
                 }
             }
         }
         when (val result = saleUseCases.checkoutCash(chargedDraft.id, paid, key)) {
             is AppResult.Failure ->
                 if (result.error is AppError.Conflict) {
-                    recoverFromCheckoutConflict()
+                    recoverFromCheckoutConflict(chargedDraft.id)
                 } else {
                     failCheckout(result.error, key)
                 }
@@ -340,9 +368,8 @@ class CashierSaleViewModel(
                     result.value
                 }
                 _state.update {
-                    it.copy(
+                    it.withoutAccount(chargedDraft.id).copy(
                         phase = SalePhase.Done,
-                        draft = null,
                         lastResult = charged,
                         isCheckoutInFlight = false,
                         checkoutIdempotencyKey = null,
@@ -359,29 +386,35 @@ class CashierSaleViewModel(
         }
     }
 
-    private suspend fun recoverFromCheckoutConflict() {
-        when (val refreshed = saleUseCases.currentOrNewDraft()) {
-            is AppResult.Failure -> _state.update {
-                it.copy(
-                    isCheckoutInFlight = false,
-                    checkoutIdempotencyKey = null,
-                    errorMessage = SaleErrorText.from(refreshed.error),
-                )
+    private suspend fun recoverFromCheckoutConflict(draftId: Long) {
+        when (val refreshed = saleUseCases.draft(draftId)) {
+            is AppResult.Failure -> {
+                val keepKey = refreshed.error is AppError.Network
+                _state.update {
+                    it.copy(
+                        isCheckoutInFlight = false,
+                        checkoutIdempotencyKey = if (keepKey) it.checkoutIdempotencyKey else null,
+                        errorMessage = SaleErrorText.from(refreshed.error),
+                    )
+                }
             }
             is AppResult.Success -> {
-                val possiblyCharged = refreshed.value.lines.isEmpty()
+                val draft = refreshed.value
                 _state.update {
                     it.copy(
                         phase = SalePhase.Selling,
-                        draft = refreshed.value,
                         isCheckoutInFlight = false,
                         checkoutIdempotencyKey = null,
                         paidInput = "",
-                        selectedLineId = null,
-                        qtyInput = "",
-                        notice = if (possiblyCharged) SaleStrings.POSSIBLY_CHARGED else null,
-                        errorMessage = if (possiblyCharged) null else SaleStrings.CHECKOUT_CONFLICT,
                     )
+                }
+                when {
+                    draft.isOpen -> {
+                        applyDraft(draft, null, null)
+                        _state.update { it.copy(errorMessage = SaleStrings.CHECKOUT_CONFLICT) }
+                    }
+                    draft.status == CHECKED_OUT -> closeAccount(draftId, SaleStrings.POSSIBLY_CHARGED)
+                    else -> closeAccount(draftId, SaleStrings.ACCOUNT_CLOSED)
                 }
             }
         }
@@ -419,11 +452,11 @@ class CashierSaleViewModel(
         }
     }
 
-    private suspend fun addOrIncrement(product: SaleProduct) {
-        val first = mutateForProduct(product) ?: return
+    private suspend fun addOrIncrement(draftId: Long, product: SaleProduct) {
+        val first = mutateForProduct(draftId, product) ?: return
         val result = if (first is SaleMutationResult.ConflictRefetched) {
             applyDraft(first.draft, _state.value.selectedLineId, null)
-            when (val retry = mutateForProduct(product) ?: return) {
+            when (val retry = mutateForProduct(draftId, product) ?: return) {
                 is SaleMutationResult.ConflictRefetched -> {
                     applyDraft(retry.draft, _state.value.selectedLineId, SaleStrings.notAdded(product.name))
                     return
@@ -434,6 +467,7 @@ class CashierSaleViewModel(
             first
         }
         applyMutationResult(
+            draftId = draftId,
             result = result,
             selectLine = { updated ->
                 updated.lines
@@ -445,10 +479,10 @@ class CashierSaleViewModel(
         )
     }
 
-    private suspend fun mutateForProduct(product: SaleProduct): SaleMutationResult? {
+    private suspend fun mutateForProduct(draftId: Long, product: SaleProduct): SaleMutationResult? {
         val snapshot = _state.value
         if (snapshot.phase != SalePhase.Selling) return null
-        val draft = snapshot.draft ?: return null
+        val draft = snapshot.accountById(draftId) ?: return null
         val existing = draft.lines.firstOrNull { it.productId == product.id && it.unitId == product.unitId }
         return if (existing != null) {
             saleUseCases.updateLineQty(draft.id, existing.id, existing.qty + 1, draft.version)
@@ -457,28 +491,26 @@ class CashierSaleViewModel(
         }
     }
 
-    private suspend fun changeQty(line: SaleLine, qty: Double) {
-        val draft = _state.value.draft ?: return
+    private suspend fun changeQty(draftId: Long, line: SaleLine, qty: Double) {
+        val draft = _state.value.accountById(draftId) ?: return
         val result = saleUseCases.updateLineQty(draft.id, line.id, qty, draft.version)
-        applyMutationResult(result, selectLine = { line.id })
+        applyMutationResult(draftId, result, selectLine = { line.id })
     }
 
-    private fun replaceDraft(refreshed: AppResult<SaleDraft>, notice: String?) {
-        when (refreshed) {
-            is AppResult.Failure -> _state.update { it.copy(errorMessage = SaleErrorText.from(refreshed.error)) }
-            is AppResult.Success -> _state.update {
-                it.copy(
-                    draft = refreshed.value,
-                    selectedLineId = null,
-                    qtyInput = "",
-                    notice = notice,
-                    errorMessage = null,
-                )
-            }
+    private suspend fun refreshAfterClearConflict(draftId: Long) {
+        when (val refreshed = saleUseCases.draft(draftId)) {
+            is AppResult.Failure -> showErrorOn(draftId, refreshed.error)
+            is AppResult.Success ->
+                if (refreshed.value.isOpen) {
+                    applyDraft(refreshed.value, null, SaleStrings.SALE_CHANGED)
+                } else {
+                    closeAccount(draftId, SaleStrings.ACCOUNT_CLOSED)
+                }
         }
     }
 
-    private fun applyMutationResult(
+    private suspend fun applyMutationResult(
+        draftId: Long,
         result: SaleMutationResult,
         selectLine: (SaleDraft) -> Long?,
         successNotice: String? = null,
@@ -487,17 +519,25 @@ class CashierSaleViewModel(
             is SaleMutationResult.Success -> applyDraft(result.draft, selectLine(result.draft), successNotice)
             is SaleMutationResult.ConflictRefetched ->
                 applyDraft(result.draft, _state.value.selectedLineId, SaleStrings.SALE_CHANGED)
-            is SaleMutationResult.Failure -> _state.update {
-                it.copy(errorMessage = SaleErrorText.from(result.error), notice = null)
-            }
+            is SaleMutationResult.DraftClosed -> closeAccount(draftId, SaleStrings.ACCOUNT_CLOSED)
+            is SaleMutationResult.Failure -> showErrorOn(draftId, result.error)
+        }
+    }
+
+    private fun showErrorOn(draftId: Long, error: AppError) {
+        _state.update {
+            if (it.activeDraftId == draftId) it.copy(errorMessage = SaleErrorText.from(error), notice = null) else it
         }
     }
 
     private fun applyDraft(draft: SaleDraft, preferredLineId: Long?, notice: String?) {
-        val selected = draft.lines.firstOrNull { it.id == preferredLineId }
-        _state.update {
-            it.copy(
-                draft = draft,
+        _state.update { current ->
+            if (current.accountById(draft.id) == null) return@update current
+            val accounts = current.accounts.map { if (it.id == draft.id) draft else it }
+            if (current.activeDraftId != draft.id) return@update current.copy(accounts = accounts)
+            val selected = draft.lines.firstOrNull { it.id == preferredLineId }
+            current.copy(
+                accounts = accounts,
                 selectedLineId = selected?.id,
                 qtyInput = selected?.let { line -> SaleStrings.qtyText(line.qty) }.orEmpty(),
                 notice = notice,
@@ -506,14 +546,107 @@ class CashierSaleViewModel(
         }
     }
 
+    private fun upsertAccount(draft: SaleDraft) {
+        _state.update { current ->
+            val accounts = if (current.accountById(draft.id) != null) {
+                current.accounts.map { if (it.id == draft.id) draft else it }
+            } else {
+                current.accounts + draft
+            }
+            current.copy(accounts = accounts)
+        }
+    }
+
+    private fun removeAccount(draftId: Long): Long? = _state.updateAndGet { it.withoutAccount(draftId) }.activeDraftId
+
+    private suspend fun closeAccount(draftId: Long, notice: String?) {
+        val wasActive = _state.value.activeDraftId == draftId
+        removeAccount(draftId)
+        if (wasActive) _state.update { it.copy(notice = notice, errorMessage = null) }
+        ensureActiveAccount()
+    }
+
+    private suspend fun ensureActiveAccount() {
+        if (_state.value.draft != null) return
+        val fallback = _state.value.accounts.firstOrNull()
+        if (fallback != null) {
+            _state.update { it.copy(activeDraftId = fallback.id, selectedLineId = null, qtyInput = "") }
+            return
+        }
+        when (val created = saleUseCases.newDraft()) {
+            is AppResult.Failure -> _state.update { it.copy(errorMessage = SaleErrorText.from(created.error)) }
+            is AppResult.Success -> {
+                upsertAccount(created.value)
+                _state.update { it.copy(activeDraftId = created.value.id, selectedLineId = null, qtyInput = "") }
+            }
+        }
+    }
+
+    private suspend fun resumeSelling() {
+        if (_state.value.phase != SalePhase.Done) return
+        ensureActiveAccount()
+        val active = _state.value.activeDraftId ?: return
+        _state.update { it.activating(active) }
+    }
+
+    private suspend fun openAccountsOrNew(): AppResult<List<SaleDraft>> =
+        when (val open = saleUseCases.openDrafts()) {
+            is AppResult.Failure -> open
+            is AppResult.Success ->
+                if (open.value.isNotEmpty()) {
+                    open
+                } else {
+                    when (val created = saleUseCases.newDraft()) {
+                        is AppResult.Failure -> created
+                        is AppResult.Success -> AppResult.Success(listOf(created.value))
+                    }
+                }
+        }
+
+    private fun CashierSaleState.withoutAccount(draftId: Long): CashierSaleState {
+        val index = accounts.indexOfFirst { it.id == draftId }
+        if (index < 0) return this
+        val remaining = accounts.filterNot { it.id == draftId }
+        if (activeDraftId != draftId) return copy(accounts = remaining)
+        val next = accounts.getOrNull(index + 1) ?: accounts.getOrNull(index - 1)
+        return copy(accounts = remaining, activeDraftId = next?.id, selectedLineId = null, qtyInput = "")
+    }
+
+    private fun CashierSaleState.activating(draftId: Long): CashierSaleState = copy(
+        phase = SalePhase.Selling,
+        activeDraftId = draftId,
+        lastResult = null,
+        selectedLineId = null,
+        qtyInput = "",
+        paidInput = "",
+        checkoutIdempotencyKey = null,
+        notice = null,
+        errorMessage = null,
+    )
+
+    private fun lineIn(draftId: Long, lineId: Long): SaleLine? =
+        _state.value.accountById(draftId)?.lines?.firstOrNull { it.id == lineId }
+
     private fun enqueue(mutation: suspend () -> Unit) {
         _state.update { it.copy(pendingMutations = it.pendingMutations + 1) }
         mutations.trySend(mutation)
     }
 
-    private fun enqueueWhileSelling(mutation: suspend () -> Unit) {
+    private fun enqueueOnAccount(mutation: suspend (draftId: Long) -> Unit) {
+        val draftId = _state.value.activeDraftId
+        if (draftId == null) {
+            enqueue {
+                if (_state.value.phase != SalePhase.Selling) return@enqueue
+                ensureActiveAccount()
+                val current = _state.value
+                val created = current.activeDraftId ?: return@enqueue
+                if (current.phase == SalePhase.Selling) mutation(created)
+            }
+            return
+        }
         enqueue {
-            if (_state.value.phase == SalePhase.Selling) mutation()
+            val current = _state.value
+            if (current.phase == SalePhase.Selling && current.accountById(draftId) != null) mutation(draftId)
         }
     }
 
@@ -550,6 +683,7 @@ class CashierSaleViewModel(
         const val SEARCH_LIMIT = 8
         const val MAX_QTY_DIGITS = 4
         const val MAX_AMOUNT_DIGITS = 6
+        const val CHECKED_OUT = "CHECKED_OUT"
         val BARCODE_LENGTH = 6..80
     }
 }

@@ -67,7 +67,9 @@ data class SaleDraft(
     val version: Int,
     val lines: List<SaleLine>,
     val totals: SaleTotals,
-)
+) {
+    val isOpen: Boolean get() = status == "OPEN"
+}
 
 data class CashCheckoutResult(
     val saleId: Long,
@@ -81,6 +83,7 @@ data class CashCheckoutResult(
 sealed interface SaleMutationResult {
     data class Success(val draft: SaleDraft) : SaleMutationResult
     data class ConflictRefetched(val draft: SaleDraft) : SaleMutationResult
+    data class DraftClosed(val draft: SaleDraft) : SaleMutationResult
     data class Failure(val error: AppError) : SaleMutationResult
 }
 

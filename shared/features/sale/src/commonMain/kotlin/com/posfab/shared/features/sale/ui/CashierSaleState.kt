@@ -21,7 +21,8 @@ sealed interface SaleConfirm {
 
 data class CashierSaleState(
     val phase: SalePhase = SalePhase.Loading,
-    val draft: SaleDraft? = null,
+    val accounts: List<SaleDraft> = emptyList(),
+    val activeDraftId: Long? = null,
     val query: String = "",
     val searchResults: List<SaleProduct> = emptyList(),
     val kitchenProducts: List<SaleProduct> = emptyList(),
@@ -36,6 +37,7 @@ data class CashierSaleState(
     val notice: String? = null,
     val errorMessage: String? = null,
 ) {
+    val draft: SaleDraft? get() = activeDraftId?.let(::accountById)
     val isBusy: Boolean get() = pendingMutations > 0
     val isPaidLocked: Boolean get() = checkoutIdempotencyKey != null
     val cashTotal: Double get() = draft?.totals?.cashTotal ?: 0.0
@@ -46,4 +48,15 @@ data class CashierSaleState(
     val canCharge: Boolean
         get() = phase == SalePhase.Selling && draft?.lines?.isNotEmpty() == true && cashTotal > 0 && !isBusy
     val selectedLine: SaleLine? get() = selectedLineId?.let { id -> draft?.lines?.firstOrNull { it.id == id } }
+    val canOpenAccount: Boolean
+        get() = (phase == SalePhase.Selling || phase == SalePhase.Done) &&
+            accounts.size < MAX_ACCOUNTS &&
+            draft?.lines?.isNotEmpty() != false &&
+            !isCheckoutInFlight
+    val canCloseEmptyAccount: Boolean
+        get() = phase == SalePhase.Selling && draft?.lines?.isEmpty() == true && accounts.size > 1
+
+    fun accountById(id: Long): SaleDraft? = accounts.firstOrNull { it.id == id }
 }
+
+internal const val MAX_ACCOUNTS = 10

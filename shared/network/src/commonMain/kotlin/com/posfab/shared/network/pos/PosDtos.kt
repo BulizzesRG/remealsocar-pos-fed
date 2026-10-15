@@ -18,6 +18,9 @@ data class DraftDto(
 )
 
 @Serializable
+data class DraftListDto(val items: List<DraftDto>)
+
+@Serializable
 data class DraftLineDto(
     val id: Long,
     @SerialName("lineNo") val lineNo: Int,

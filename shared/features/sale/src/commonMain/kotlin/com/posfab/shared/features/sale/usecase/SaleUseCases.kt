@@ -11,7 +11,9 @@ import com.posfab.shared.features.sale.repository.SaleRepository
 class SaleUseCases(private val repository: SaleRepository) {
     suspend fun cashSession(): AppResult<CashSessionCheck> = repository.cashSession()
 
-    suspend fun currentOrNewDraft(): AppResult<SaleDraft> = repository.currentOrNewDraft()
+    suspend fun openDrafts(): AppResult<List<SaleDraft>> = repository.openDrafts()
+
+    suspend fun draft(draftId: Long): AppResult<SaleDraft> = repository.draft(draftId)
 
     suspend fun newDraft(): AppResult<SaleDraft> = repository.newDraft()
 

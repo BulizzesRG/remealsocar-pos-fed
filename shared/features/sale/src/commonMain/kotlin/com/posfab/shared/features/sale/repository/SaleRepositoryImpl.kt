@@ -42,14 +42,14 @@ class SaleRepositoryImpl(
             is AppResult.Failure -> AppResult.Success(CashSessionCheck.Unavailable(result.error))
         }
 
-    override suspend fun currentOrNewDraft(): AppResult<SaleDraft> {
-        val current = authorized { posApi.getCurrentSaleDraft(it) }
-        return when {
-            current is AppResult.Success -> AppResult.Success(current.value.toDomain())
-            current is AppResult.Failure && current.error.isNoOpenDraft() -> newDraft()
-            else -> current.mapDraft()
+    override suspend fun openDrafts(): AppResult<List<SaleDraft>> =
+        when (val result = authorized { posApi.listOpenSaleDrafts(it) }) {
+            is AppResult.Success -> AppResult.Success(result.value.items.map { it.toDomain() }.sortedBy { it.id })
+            is AppResult.Failure -> result
         }
-    }
+
+    override suspend fun draft(draftId: Long): AppResult<SaleDraft> =
+        authorized { posApi.getDraft(it, draftId) }.mapDraft()
 
     override suspend fun searchProducts(query: String, limit: Int): AppResult<List<SaleProduct>> =
         when (val result = authorized { catalogApi.listProducts(it, query, SEARCH_FETCH_LIMIT, 0, true) }) {
@@ -96,7 +96,7 @@ class SaleRepositoryImpl(
         product: SaleProduct,
         qty: Double,
         expectedVersion: Int,
-    ): SaleMutationResult = mutationWithConflictRefetch {
+    ): SaleMutationResult = mutationWithConflictRefetch(draftId) {
         posApi.addDraftLine(
             accessToken = it,
             draftId = draftId,
@@ -115,7 +115,7 @@ class SaleRepositoryImpl(
         lineId: Long,
         qty: Double,
         expectedVersion: Int,
-    ): SaleMutationResult = mutationWithConflictRefetch {
+    ): SaleMutationResult = mutationWithConflictRefetch(draftId) {
         posApi.updateDraftLine(
             accessToken = it,
             draftId = draftId,
@@ -125,7 +125,7 @@ class SaleRepositoryImpl(
     }
 
     override suspend fun removeLine(draftId: Long, lineId: Long, expectedVersion: Int): SaleMutationResult =
-        mutationWithConflictRefetch {
+        mutationWithConflictRefetch(draftId) {
             posApi.removeDraftLine(
                 accessToken = it,
                 draftId = draftId,
@@ -192,18 +192,29 @@ class SaleRepositoryImpl(
 
     private suspend fun <T> authorized(block: suspend (String) -> AppResult<T>): AppResult<T> = executor.execute(block)
 
-    private suspend fun mutationWithConflictRefetch(block: suspend (String) -> AppResult<DraftDto>): SaleMutationResult =
+    private suspend fun mutationWithConflictRefetch(
+        draftId: Long,
+        block: suspend (String) -> AppResult<DraftDto>,
+    ): SaleMutationResult =
         when (val result = authorized(block)) {
             is AppResult.Success -> SaleMutationResult.Success(result.value.toDomain())
             is AppResult.Failure ->
                 if (result.error is AppError.Conflict) {
-                    when (val refetch = currentOrNewDraft()) {
-                        is AppResult.Success -> SaleMutationResult.ConflictRefetched(refetch.value)
-                        is AppResult.Failure -> SaleMutationResult.Failure(result.error)
-                    }
+                    refetchAfterConflict(draftId, result.error)
                 } else {
                     SaleMutationResult.Failure(result.error)
                 }
+        }
+
+    private suspend fun refetchAfterConflict(draftId: Long, conflict: AppError): SaleMutationResult =
+        when (val refetch = draft(draftId)) {
+            is AppResult.Success ->
+                if (refetch.value.isOpen) {
+                    SaleMutationResult.ConflictRefetched(refetch.value)
+                } else {
+                    SaleMutationResult.DraftClosed(refetch.value)
+                }
+            is AppResult.Failure -> SaleMutationResult.Failure(conflict)
         }
 
     private fun AppResult<DraftDto>.mapDraft(): AppResult<SaleDraft> = when (this) {
@@ -256,9 +267,6 @@ class SaleRepositoryImpl(
         )
     }
 
-    private fun AppError.isNoOpenDraft(): Boolean =
-        this is AppError.Validation && message.contains(NO_OPEN_DRAFT, ignoreCase = true)
-
     private fun AppError.isBarcodeNotFound(): Boolean =
         this is AppError.Validation && message.contains(BARCODE_NOT_FOUND, ignoreCase = true)
 
@@ -278,7 +286,6 @@ class SaleRepositoryImpl(
         const val DRAFT_TYPE_SALE = "SALE"
         const val PAYMENT_STATUS_PAID = "PAID"
         const val PAYMENT_TYPE_CASH = "CASH"
-        const val NO_OPEN_DRAFT = "No OPEN draft"
         const val BARCODE_NOT_FOUND = "Barcode not found"
         const val INSUFFICIENT_STOCK = "Insufficient stock"
         const val KITCHEN_LIMIT = 200

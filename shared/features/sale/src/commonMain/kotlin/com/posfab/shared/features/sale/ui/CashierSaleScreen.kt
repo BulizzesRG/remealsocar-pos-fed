@@ -1,7 +1,9 @@
 package com.posfab.shared.features.sale.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -24,6 +27,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Payments
@@ -44,12 +48,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -59,11 +66,21 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.posfab.shared.features.sale.domain.CashCheckoutResult
+import com.posfab.shared.features.sale.domain.SaleDraft
 import com.posfab.shared.features.sale.domain.SaleKitchenKind
 import com.posfab.shared.features.sale.domain.SaleLine
 import com.posfab.shared.features.sale.domain.SaleProduct
@@ -199,6 +216,20 @@ private fun SellingView(state: CashierSaleState, viewModel: CashierSaleViewModel
                 modifier = Modifier.weight(1f).fillMaxHeight(),
                 verticalArrangement = Arrangement.spacedBy(PosSpacing.sm),
             ) {
+                AccountStrip(
+                    accounts = state.accounts,
+                    activeDraftId = state.activeDraftId,
+                    canOpen = state.canOpenAccount,
+                    enabled = state.phase != SalePhase.Charging && state.confirm == null,
+                    onSelect = { id ->
+                        viewModel.selectAccount(id)
+                        focusSearch()
+                    },
+                    onNew = {
+                        viewModel.openAccount()
+                        focusSearch()
+                    },
+                )
                 PosNoticeRow(notice = state.notice, errorMessage = null)
                 if (state.phase != SalePhase.Charging) {
                     state.errorMessage?.let { PosErrorBanner(error = it) }
@@ -255,14 +286,113 @@ private fun SellingView(state: CashierSaleState, viewModel: CashierSaleViewModel
 }
 
 @Composable
+private fun AccountStrip(
+    accounts: List<SaleDraft>,
+    activeDraftId: Long?,
+    canOpen: Boolean,
+    enabled: Boolean,
+    onSelect: (Long) -> Unit,
+    onNew: () -> Unit,
+) {
+    val scrollState = rememberScrollState()
+    val chipRanges = remember { mutableStateMapOf<Long, IntRange>() }
+    LaunchedEffect(activeDraftId, accounts.size) {
+        val range = activeDraftId?.let { chipRanges[it] } ?: return@LaunchedEffect
+        val viewportStart = scrollState.value
+        val viewportEnd = viewportStart + scrollState.viewportSize
+        when {
+            range.first < viewportStart -> scrollState.animateScrollTo(range.first)
+            range.last > viewportEnd -> scrollState.animateScrollTo(range.last - scrollState.viewportSize)
+        }
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .alpha(if (enabled) 1f else DISABLED_ALPHA)
+            .horizontalScroll(scrollState),
+        horizontalArrangement = Arrangement.spacedBy(PosSpacing.sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        accounts.forEach { account ->
+            AccountChip(
+                account = account,
+                isActive = account.id == activeDraftId,
+                enabled = enabled,
+                onClick = { onSelect(account.id) },
+                modifier = Modifier.onGloballyPositioned { coordinates ->
+                    val x = coordinates.positionInParent().x.toInt()
+                    chipRanges[account.id] = x..(x + coordinates.size.width)
+                },
+            )
+        }
+        PosSecondaryButton(
+            text = SaleStrings.NEW_ACCOUNT,
+            onClick = onNew,
+            enabled = enabled && canOpen,
+            icon = Icons.Filled.Add,
+            modifier = Modifier.focusProperties { canFocus = false },
+        )
+    }
+}
+
+@Composable
+private fun AccountChip(
+    account: SaleDraft,
+    isActive: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+    val isEmpty = account.lines.isEmpty()
+    val label = if (isEmpty) {
+        SaleStrings.EMPTY_ACCOUNT
+    } else {
+        SaleStrings.accountChip(account.totals.cashTotal, account.lines.size)
+    }
+    val description = if (isEmpty) {
+        SaleStrings.EMPTY_ACCOUNT_DESCRIPTION
+    } else {
+        SaleStrings.accountDescription(account.totals.cashTotal, account.lines.size)
+    }
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = if (isActive) colors.primaryContainer else colors.surfaceVariant,
+        contentColor = if (isActive) colors.onPrimaryContainer else colors.onSurfaceVariant,
+        border = if (isActive) BorderStroke(2.dp, colors.primary) else BorderStroke(1.dp, colors.outline),
+        modifier = modifier
+            .heightIn(min = PosLayout.touchTarget)
+            .semantics {
+                selected = isActive
+                contentDescription = description
+                if (isActive) stateDescription = SaleStrings.ACCOUNT_SELECTED
+            }
+            .focusProperties { canFocus = false }
+            .clickable(enabled = enabled, role = Role.Tab, onClick = onClick),
+    ) {
+        Row(
+            modifier = Modifier.heightIn(min = PosLayout.touchTarget).padding(horizontal = PosSpacing.md),
+            horizontalArrangement = Arrangement.spacedBy(PosSpacing.xs),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (isActive) {
+                Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+            }
+            Text(
+                label,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                modifier = Modifier.clearAndSetSemantics {},
+            )
+        }
+    }
+}
+
+@Composable
 private fun CartPanel(state: CashierSaleState, viewModel: CashierSaleViewModel, modifier: Modifier = Modifier) {
     val lines = state.draft?.lines.orEmpty()
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(PosSpacing.sm)) {
-        Text(
-            SaleStrings.CART_TITLE,
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
         if (lines.isEmpty()) {
             Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Text(
@@ -306,9 +436,14 @@ private fun CartPanel(state: CashierSaleState, viewModel: CashierSaleViewModel, 
             horizontalArrangement = Arrangement.spacedBy(PosSpacing.md),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (lines.isNotEmpty()) {
+            val footerLabel = when {
+                lines.isNotEmpty() -> SaleStrings.CLEAR
+                state.canCloseEmptyAccount -> SaleStrings.CLOSE_ACCOUNT
+                else -> null
+            }
+            if (footerLabel != null) {
                 TextButton(onClick = viewModel::requestClear, enabled = !state.isBusy) {
-                    Text(SaleStrings.CLEAR)
+                    Text(footerLabel)
                 }
             }
             PosPrimaryButton(
@@ -661,3 +796,5 @@ private fun SaleKitchenKind.label(): String = when (this) {
 
 private fun KeyEvent.isEnterUp(): Boolean =
     type == KeyEventType.KeyUp && (key == Key.Enter || key == Key.NumPadEnter)
+
+private const val DISABLED_ALPHA = 0.5f

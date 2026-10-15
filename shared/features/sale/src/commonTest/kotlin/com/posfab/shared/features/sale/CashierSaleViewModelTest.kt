@@ -13,6 +13,7 @@ import com.posfab.shared.features.sale.domain.SaleProduct
 import com.posfab.shared.features.sale.domain.SaleTotals
 import com.posfab.shared.features.sale.repository.SaleRepository
 import com.posfab.shared.features.sale.ui.CashierSaleViewModel
+import com.posfab.shared.features.sale.ui.MAX_ACCOUNTS
 import com.posfab.shared.features.sale.ui.SaleConfirm
 import com.posfab.shared.features.sale.ui.SalePhase
 import com.posfab.shared.features.sale.ui.SaleStrings
@@ -514,10 +515,437 @@ class CashierSaleViewModelTest {
         assertFalse(vm.state.value.isPaidLocked)
         assertEquals(SalePhase.Selling, vm.state.value.phase)
     }
+
+    @Test
+    fun load_lists_open_drafts_oldest_first() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(openDraftsSeed = listOf(12L, 9L))
+        val vm = start(repo)
+
+        val state = vm.state.value
+        assertEquals(listOf(9L, 12L), state.accounts.map { it.id })
+        assertEquals(9L, state.activeDraftId)
+        assertEquals(1, repo.openDraftsCalls)
+        assertEquals(0, repo.newDraftCalls)
+        assertEquals(SalePhase.Selling, state.phase)
+    }
+
+    @Test
+    fun load_creates_one_account_when_the_terminal_has_none() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(openDraftsSeed = emptyList())
+        val vm = start(repo)
+
+        val state = vm.state.value
+        assertEquals(1, state.accounts.size)
+        assertEquals(state.accounts.single().id, state.activeDraftId)
+        assertEquals(1, repo.newDraftCalls)
+        assertEquals(SalePhase.Selling, state.phase)
+    }
+
+    @Test
+    fun new_account_switches_and_keeps_the_first_one() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.cigarro)
+        advanceUntilIdle()
+        val firstId = vm.state.value.activeDraftId
+
+        assertTrue(vm.state.value.canOpenAccount)
+        vm.openAccount()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(2, state.accounts.size)
+        assertEquals(firstId, state.accounts.first().id)
+        assertEquals(1, state.accounts.first().lines.size)
+        assertEquals(state.accounts.last().id, state.activeDraftId)
+        assertTrue(state.draft!!.lines.isEmpty())
+        assertEquals(1, repo.newDraftCalls)
+    }
+
+    @Test
+    fun new_account_is_ignored_when_the_active_one_is_empty() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+
+        assertFalse(vm.state.value.canOpenAccount)
+        vm.openAccount()
+        advanceUntilIdle()
+        assertEquals(0, repo.newDraftCalls)
+        assertEquals(1, vm.state.value.accounts.size)
+
+        vm.addProduct(repo.cigarro)
+        advanceUntilIdle()
+        vm.openAccount()
+        vm.openAccount()
+        advanceUntilIdle()
+
+        assertEquals(1, repo.newDraftCalls)
+        assertEquals(2, vm.state.value.accounts.size)
+    }
+
+    @Test
+    fun max_accounts_disables_new_account() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(openDraftsSeed = (1L..MAX_ACCOUNTS.toLong()).toList())
+        val vm = start(repo)
+        vm.addProduct(repo.cigarro)
+        advanceUntilIdle()
+
+        assertEquals(MAX_ACCOUNTS, vm.state.value.accounts.size)
+        assertFalse(vm.state.value.canOpenAccount)
+        vm.openAccount()
+        advanceUntilIdle()
+
+        assertEquals(0, repo.newDraftCalls)
+        assertEquals(MAX_ACCOUNTS, vm.state.value.accounts.size)
+    }
+
+    @Test
+    fun switching_accounts_clears_selection_and_notice_but_keeps_search() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(openDraftsSeed = listOf(1L, 2L))
+        val vm = start(repo)
+        vm.addProduct(repo.cigarro)
+        advanceUntilIdle()
+        vm.selectLine(vm.state.value.draft!!.lines.single().id)
+        vm.onQueryChange("cig")
+        advanceTimeBy(350)
+        runCurrent()
+        assertNotNull(vm.state.value.notice)
+        assertNotNull(vm.state.value.selectedLineId)
+
+        vm.selectAccount(99L)
+        assertEquals(1L, vm.state.value.activeDraftId)
+
+        vm.selectAccount(2L)
+
+        val state = vm.state.value
+        assertEquals(2L, state.activeDraftId)
+        assertNull(state.selectedLineId)
+        assertEquals("", state.qtyInput)
+        assertNull(state.notice)
+        assertNull(state.errorMessage)
+        assertEquals("cig", state.query)
+        assertEquals(listOf(repo.cigarro), state.searchResults)
+        assertEquals(1, state.accountById(1L)!!.lines.size)
+    }
+
+    @Test
+    fun queued_scans_land_on_the_account_that_was_active_when_scanned() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(openDraftsSeed = listOf(1L, 2L))
+        val vm = start(repo)
+
+        vm.addProduct(repo.cigarro)
+        vm.addProduct(repo.cigarro)
+        vm.selectAccount(2L)
+        vm.addProduct(repo.kitchenPool.first())
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(2L, state.activeDraftId)
+        val first = state.accountById(1L)!!.lines.single()
+        assertEquals(repo.cigarro.id, first.productId)
+        assertEquals(2.0, first.qty)
+        assertEquals(repo.kitchenPool.first().id, state.accountById(2L)!!.lines.single().productId)
+        assertFalse(state.isBusy)
+    }
+
+    @Test
+    fun increment_after_switching_updates_the_original_line() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(openDraftsSeed = listOf(1L, 2L))
+        val vm = start(repo)
+        vm.addProduct(repo.cigarro)
+        advanceUntilIdle()
+        vm.selectLine(vm.state.value.draft!!.lines.single().id)
+
+        vm.incrementQty()
+        vm.selectAccount(2L)
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(2L, state.activeDraftId)
+        assertEquals(2.0, state.accountById(1L)!!.lines.single().qty)
+        assertTrue(state.draft!!.lines.isEmpty())
+        assertNull(state.selectedLineId)
+        assertNull(state.notice)
+    }
+
+    @Test
+    fun charging_one_account_removes_it_and_activates_the_next() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(openDraftsSeed = listOf(1L, 2L))
+        val vm = start(repo)
+        vm.addProduct(repo.cigarro)
+        advanceUntilIdle()
+
+        vm.startCharge()
+        vm.payExact()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SalePhase.Done, state.phase)
+        assertNotNull(state.lastResult)
+        assertEquals(listOf(2L), state.accounts.map { it.id })
+        assertEquals(2L, state.activeDraftId)
+        assertEquals("CHECKED_OUT", repo.drafts.getValue(1L).status)
+    }
+
+    @Test
+    fun next_after_charging_with_remaining_accounts_does_not_create_a_draft() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(openDraftsSeed = listOf(1L, 2L))
+        val vm = start(repo)
+        vm.selectAccount(2L)
+        vm.addProduct(repo.kitchenPool.first())
+        advanceUntilIdle()
+        vm.selectAccount(1L)
+        vm.addProduct(repo.cigarro)
+        advanceUntilIdle()
+        vm.startCharge()
+        vm.payExact()
+        advanceUntilIdle()
+
+        vm.startNextSale()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SalePhase.Selling, state.phase)
+        assertEquals(2L, state.activeDraftId)
+        assertNull(state.lastResult)
+        assertEquals(1, state.draft!!.lines.size)
+        assertEquals(0, repo.newDraftCalls)
+    }
+
+    @Test
+    fun scanning_after_charging_adds_to_the_next_account() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(openDraftsSeed = listOf(1L, 2L))
+        val vm = start(repo)
+        vm.addProduct(repo.kitchenPool.first())
+        advanceUntilIdle()
+        vm.startCharge()
+        vm.payExact()
+        advanceUntilIdle()
+
+        vm.onQueryChange(repo.cigarro.barcode!!)
+        vm.onSubmit()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SalePhase.Selling, state.phase)
+        assertEquals(2L, state.activeDraftId)
+        assertEquals(repo.cigarro.id, state.draft!!.lines.single().productId)
+        assertEquals(0, repo.newDraftCalls)
+    }
+
+    @Test
+    fun charging_the_last_account_then_next_creates_a_new_one() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.cigarro)
+        advanceUntilIdle()
+        vm.startCharge()
+        vm.payExact()
+        advanceUntilIdle()
+
+        assertTrue(vm.state.value.accounts.isEmpty())
+        assertNull(vm.state.value.activeDraftId)
+
+        vm.startNextSale()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SalePhase.Selling, state.phase)
+        assertEquals(1, repo.newDraftCalls)
+        assertEquals(1, state.accounts.size)
+        assertEquals(state.accounts.single().id, state.activeDraftId)
+    }
+
+    @Test
+    fun clearing_with_other_accounts_closes_it_and_switches() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(openDraftsSeed = listOf(1L, 2L))
+        val vm = start(repo)
+        vm.addProduct(repo.cigarro)
+        advanceUntilIdle()
+
+        vm.requestClear()
+        assertEquals(SaleConfirm.ClearCart, vm.state.value.confirm)
+        vm.confirmClear()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(listOf(2L), state.accounts.map { it.id })
+        assertEquals(2L, state.activeDraftId)
+        assertEquals("CANCELLED", repo.drafts.getValue(1L).status)
+        assertEquals(0, repo.newDraftCalls)
+    }
+
+    @Test
+    fun clearing_the_only_account_replaces_it() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.cigarro)
+        advanceUntilIdle()
+        val oldId = vm.state.value.activeDraftId
+
+        vm.requestClear()
+        vm.confirmClear()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(1, state.accounts.size)
+        assertNotEquals(oldId, state.activeDraftId)
+        assertEquals(state.accounts.single().id, state.activeDraftId)
+        assertTrue(state.draft!!.lines.isEmpty())
+        assertEquals(1, repo.newDraftCalls)
+    }
+
+    @Test
+    fun empty_account_with_others_closes_without_confirmation() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(openDraftsSeed = listOf(1L, 2L))
+        val vm = start(repo)
+
+        assertTrue(vm.state.value.canCloseEmptyAccount)
+        vm.requestClear()
+        assertNull(vm.state.value.confirm)
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(1, repo.cancelCalls)
+        assertEquals(listOf(2L), state.accounts.map { it.id })
+        assertEquals(2L, state.activeDraftId)
+        assertFalse(state.canCloseEmptyAccount)
+    }
+
+    @Test
+    fun account_cancelled_elsewhere_is_removed_on_next_mutation() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(openDraftsSeed = listOf(1L, 2L))
+        val vm = start(repo)
+        vm.addProduct(repo.cigarro)
+        advanceUntilIdle()
+
+        repo.closeElsewhere(1L, "CANCELLED")
+        vm.addProduct(repo.cigarro)
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(listOf(2L), state.accounts.map { it.id })
+        assertEquals(2L, state.activeDraftId)
+        assertEquals(SaleStrings.ACCOUNT_CLOSED, state.notice)
+        assertEquals(SalePhase.Selling, state.phase)
+    }
+
+    @Test
+    fun checkout_conflict_on_a_draft_charged_elsewhere_removes_it_and_warns() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(openDraftsSeed = listOf(1L, 2L)).apply {
+            failCheckoutWithConflict = true
+            conflictAfterServerCharged = true
+        }
+        val vm = start(repo)
+        vm.addProduct(repo.cigarro)
+        advanceUntilIdle()
+
+        vm.startCharge()
+        vm.payWith(100)
+        vm.confirmCharge()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SalePhase.Selling, state.phase)
+        assertEquals(listOf(2L), state.accounts.map { it.id })
+        assertEquals(2L, state.activeDraftId)
+        assertEquals(SaleStrings.POSSIBLY_CHARGED, state.notice)
+        assertNull(state.checkoutIdempotencyKey)
+        assertFalse(state.isCheckoutInFlight)
+        assertEquals("", state.paidInput)
+        assertEquals(0, repo.newDraftCalls)
+    }
+
+    @Test
+    fun switching_is_blocked_while_charging() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(openDraftsSeed = listOf(1L, 2L))
+        val vm = start(repo)
+        vm.addProduct(repo.cigarro)
+        advanceUntilIdle()
+        vm.startCharge()
+
+        vm.selectAccount(2L)
+
+        val state = vm.state.value
+        assertEquals(SalePhase.Charging, state.phase)
+        assertEquals(1L, state.activeDraftId)
+        assertEquals(SaleStrings.FINISH_CHARGE_FIRST, state.notice)
+    }
+    @Test
+    fun scan_in_done_then_switching_account_adds_to_the_account_shown_when_scanned() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(openDraftsSeed = listOf(1L, 2L, 3L))
+        val vm = start(repo)
+        vm.addProduct(repo.kitchenPool.first())
+        advanceUntilIdle()
+        vm.startCharge()
+        vm.payExact()
+        advanceUntilIdle()
+        assertEquals(SalePhase.Done, vm.state.value.phase)
+        assertEquals(2L, vm.state.value.activeDraftId)
+
+        vm.addProduct(repo.cigarro)
+        vm.selectAccount(3L)
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SalePhase.Selling, state.phase)
+        assertEquals(repo.cigarro.id, state.accountById(2L)!!.lines.single().productId)
+        assertTrue(state.accountById(3L)!!.lines.isEmpty())
+    }
+
+    @Test
+    fun scan_with_no_account_after_a_failed_draft_creation_retries_creating_it() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.cigarro)
+        advanceUntilIdle()
+        repo.failNextNewDraft = true
+
+        vm.requestClear()
+        vm.confirmClear()
+        advanceUntilIdle()
+        assertTrue(vm.state.value.accounts.isEmpty())
+        assertNull(vm.state.value.activeDraftId)
+        assertNotNull(vm.state.value.errorMessage)
+        assertEquals(1, repo.newDraftCalls)
+
+        vm.addProduct(repo.cigarro)
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(2, repo.newDraftCalls)
+        assertEquals(1, state.accounts.size)
+        assertEquals(state.accounts.single().id, state.activeDraftId)
+        assertEquals(repo.cigarro.id, state.draft!!.lines.single().productId)
+    }
+
+    @Test
+    fun checkout_conflict_with_a_network_failure_on_reload_keeps_the_key() = runTest(dispatcher) {
+        val repo = FakeSaleRepository().apply {
+            failCheckoutWithConflict = true
+            failNextDraftReadWithNetwork = true
+        }
+        val vm = start(repo)
+        vm.addProduct(repo.cigarro)
+        advanceUntilIdle()
+
+        vm.startCharge()
+        vm.payWith(100)
+        vm.confirmCharge()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SalePhase.Charging, state.phase)
+        assertEquals(repo.checkoutKeys.single(), state.checkoutIdempotencyKey)
+        assertTrue(state.isPaidLocked)
+        assertFalse(state.isCheckoutInFlight)
+        assertNotNull(state.errorMessage)
+    }
 }
 
 private class FakeSaleRepository(
     private val checkoutDelayMs: Long = 0,
+    openDraftsSeed: List<Long> = listOf(1L),
 ) : SaleRepository {
     val cigarro = SaleProduct(
         id = 1L, name = "Cigarro suelto", barcode = "7501000100015", unitId = 1L, cashPrice = 21.0,
@@ -541,12 +969,16 @@ private class FakeSaleRepository(
         ),
     )
 
+    val drafts: MutableMap<Long, SaleDraft> = openDraftsSeed.associateWith { emptyDraft(it) }.toMutableMap()
+
     var cashSession: CashSessionCheck = CashSessionCheck.Open
     var failFirstCheckoutWithNetwork = false
     var failCheckoutWithValidation = false
     var forceConflictOnNextUpdate = false
     var failCheckoutWithConflict = false
     var conflictAfterServerCharged = false
+    var failNextNewDraft = false
+    var failNextDraftReadWithNetwork = false
 
     var addLineCalls = 0
     var updateQtyCalls = 0
@@ -554,47 +986,71 @@ private class FakeSaleRepository(
     var checkoutCalls = 0
     var cancelCalls = 0
     var resolveLotsCalls = 0
+    var openDraftsCalls = 0
+    var newDraftCalls = 0
     var lastPaidAmount: Double? = null
     val checkoutKeys = mutableListOf<String>()
     val callLog = mutableListOf<String>()
 
-    private var draftCounter = 1L
+    private var draftCounter = openDraftsSeed.maxOrNull() ?: 0L
     private var nextLineId = 1L
-    private var needsFreshDraft = false
-    private var draft = emptyDraft()
 
-    private fun emptyDraft() = SaleDraft(
-        id = draftCounter, status = "OPEN", version = 1, lines = emptyList(), totals = SaleTotals(cashTotal = 0.0),
-    )
-
-    private fun freshDraftIfNeeded() {
-        if (needsFreshDraft) {
-            draftCounter += 1
-            draft = emptyDraft()
-            needsFreshDraft = false
-        }
+    fun closeElsewhere(draftId: Long, status: String) {
+        drafts[draftId]?.let { drafts[draftId] = it.copy(status = status, version = it.version + 1) }
     }
+
+    private fun emptyDraft(id: Long) = SaleDraft(
+        id = id, status = "OPEN", version = 1, lines = emptyList(), totals = SaleTotals(cashTotal = 0.0),
+    )
 
     private fun round2(value: Double) = kotlin.math.round(value * 100) / 100
 
-    private fun withLines(lines: List<SaleLine>) = draft.copy(
-        version = draft.version + 1,
+    private fun SaleDraft.withLines(lines: List<SaleLine>) = copy(
+        version = version + 1,
         lines = lines,
         totals = SaleTotals(cashTotal = lines.sumOf { it.lineTotal }),
     )
 
+    private fun notFound(): AppError = AppError.Validation("Request rejected: 404")
+
+    private fun mutate(
+        draftId: Long,
+        expectedVersion: Int,
+        change: (SaleDraft) -> SaleDraft,
+    ): SaleMutationResult {
+        val draft = drafts[draftId] ?: return SaleMutationResult.Failure(notFound())
+        if (!draft.isOpen) return SaleMutationResult.DraftClosed(draft)
+        if (expectedVersion != draft.version) return SaleMutationResult.ConflictRefetched(draft)
+        val updated = change(draft)
+        drafts[draftId] = updated
+        return SaleMutationResult.Success(updated)
+    }
+
     override suspend fun cashSession(): AppResult<CashSessionCheck> = AppResult.Success(cashSession)
 
-    override suspend fun currentOrNewDraft(): AppResult<SaleDraft> {
-        freshDraftIfNeeded()
-        return AppResult.Success(draft)
+    override suspend fun openDrafts(): AppResult<List<SaleDraft>> {
+        openDraftsCalls += 1
+        return AppResult.Success(drafts.values.filter { it.isOpen }.sortedBy { it.id })
+    }
+
+    override suspend fun draft(draftId: Long): AppResult<SaleDraft> {
+        if (failNextDraftReadWithNetwork) {
+            failNextDraftReadWithNetwork = false
+            return AppResult.Failure(AppError.Network("network down"))
+        }
+        return drafts[draftId]?.let { AppResult.Success(it) } ?: AppResult.Failure(notFound())
     }
 
     override suspend fun newDraft(): AppResult<SaleDraft> {
+        newDraftCalls += 1
+        if (failNextNewDraft) {
+            failNextNewDraft = false
+            return AppResult.Failure(AppError.Network("network down"))
+        }
         draftCounter += 1
-        draft = emptyDraft()
-        needsFreshDraft = false
-        return AppResult.Success(draft)
+        val created = emptyDraft(draftCounter)
+        drafts[created.id] = created
+        return AppResult.Success(created)
     }
 
     override suspend fun searchProducts(query: String, limit: Int): AppResult<List<SaleProduct>> {
@@ -614,20 +1070,20 @@ private class FakeSaleRepository(
         expectedVersion: Int,
     ): SaleMutationResult {
         addLineCalls += 1
-        if (expectedVersion != draft.version) return SaleMutationResult.ConflictRefetched(draft)
-        val price = product.cashPrice ?: 0.0
-        val line = SaleLine(
-            id = nextLineId++,
-            productId = product.id,
-            productName = product.name,
-            qty = qty,
-            unitId = product.unitId,
-            cashUnitPrice = price,
-            lineTotal = round2(qty * price),
-            lotTracked = product.lotTracked,
-        )
-        draft = withLines(draft.lines + line)
-        return SaleMutationResult.Success(draft)
+        return mutate(draftId, expectedVersion) { draft ->
+            val price = product.cashPrice ?: 0.0
+            val line = SaleLine(
+                id = nextLineId++,
+                productId = product.id,
+                productName = product.name,
+                qty = qty,
+                unitId = product.unitId,
+                cashUnitPrice = price,
+                lineTotal = round2(qty * price),
+                lotTracked = product.lotTracked,
+            )
+            draft.withLines(draft.lines + line)
+        }
     }
 
     override suspend fun updateLineQty(
@@ -639,33 +1095,37 @@ private class FakeSaleRepository(
         updateQtyCalls += 1
         if (forceConflictOnNextUpdate) {
             forceConflictOnNextUpdate = false
-            draft = draft.copy(version = draft.version + 1)
-            return SaleMutationResult.ConflictRefetched(draft)
+            val draft = drafts[draftId] ?: return SaleMutationResult.Failure(notFound())
+            val bumped = draft.copy(version = draft.version + 1)
+            drafts[draftId] = bumped
+            return SaleMutationResult.ConflictRefetched(bumped)
         }
-        if (expectedVersion != draft.version) return SaleMutationResult.ConflictRefetched(draft)
-        val updated = draft.lines.map {
-            if (it.id == lineId) it.copy(qty = qty, lineTotal = round2(qty * it.cashUnitPrice)) else it
+        return mutate(draftId, expectedVersion) { draft ->
+            draft.withLines(
+                draft.lines.map {
+                    if (it.id == lineId) it.copy(qty = qty, lineTotal = round2(qty * it.cashUnitPrice)) else it
+                }
+            )
         }
-        draft = withLines(updated)
-        return SaleMutationResult.Success(draft)
     }
 
-    override suspend fun removeLine(draftId: Long, lineId: Long, expectedVersion: Int): SaleMutationResult {
-        if (expectedVersion != draft.version) return SaleMutationResult.ConflictRefetched(draft)
-        draft = withLines(draft.lines.filterNot { it.id == lineId })
-        return SaleMutationResult.Success(draft)
-    }
+    override suspend fun removeLine(draftId: Long, lineId: Long, expectedVersion: Int): SaleMutationResult =
+        mutate(draftId, expectedVersion) { draft -> draft.withLines(draft.lines.filterNot { it.id == lineId }) }
 
     override suspend fun resolveLots(draftId: Long): AppResult<SaleDraft> {
         resolveLotsCalls += 1
         callLog += "resolveLots"
-        draft = withLines(draft.lines.map { if (it.lotTracked) it.copy(lotId = 999L) else it })
-        return AppResult.Success(draft)
+        val draft = drafts[draftId] ?: return AppResult.Failure(notFound())
+        val resolved = draft.withLines(draft.lines.map { if (it.lotTracked) it.copy(lotId = 999L) else it })
+        drafts[draftId] = resolved
+        return AppResult.Success(resolved)
     }
 
     override suspend fun cancelDraft(draftId: Long, expectedVersion: Int): AppResult<Unit> {
         cancelCalls += 1
-        needsFreshDraft = true
+        val draft = drafts[draftId] ?: return AppResult.Failure(notFound())
+        if (!draft.isOpen || draft.version != expectedVersion) return AppResult.Failure(AppError.Conflict)
+        drafts[draftId] = draft.copy(status = "CANCELLED", version = draft.version + 1)
         return AppResult.Success(Unit)
     }
 
@@ -684,16 +1144,16 @@ private class FakeSaleRepository(
         }
         if (failCheckoutWithConflict) {
             failCheckoutWithConflict = false
-            if (conflictAfterServerCharged) needsFreshDraft = true
+            if (conflictAfterServerCharged) closeElsewhere(draftId, "CHECKED_OUT")
             return AppResult.Failure(AppError.Conflict)
         }
         if (failCheckoutWithValidation) {
             return AppResult.Failure(AppError.Validation("Draft has no lines"))
         }
-        val total = draft.totals.cashTotal
-        needsFreshDraft = true
+        val draft = drafts[draftId] ?: return AppResult.Failure(notFound())
+        drafts[draftId] = draft.copy(status = "CHECKED_OUT", version = draft.version + 1)
         return AppResult.Success(
-            CashCheckoutResult(saleId = 1L, folio = "FOL-0001", cashTotal = total, paidAmount = paidAmount)
+            CashCheckoutResult(saleId = 1L, folio = "FOL-0001", cashTotal = draft.totals.cashTotal, paidAmount = paidAmount)
         )
     }
 }

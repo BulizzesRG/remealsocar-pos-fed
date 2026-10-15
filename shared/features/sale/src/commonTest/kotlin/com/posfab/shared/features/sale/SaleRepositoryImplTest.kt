@@ -13,6 +13,7 @@ import com.posfab.shared.core.result.AppResult
 import com.posfab.shared.features.sale.domain.CashCheckoutResult
 import com.posfab.shared.features.sale.domain.SaleDraft
 import com.posfab.shared.features.sale.domain.SaleKitchenKind
+import com.posfab.shared.features.sale.domain.SaleMutationResult
 import com.posfab.shared.features.sale.domain.SaleProduct
 import com.posfab.shared.features.sale.repository.SaleRepositoryImpl
 import com.posfab.shared.network.catalog.BusinessConfigDto
@@ -37,6 +38,7 @@ import com.posfab.shared.network.pos.DraftCreateRequestDto
 import com.posfab.shared.network.pos.DraftCreateResponseDto
 import com.posfab.shared.network.pos.DraftDto
 import com.posfab.shared.network.pos.DraftLineDto
+import com.posfab.shared.network.pos.DraftListDto
 import com.posfab.shared.network.pos.DraftTotalsDto
 import com.posfab.shared.network.pos.PosApi
 import com.posfab.shared.network.pos.ResolveLotsResponseDto
@@ -64,45 +66,54 @@ class SaleRepositoryImplTest {
     }
 
     @Test
-    fun current_or_new_draft_returns_the_open_draft_without_creating() = runTest {
-        val posApi = FakePosApi().apply { currentDraft = AppResult.Success(draftDto(id = 7, cashTotal = "40.00")) }
-        val result = repository(posApi).currentOrNewDraft()
+    fun open_drafts_maps_items_oldest_first() = runTest {
+        val posApi = FakePosApi().apply {
+            openDrafts = AppResult.Success(
+                DraftListDto(listOf(draftDto(id = 9, cashTotal = "40.00"), draftDto(id = 7, cashTotal = "18.00"))),
+            )
+        }
+        val result = repository(posApi).openDrafts()
 
-        val draft = assertIs<AppResult.Success<SaleDraft>>(result).value
-        assertEquals(7L, draft.id)
-        assertEquals(40.0, draft.totals.cashTotal)
+        val drafts = assertIs<AppResult.Success<List<SaleDraft>>>(result).value
+        assertEquals(listOf(7L, 9L), drafts.map { it.id })
+        assertEquals(18.0, drafts.first().totals.cashTotal)
         assertEquals(0, posApi.createCalls.size)
     }
 
     @Test
-    fun current_or_new_draft_creates_only_when_there_is_no_open_draft() = runTest {
-        val posApi = FakePosApi().apply {
-            currentDraft = AppResult.Failure(AppError.Validation("No OPEN draft for terminal=3 type=SALE"))
-        }
-        val result = repository(posApi).currentOrNewDraft()
-
-        assertEquals(99L, assertIs<AppResult.Success<SaleDraft>>(result).value.id)
-        assertEquals(1, posApi.createCalls.size)
-        assertEquals("SALE", posApi.createCalls.single().type)
-        assertEquals(TERMINAL_ID, posApi.createCalls.single().terminalId)
-        assertNull(posApi.createCalls.single().businessUnitId)
-        assertEquals(listOf(99L), posApi.getDraftCalls)
-    }
-
-    @Test
-    fun current_or_new_draft_passes_other_failures_through() = runTest {
-        val failures = listOf(
-            AppError.Network("down"),
-            AppError.Validation("Request rejected: 400"),
-            AppError.Forbidden,
-        )
+    fun open_drafts_passes_failures_through() = runTest {
+        val failures = listOf(AppError.Network("down"), AppError.Forbidden, AppError.Validation("Request rejected: 400"))
         failures.forEach { error ->
-            val posApi = FakePosApi().apply { currentDraft = AppResult.Failure(error) }
-            val result = repository(posApi).currentOrNewDraft()
+            val posApi = FakePosApi().apply { openDrafts = AppResult.Failure(error) }
+            val result = repository(posApi).openDrafts()
 
             assertEquals(error, assertIs<AppResult.Failure>(result).error)
             assertEquals(0, posApi.createCalls.size)
         }
+    }
+
+    @Test
+    fun conflict_on_add_refetches_the_same_draft() = runTest {
+        val posApi = FakePosApi().apply { addLineResult = AppResult.Failure(AppError.Conflict) }
+        val result = repository(posApi).addLine(7L, product(), 1.0, expectedVersion = 1)
+
+        val refetched = assertIs<SaleMutationResult.ConflictRefetched>(result)
+        assertEquals(7L, refetched.draft.id)
+        assertEquals(listOf(7L), posApi.getDraftCalls)
+    }
+
+    @Test
+    fun conflict_on_a_cancelled_draft_reports_it_closed() = runTest {
+        val posApi = FakePosApi().apply {
+            addLineResult = AppResult.Failure(AppError.Conflict)
+            draftStatus = "CANCELLED"
+        }
+        val result = repository(posApi).addLine(7L, product(), 1.0, expectedVersion = 1)
+
+        val closed = assertIs<SaleMutationResult.DraftClosed>(result)
+        assertEquals(7L, closed.draft.id)
+        assertEquals("CANCELLED", closed.draft.status)
+        assertEquals(listOf(7L), posApi.getDraftCalls)
     }
 
     @Test
@@ -211,6 +222,8 @@ class SaleRepositoryImplTest {
         assertEquals("F-1", charged.folio)
     }
 
+    private fun product() = SaleProduct(id = 1L, name = "Coca", barcode = null, unitId = 1L, cashPrice = 18.0)
+
     private fun lookup(active: Boolean = true, matchedUnitId: Long? = null) = BarcodeLookupResponseDto(
         product = BarcodeLookupProductDto(
             id = 10L,
@@ -250,10 +263,15 @@ class SaleRepositoryImplTest {
     }
 }
 
-internal fun draftDto(id: Long, cashTotal: String = "0", lines: List<DraftLineDto> = emptyList()) = DraftDto(
+internal fun draftDto(
+    id: Long,
+    cashTotal: String = "0",
+    lines: List<DraftLineDto> = emptyList(),
+    status: String = "OPEN",
+) = DraftDto(
     id = id,
     type = "SALE",
-    status = "OPEN",
+    status = status,
     terminalId = 3L,
     version = 1,
     lines = lines,
@@ -273,7 +291,9 @@ private class NoRefreshAuthRepository(private val manager: SessionManager) : Aut
 }
 
 private class FakePosApi : PosApi {
-    var currentDraft: AppResult<DraftDto> = AppResult.Failure(AppError.Validation("No OPEN draft"))
+    var openDrafts: AppResult<DraftListDto> = AppResult.Success(DraftListDto(emptyList()))
+    var draftStatus: String = "OPEN"
+    var addLineResult: AppResult<DraftDto>? = null
     var barcode: AppResult<BarcodeLookupResponseDto> = AppResult.Failure(AppError.Validation("Barcode not found"))
     val createCalls = mutableListOf<DraftCreateRequestDto>()
     val getDraftCalls = mutableListOf<Long>()
@@ -283,7 +303,7 @@ private class FakePosApi : PosApi {
     override suspend fun currentCashSession(accessToken: String, terminalId: Long): AppResult<Boolean> =
         AppResult.Success(true)
 
-    override suspend fun getCurrentSaleDraft(accessToken: String): AppResult<DraftDto> = currentDraft
+    override suspend fun listOpenSaleDrafts(accessToken: String): AppResult<DraftListDto> = openDrafts
 
     override suspend fun createDraft(accessToken: String, request: DraftCreateRequestDto): AppResult<DraftCreateResponseDto> {
         createCalls += request
@@ -294,11 +314,11 @@ private class FakePosApi : PosApi {
     override suspend fun getDraft(accessToken: String, draftId: Long): AppResult<DraftDto> {
         getDraftCalls += draftId
         log += "get:$draftId"
-        return AppResult.Success(draftDto(id = draftId))
+        return AppResult.Success(draftDto(id = draftId, status = draftStatus))
     }
 
     override suspend fun addDraftLine(accessToken: String, draftId: Long, request: AddLineRequestDto): AppResult<DraftDto> =
-        error("unused")
+        addLineResult ?: error("unused")
 
     override suspend fun updateDraftLine(
         accessToken: String,

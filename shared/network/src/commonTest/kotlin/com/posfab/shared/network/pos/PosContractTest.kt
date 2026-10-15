@@ -88,4 +88,32 @@ class PosContractTest {
         assertNull(dto.product.kitchenKind)
         assertNull(dto.product.prices)
     }
+
+    @Test
+    fun draft_list_decodes() {
+        val body = """
+            {"items":[
+             {"id":9,"type":"SALE","status":"OPEN","terminalId":1,"version":2,
+              "lines":[{"id":21,"lineNo":1,"productId":5,"unitId":2,"qty":"1.000000",
+              "unitPrice":"22.00","cashUnitPrice":"21.00","productName":"Cigarro suelto",
+              "unitCode":"PZA","lineTotal":"22.00"}],
+              "totals":{"amount":"22.00","subtotal":"22.00","tax":"0.00","total":"22.00",
+              "cashDiscount":"1.00","cashTotal":"21.00"}},
+             {"id":12,"type":"SALE","status":"OPEN","terminalId":1,"version":0,"lines":[],
+              "totals":{"amount":"0.00","subtotal":"0.00","tax":"0.00","total":"0.00",
+              "cashDiscount":"0.00","cashTotal":"0.00"}}
+            ]}
+        """.trimIndent()
+        val dto = json.decodeFromString<DraftListDto>(body)
+        assertEquals(listOf(9L, 12L), dto.items.map { it.id })
+        assertEquals("21.00", dto.items[0].totals.cashTotal)
+        assertEquals("0.00", dto.items[1].totals.cashTotal)
+        assertEquals(1, dto.items[0].lines.size)
+    }
+
+    @Test
+    fun empty_draft_list_decodes() {
+        val dto = json.decodeFromString<DraftListDto>("""{"items":[]}""")
+        assertEquals(emptyList(), dto.items)
+    }
 }
