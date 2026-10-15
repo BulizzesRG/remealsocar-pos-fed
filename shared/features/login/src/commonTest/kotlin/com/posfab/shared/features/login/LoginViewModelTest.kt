@@ -5,7 +5,9 @@ import com.posfab.shared.auth.domain.AuthUser
 import com.posfab.shared.auth.domain.UserSession
 import com.posfab.shared.auth.repository.AuthRepository
 import com.posfab.shared.auth.usecase.LoginUseCase
+import com.posfab.shared.auth.usecase.LogoutUseCase
 import com.posfab.shared.core.model.DeviceRegistration
+import com.posfab.shared.core.model.Permission
 import com.posfab.shared.core.model.UserRole
 import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
@@ -19,6 +21,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class LoginViewModelTest {
@@ -34,7 +37,7 @@ class LoginViewModelTest {
 
     private val testSession = UserSession(
         tokens = AuthTokens(accessToken = "access", refreshToken = "refresh"),
-        user = AuthUser(id = "1", username = "admin", roles = setOf(UserRole.ADMIN)),
+        user = AuthUser(id = "1", username = "admin", roles = setOf(UserRole.ADMIN), permissions = Permission.entries.toSet()),
         terminalCode = "POS1",
         terminalType = "POS",
     )
@@ -103,8 +106,57 @@ class LoginViewModelTest {
         assertFalse(vm.state.value.isLoading)
     }
 
-    private fun makeViewModel(loginResult: AppResult<UserSession>) = LoginViewModel(
-        loginUseCase = LoginUseCase(FakeAuthRepository(loginResult)),
+    @Test
+    fun submit_without_caja_access_logs_out_and_does_not_emit() = runTest(dispatcher) {
+        val stockerSession = testSession.copy(
+            user = AuthUser(
+                id = "9",
+                username = "empleado",
+                roles = setOf(UserRole.STOCKER),
+                permissions = setOf(Permission.VIEW_PRODUCTS, Permission.COUNT_STOCK),
+            ),
+        )
+        val repository = FakeAuthRepository(AppResult.Success(stockerSession))
+        val vm = makeViewModel(repository)
+
+        var emitted = false
+        val collectJob = launch {
+            vm.loggedIn.first()
+            emitted = true
+        }
+
+        vm.onUsernameChange("empleado")
+        vm.onPasswordChange("empleado123")
+        vm.submit()
+        advanceUntilIdle()
+
+        assertEquals(LoginStrings.ERROR_NO_CAJA_ACCESS, vm.state.value.error)
+        assertFalse(vm.state.value.isLoading)
+        assertFalse(emitted)
+        assertEquals(1, repository.logoutCalls)
+        collectJob.cancel()
+    }
+
+    @Test
+    fun submit_with_caja_access_does_not_log_out() = runTest(dispatcher) {
+        val repository = FakeAuthRepository(AppResult.Success(testSession))
+        val vm = makeViewModel(repository)
+
+        vm.onUsernameChange("admin")
+        vm.onPasswordChange("pass123")
+        vm.submit()
+        advanceUntilIdle()
+
+        assertEquals(0, repository.logoutCalls)
+        assertTrue(vm.state.value.error == null)
+    }
+
+    private fun makeViewModel(loginResult: AppResult<UserSession>) =
+        makeViewModel(FakeAuthRepository(loginResult))
+
+    private fun makeViewModel(repository: FakeAuthRepository) = LoginViewModel(
+        loginUseCase = LoginUseCase(repository),
+        logoutUseCase = LogoutUseCase(repository),
         deviceRegistration = deviceRegistration,
         dispatcher = dispatcher,
     )
@@ -113,6 +165,9 @@ class LoginViewModelTest {
 private class FakeAuthRepository(
     private val loginResult: AppResult<UserSession>,
 ) : AuthRepository {
+    var logoutCalls = 0
+        private set
+
     override suspend fun login(
         username: String,
         password: String,
@@ -125,6 +180,8 @@ private class FakeAuthRepository(
     override suspend fun restoreSession(): AppResult<UserSession?> =
         AppResult.Failure(AppError.Unknown("not implemented"))
 
-    override suspend fun logout(): AppResult<Unit> =
-        AppResult.Failure(AppError.Unknown("not implemented"))
+    override suspend fun logout(): AppResult<Unit> {
+        logoutCalls++
+        return AppResult.Success(Unit)
+    }
 }

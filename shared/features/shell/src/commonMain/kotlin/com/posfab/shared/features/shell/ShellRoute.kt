@@ -1,16 +1,12 @@
 package com.posfab.shared.features.shell
 
-import com.posfab.shared.core.model.UserRole
+import com.posfab.shared.core.model.Permission
 
-enum class ShellRoute(val title: String, val requiredRoles: Set<UserRole>) {
-    HOME("Inicio", setOf(UserRole.CASHIER, UserRole.MANAGER, UserRole.ADMIN)),
-    POS("POS", setOf(UserRole.CASHIER, UserRole.MANAGER, UserRole.ADMIN)),
-    CASH("Cash", setOf(UserRole.CASHIER, UserRole.MANAGER, UserRole.ADMIN)),
-    HISTORY("History", setOf(UserRole.CASHIER, UserRole.MANAGER, UserRole.ADMIN)),
-    CATALOG("Productos", setOf(UserRole.MANAGER, UserRole.ADMIN)),
-    OPERATIONS("Operations", setOf(UserRole.MANAGER, UserRole.ADMIN)),
-    DIAGNOSTICS("Diagnostics", setOf(UserRole.MANAGER, UserRole.ADMIN)),
-    CREDIT("Credit", setOf(UserRole.CASHIER, UserRole.MANAGER, UserRole.ADMIN)),
-    REPORTS("Reports", setOf(UserRole.MANAGER, UserRole.ADMIN)),
-    ADMIN("Admin", setOf(UserRole.ADMIN));
+enum class ShellRoute(val title: String, val permission: Permission?) {
+    HOME("Inicio", null),
+    SELL("Vender", Permission.SELL),
+    CASH("Caja", Permission.OPEN_CASH),
+    DAILY_SALES("Ventas del día", Permission.VIEW_SALES),
+    PRODUCTS("Productos", Permission.MANAGE_PRODUCTS),
+    HELP("Ayuda", null),
 }

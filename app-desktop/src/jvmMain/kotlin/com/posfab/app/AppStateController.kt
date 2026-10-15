@@ -1,5 +1,6 @@
 package com.posfab.app
 
+import com.posfab.shared.auth.domain.CajaAccess
 import com.posfab.shared.auth.domain.UserSession
 import com.posfab.shared.auth.session.SessionManager
 import com.posfab.shared.auth.usecase.RestoreSessionUseCase
@@ -75,7 +76,6 @@ class AppStateController(
                         _screen.value = AppScreen.DeviceSetup
                     }
                     else -> {
-                        // Network error — proceed with stored device, try session restore
                         _deviceRegistration.value = stored
                         restoreSession()
                     }
@@ -85,9 +85,14 @@ class AppStateController(
     }
 
     private suspend fun restoreSession() {
-        _screen.value = when (val restored = restoreSessionUseCase()) {
-            is AppResult.Success -> restored.value?.let { AppScreen.Shell(it) } ?: AppScreen.Login
-            is AppResult.Failure -> AppScreen.Login
+        val restored = (restoreSessionUseCase() as? AppResult.Success)?.value
+        _screen.value = when {
+            restored == null -> AppScreen.Login
+            CajaAccess.allows(restored.user) -> AppScreen.Shell(restored)
+            else -> {
+                sessionManager.clear()
+                AppScreen.Login
+            }
         }
     }
 

@@ -11,6 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 class DiagnosticsViewModel(
@@ -44,7 +45,7 @@ class DiagnosticsViewModel(
         }
     }
 
-    fun buildSupportBundle() {
+    fun buildSupportBundle(): String {
         val snapshot = _state.value
         val logs = AppLogger.recentSupportEntries(limit = 200).joinToString("\n")
         val bundle = buildString {
@@ -61,9 +62,7 @@ class DiagnosticsViewModel(
             appendLine("--- recent_logs ---")
             append(logs)
         }
-        _state.value = snapshot.copy(
-            supportBundleText = bundle,
-            notice = "Support bundle preparado (${bundle.length} chars)",
-        )
+        _state.update { it.copy(notice = DiagnosticsStrings.COPIED) }
+        return bundle
     }
 }

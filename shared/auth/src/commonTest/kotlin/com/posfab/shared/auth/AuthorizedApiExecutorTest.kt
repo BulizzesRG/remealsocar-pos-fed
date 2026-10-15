@@ -7,6 +7,7 @@ import com.posfab.shared.auth.refresh.AuthorizedApiExecutor
 import com.posfab.shared.auth.repository.AuthRepository
 import com.posfab.shared.auth.session.InMemorySessionStorage
 import com.posfab.shared.auth.session.SessionManager
+import com.posfab.shared.core.model.Permission
 import com.posfab.shared.core.model.UserRole
 import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
@@ -24,7 +25,7 @@ class AuthorizedApiExecutorTest {
         manager.set(
             UserSession(
                 tokens = AuthTokens("old-access", "refresh-1"),
-                user = AuthUser("u1", "cashier", setOf(UserRole.CASHIER)),
+                user = AuthUser("u1", "cashier", setOf(UserRole.CASHIER), setOf(Permission.VIEW_PRODUCTS, Permission.SELL, Permission.OPEN_CASH)),
                 terminalCode = "POS1",
             )
         )
@@ -58,7 +59,7 @@ class AuthorizedApiExecutorTest {
         manager.set(
             UserSession(
                 tokens = AuthTokens("old-access", "refresh-1"),
-                user = AuthUser("u1", "cashier", setOf(UserRole.CASHIER)),
+                user = AuthUser("u1", "cashier", setOf(UserRole.CASHIER), setOf(Permission.VIEW_PRODUCTS, Permission.SELL, Permission.OPEN_CASH)),
                 terminalCode = "POS1",
             )
         )

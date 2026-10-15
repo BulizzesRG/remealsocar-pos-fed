@@ -10,12 +10,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 
-/**
- * Pins the wire format of the backend (bed) for purchases, requisitions and inventory:
- * numeric ids, camelCase keys, decimal strings for quantities/money and `{"error": ...}` envelopes.
- */
 class OperationsContractTest {
-    // Same configuration as HttpClientFactory
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false; isLenient = true }
 
     @Test

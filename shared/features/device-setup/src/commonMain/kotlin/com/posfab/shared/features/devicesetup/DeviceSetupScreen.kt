@@ -38,6 +38,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.posfab.shared.core.model.terminalDisplayName
 import com.posfab.shared.ui.components.PosBrandMark
 import com.posfab.shared.ui.components.PosBrandPanel
 import com.posfab.shared.ui.components.PosErrorBanner
@@ -81,7 +82,6 @@ fun DeviceSetupScreenContent(
         val brandWeight = if (maxWidth >= 1200.dp) 0.35f else 0.42f
 
         Row(modifier = Modifier.fillMaxSize()) {
-            // LEFT PANEL — Brand
             PosBrandPanel(
                 modifier = Modifier
                     .weight(brandWeight)
@@ -108,7 +108,6 @@ fun DeviceSetupScreenContent(
                 }
             }
 
-            // RIGHT PANEL — Form
             Surface(
                 modifier = Modifier
                     .weight(1f - brandWeight)
@@ -222,7 +221,7 @@ private fun DeviceSetupForm(
                         ),
                         enabled = !state.isRegistering,
                     ) {
-                        Text(code)
+                        Text(terminalDisplayName(code))
                     }
                 }
             }
@@ -275,7 +274,7 @@ private fun DeviceSetupConfirmation(
         )
 
         PosSectionCard(modifier = Modifier.fillMaxWidth()) {
-            Text("Terminal: ${state.selectedTerminalCode}")
+            Text(terminalDisplayName(state.selectedTerminalCode.orEmpty()))
         }
 
         state.error?.let { error ->
@@ -325,7 +324,7 @@ private fun DeviceSetupSuccess(
             fontWeight = FontWeight.Bold,
         )
         Text(
-            text = "Terminal: ${state.registeredDevice?.terminalCode}",
+            text = terminalDisplayName(state.registeredDevice?.terminalCode.orEmpty()),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

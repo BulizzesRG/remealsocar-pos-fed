@@ -28,21 +28,17 @@ import com.posfab.shared.features.devicesetup.DeviceSetupScreen
 import com.posfab.shared.features.devicesetup.DeviceSetupViewModel
 import com.posfab.shared.features.login.LoginScreen
 import com.posfab.shared.features.login.LoginViewModel
-import com.posfab.shared.features.operations.common.OperationsUseCases
-import com.posfab.shared.features.operations.ui.OperationsScreen
-import com.posfab.shared.features.operations.ui.OperationsViewModel
 import com.posfab.shared.features.reports.diagnostics.DiagnosticsScreen
 import com.posfab.shared.features.reports.diagnostics.DiagnosticsViewModel
 import com.posfab.shared.features.reports.common.ReportsUseCases
 import com.posfab.shared.features.reports.daily.DailyHistoryScreen
 import com.posfab.shared.features.reports.daily.DailyHistoryViewModel
-import com.posfab.shared.features.reports.manager.ManagerPanelScreen
-import com.posfab.shared.features.reports.manager.ManagerPanelViewModel
 import com.posfab.shared.features.sale.ui.CashierSaleScreen
 import com.posfab.shared.features.sale.ui.CashierSaleViewModel
 import com.posfab.shared.features.sale.ui.CardPaymentAdapter
 import com.posfab.shared.features.sale.ui.ReceiptPrinterAdapter
 import com.posfab.shared.features.sale.usecase.SaleUseCases
+import com.posfab.shared.features.shell.ShellRoute
 import com.posfab.shared.features.shell.ShellScreen
 import com.posfab.shared.features.shell.ShellViewModel
 import com.posfab.shared.network.device.DeviceApi
@@ -55,8 +51,6 @@ fun PosApp(controller: AppStateController) {
     val current by controller.screen.collectAsState()
 
     PosTheme {
-        // Root surface: paints the theme background and sets the default content color
-        // for every screen (the desktop window is otherwise white with black text).
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             when (val screen = current) {
                 AppScreen.Loading -> {
@@ -91,7 +85,7 @@ fun PosApp(controller: AppStateController) {
                     val device = controller.deviceRegistration.value
                         ?: error("Login screen reached before device registration")
                     val loginViewModel = remember {
-                        LoginViewModel(koin.get<LoginUseCase>(), device)
+                        LoginViewModel(koin.get<LoginUseCase>(), koin.get<LogoutUseCase>(), device)
                     }
                     LaunchedEffect(loginViewModel) {
                         loginViewModel.loggedIn.collect { session ->
@@ -106,7 +100,7 @@ fun PosApp(controller: AppStateController) {
                         ?: error("Shell screen reached before device registration")
                     val logoutUseCase: LogoutUseCase = koin.get()
                     val shellViewModel = remember(screen.session) {
-                        ShellViewModel(screen.session, logoutUseCase)
+                        ShellViewModel(screen.session, logoutUseCase, koin.get<CashUseCases>(), device.terminalId)
                     }
                     val saleViewModel = remember(screen.session) {
                         CashierSaleViewModel(
@@ -114,7 +108,7 @@ fun PosApp(controller: AppStateController) {
                             saleUiStateStore = koin.get(),
                             cardPaymentAdapter = koin.get<CardPaymentAdapter>(),
                             receiptPrinterAdapter = koin.get<ReceiptPrinterAdapter>(),
-                            onNavigateToCash = { shellViewModel.select(com.posfab.shared.features.shell.ShellRoute.CASH) },
+                            onNavigateToCash = { shellViewModel.select(ShellRoute.CASH) },
                         )
                     }
                     val cashViewModel = remember(screen.session) {
@@ -122,14 +116,11 @@ fun PosApp(controller: AppStateController) {
                             terminalId = device.terminalId,
                             businessUnitId = device.businessUnitId,
                             cashUseCases = koin.get<CashUseCases>(),
-                            onNavigateToPos = { shellViewModel.select(com.posfab.shared.features.shell.ShellRoute.POS) },
+                            onNavigateToPos = { shellViewModel.select(ShellRoute.SELL) },
                         )
                     }
                     val historyViewModel = remember(screen.session) {
                         DailyHistoryViewModel(screen.session, koin.get<ReportsUseCases>())
-                    }
-                    val managerViewModel = remember {
-                        ManagerPanelViewModel(koin.get<ReportsUseCases>())
                     }
                     val diagnosticsViewModel = remember(screen.session) {
                         DiagnosticsViewModel(screen.session, koin.get(), koin.get())
@@ -137,24 +128,14 @@ fun PosApp(controller: AppStateController) {
                     val catalogViewModel = remember(device.businessUnitId) {
                         CatalogViewModel(koin.get<CatalogUseCases>(), defaultBusinessUnitId = device.businessUnitId)
                     }
-                    val operationsViewModel = remember(screen.session, device.terminalId) {
-                        OperationsViewModel(
-                            session = screen.session,
-                            terminalId = device.terminalId,
-                            defaultBusinessUnitId = device.businessUnitId,
-                            useCases = koin.get<OperationsUseCases>(),
-                        )
-                    }
                     ShellScreen(
                         viewModel = shellViewModel,
                         onLoggedOut = controller::onLoggedOut,
-                        posContent = { CashierSaleScreen(saleViewModel) },
+                        sellContent = { CashierSaleScreen(saleViewModel) },
                         cashContent = { CashSessionScreen(cashViewModel) },
-                        historyContent = { DailyHistoryScreen(historyViewModel) },
-                        catalogContent = { CatalogScreen(catalogViewModel) },
-                        operationsContent = { OperationsScreen(operationsViewModel) },
-                        reportsContent = { ManagerPanelScreen(managerViewModel) },
-                        diagnosticsContent = { DiagnosticsScreen(diagnosticsViewModel) },
+                        dailySalesContent = { DailyHistoryScreen(historyViewModel) },
+                        productsContent = { CatalogScreen(catalogViewModel) },
+                        helpContent = { DiagnosticsScreen(diagnosticsViewModel) },
                     )
                 }
             }

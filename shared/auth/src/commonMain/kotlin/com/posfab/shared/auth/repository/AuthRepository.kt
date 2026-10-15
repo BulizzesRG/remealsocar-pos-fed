@@ -4,6 +4,7 @@ import com.posfab.shared.auth.domain.AuthTokens
 import com.posfab.shared.auth.domain.AuthUser
 import com.posfab.shared.auth.domain.UserSession
 import com.posfab.shared.auth.session.SessionManager
+import com.posfab.shared.core.model.Permission
 import com.posfab.shared.core.model.UserRole
 import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
@@ -107,6 +108,7 @@ class AuthRepositoryImpl(
                 id = user.id.toString(),
                 username = user.fullName,
                 roles = setOfNotNull(UserRole.fromRaw(user.role)),
+                permissions = user.permissions.mapNotNull(Permission::fromRaw).toSet(),
             ),
             terminalCode = terminal.code,
             terminalType = if (terminal.code.equals("ADMIN", ignoreCase = true)) "ADMIN" else "POS",

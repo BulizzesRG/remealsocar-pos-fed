@@ -11,6 +11,5 @@ data class DiagnosticsState(
     val lastSyncAt: String? = null,
     val lastFailureAt: String? = null,
     val offline: Boolean = false,
-    val supportBundleText: String = "",
     val notice: String? = null,
 )

@@ -5,6 +5,7 @@ import com.posfab.shared.auth.domain.AuthUser
 import com.posfab.shared.auth.domain.UserSession
 import com.posfab.shared.auth.repository.AuthRepository
 import com.posfab.shared.auth.usecase.LoginUseCase
+import com.posfab.shared.core.model.Permission
 import com.posfab.shared.core.model.UserRole
 import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
@@ -138,11 +139,13 @@ private class FakeStoreBackend :
     )
 
     override suspend fun login(username: String, password: String, terminalCode: String): AppResult<UserSession> {
-        val roles = if (username == "manager") setOf(UserRole.MANAGER) else setOf(UserRole.CASHIER)
+        val manager = username == "manager"
+        val roles = if (manager) setOf(UserRole.MANAGER) else setOf(UserRole.CASHIER)
+        val permissions = if (manager) Permission.entries.toSet() - Permission.MANAGE_USERS else setOf(Permission.VIEW_PRODUCTS, Permission.SELL, Permission.OPEN_CASH)
         return AppResult.Success(
             UserSession(
                 tokens = AuthTokens("access-$username", "refresh-$username"),
-                user = AuthUser("u-$username", username, roles),
+                user = AuthUser("u-$username", username, roles, permissions),
                 terminalCode = terminalCode,
                 terminalType = if (terminalCode.equals("ADMIN", ignoreCase = true)) "ADMIN" else "POS",
             )

@@ -3,15 +3,15 @@ package com.posfab.shared.network.cash
 import com.posfab.shared.config.PosConfig
 import com.posfab.shared.core.result.AppResult
 import com.posfab.shared.network.http.safeCall
+import com.posfab.shared.network.http.safeCallOrNull
 import io.ktor.client.HttpClient
-import io.ktor.client.plugins.ClientRequestException
+import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
-import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 
 interface CashApi {
@@ -50,24 +50,9 @@ class CashApiClient(
     override suspend fun currentSession(
         accessToken: String,
         terminalId: Long,
-    ): AppResult<CashSessionResponseDto?> {
-        return try {
-            safeCall<CashSessionResponseDto> {
-                httpClient.get("${config.apiBaseUrl}/cash/sessions/current?terminal_id=$terminalId") {
-                    bearer(accessToken)
-                }
-            }.let { result ->
-                when (result) {
-                    is AppResult.Success -> AppResult.Success(result.value)
-                    is AppResult.Failure -> result
-                }
-            }
-        } catch (e: ClientRequestException) {
-            if (e.response.status == HttpStatusCode.NotFound) {
-                AppResult.Success(null)
-            } else {
-                AppResult.Failure(com.posfab.shared.network.http.ApiErrorMapper.fromStatus(e.response.status))
-            }
+    ): AppResult<CashSessionResponseDto?> = safeCallOrNull {
+        httpClient.get("${config.apiBaseUrl}/cash/sessions/current?terminal_id=$terminalId") {
+            bearer(accessToken)
         }
     }
 
@@ -81,7 +66,7 @@ class CashApiClient(
         }
     }
 
-    private fun io.ktor.client.request.HttpRequestBuilder.bearer(accessToken: String) {
+    private fun HttpRequestBuilder.bearer(accessToken: String) {
         header(HttpHeaders.Authorization, "Bearer $accessToken")
     }
 }

@@ -3,6 +3,7 @@ package com.posfab.shared.features.operations
 import com.posfab.shared.auth.domain.AuthTokens
 import com.posfab.shared.auth.domain.AuthUser
 import com.posfab.shared.auth.domain.UserSession
+import com.posfab.shared.core.model.Permission
 import com.posfab.shared.core.model.UserRole
 import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
@@ -96,7 +97,6 @@ class OperationsViewModelTest {
         assertNull(vm.state.value.errorMessage)
         assertEquals(1, vm.state.value.purchaseLines.size)
         assertEquals(37.5, vm.state.value.purchaseTotal)
-        // Picker is reset for the next line.
         assertNull(vm.state.value.picker.selectedProduct)
 
         vm.submitPurchase()
@@ -206,7 +206,6 @@ class OperationsViewModelTest {
         advanceUntilIdle()
         vm.selectProduct(vm.state.value.picker.results.first { it.id == 200L })
         advanceUntilIdle()
-        // Lots are loaded automatically for lot-tracked products.
         assertEquals(200L, repo.lastLotsProductId)
         assertEquals(1, vm.state.value.picker.lots.size)
 
@@ -381,23 +380,21 @@ class OperationsViewModelTest {
         assertNull(vm.state.value.picker.selectedProduct)
     }
 
-    // ---- Fixtures ---------------------------------------------------------
-
     private fun managerSession() = UserSession(
         tokens = AuthTokens("a", "r"),
-        user = AuthUser("u1", "manager", setOf(UserRole.MANAGER)),
+        user = AuthUser("u1", "manager", setOf(UserRole.MANAGER), Permission.entries.toSet() - Permission.MANAGE_USERS),
         terminalCode = "POS1",
     )
 
     private fun adminSession() = UserSession(
         tokens = AuthTokens("a", "r"),
-        user = AuthUser("u0", "admin", setOf(UserRole.ADMIN)),
+        user = AuthUser("u0", "admin", setOf(UserRole.ADMIN), Permission.entries.toSet()),
         terminalCode = "POS1",
     )
 
     private fun cashierSession() = UserSession(
         tokens = AuthTokens("a", "r"),
-        user = AuthUser("u2", "cashier", setOf(UserRole.CASHIER)),
+        user = AuthUser("u2", "cashier", setOf(UserRole.CASHIER), setOf(Permission.VIEW_PRODUCTS, Permission.SELL, Permission.OPEN_CASH)),
         terminalCode = "POS1",
     )
 

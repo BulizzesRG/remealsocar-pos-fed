@@ -40,6 +40,7 @@ data class UserDto(
     val id: Long,
     val fullName: String,
     val role: String,
+    val permissions: List<String> = emptyList(),
 )
 
 @Serializable

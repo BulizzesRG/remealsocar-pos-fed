@@ -6,12 +6,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
-/**
- * Pins the wire format of the backend (bed) for catalog payloads: money and factors are decimal
- * strings and `/products/by-barcode` is a lookup envelope, not a product detail.
- */
 class CatalogContractTest {
-    // Same configuration as HttpClientFactory
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false; isLenient = true }
 
     @Test

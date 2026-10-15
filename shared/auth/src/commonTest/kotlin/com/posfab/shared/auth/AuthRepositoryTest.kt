@@ -1,11 +1,13 @@
 package com.posfab.shared.auth
 
+import com.posfab.shared.auth.domain.UserSession
 import com.posfab.shared.auth.repository.AuthRepositoryImpl
 import com.posfab.shared.auth.session.InMemorySessionStorage
 import com.posfab.shared.auth.session.SessionManager
 import com.posfab.shared.config.PosConfig
 import com.posfab.shared.config.PosEnv
 import com.posfab.shared.core.logging.LogLevel
+import com.posfab.shared.core.model.Permission
 import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
 import com.posfab.shared.network.auth.AuthApiClient
@@ -41,7 +43,7 @@ class AuthRepositoryTest {
                   "accessToken": "access-1",
                   "refreshToken": "refresh-1",
                   "accessExpiresAt": "2099-01-01T00:00:00Z",
-                  "user": {"id": 1, "fullName": "alice", "role": "CASHIER"},
+                  "user": {"id": 1, "fullName": "alice", "role": "CASHIER", "permissions": ["VIEW_PRODUCTS","SELL","OPEN_CASH","BOGUS"]},
                   "terminal": {"id": 1, "code": "POS1"}
                 }
                 """.trimIndent(),
@@ -55,7 +57,12 @@ class AuthRepositoryTest {
         val result = repo.login("alice", "pw", "POS1")
 
         val success = assertIs<AppResult.Success<*>>(result)
-        assertEquals("alice", (success.value as com.posfab.shared.auth.domain.UserSession).user.username)
+        val session = success.value as UserSession
+        assertEquals("alice", session.user.username)
+        assertEquals(
+            setOf(Permission.VIEW_PRODUCTS, Permission.SELL, Permission.OPEN_CASH),
+            session.user.permissions,
+        )
     }
 
     @Test

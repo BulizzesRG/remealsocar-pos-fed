@@ -7,5 +7,5 @@ internal object LoginStrings {
     const val FIELD_PASSWORD = "Contraseña"
     const val SUBMIT = "Iniciar sesión"
     const val ERROR_EMPTY_CREDS = "El usuario y la contraseña son obligatorios"
-    const val TERMINAL_LABEL = "Terminal"
+    const val ERROR_NO_CAJA_ACCESS = "Esta cuenta no puede usar la caja"
 }

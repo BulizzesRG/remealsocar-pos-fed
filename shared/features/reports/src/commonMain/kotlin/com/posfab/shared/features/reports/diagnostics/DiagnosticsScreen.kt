@@ -2,16 +2,14 @@ package com.posfab.shared.features.reports.diagnostics
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -19,13 +17,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
+import com.posfab.shared.core.model.terminalDisplayName
 import com.posfab.shared.ui.components.PosNoticeRow
 import com.posfab.shared.ui.components.PosPrimaryButton
 import com.posfab.shared.ui.components.PosSectionCard
 import com.posfab.shared.ui.theme.PosSpacing
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
+import kotlin.time.Instant
 
 @Composable
 fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
@@ -39,67 +39,35 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
         verticalArrangement = Arrangement.spacedBy(PosSpacing.md),
     ) {
         Text(
-            "Diagnosticos",
+            DiagnosticsStrings.TITLE,
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
         )
 
         PosSectionCard(
-            title = "Estado de la aplicacion",
+            title = DiagnosticsStrings.STATUS_CARD,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            DiagnosticRow("Version", state.appVersion)
-            DiagnosticRow("Build", state.appBuild)
-            DiagnosticRow("Entorno", state.environment)
-            DiagnosticRow("API", state.apiBaseUrl)
-            DiagnosticRow("Terminal", state.terminal)
-            DiagnosticRow("Usuario", "${state.username} (${state.roles})")
-            DiagnosticRow("Ultima sincronizacion", state.lastSyncAt ?: "-")
-            DiagnosticRow("Ultimo fallo", state.lastFailureAt ?: "-")
+            DiagnosticRow(DiagnosticsStrings.ROW_VERSION, state.appVersion)
+            DiagnosticRow(DiagnosticsStrings.ROW_TERMINAL, terminalDisplayName(state.terminal))
+            DiagnosticRow(DiagnosticsStrings.ROW_USER, state.username)
             DiagnosticRow(
-                "Red",
-                if (state.offline) "OFFLINE" else "ONLINE",
+                DiagnosticsStrings.ROW_CONNECTION,
+                if (state.offline) DiagnosticsStrings.DISCONNECTED else DiagnosticsStrings.CONNECTED,
                 highlight = state.offline,
             )
+            DiagnosticRow(DiagnosticsStrings.ROW_LAST_CONNECTION, lastConnectionLabel(state.lastSyncAt))
         }
 
         PosSectionCard(
-            title = "Support bundle",
+            title = DiagnosticsStrings.SUPPORT_CARD,
             modifier = Modifier.fillMaxWidth(),
         ) {
             PosPrimaryButton(
-                text = "Generar support bundle",
-                onClick = viewModel::buildSupportBundle,
-                modifier = Modifier.width(240.dp),
+                text = DiagnosticsStrings.COPY_SUPPORT,
+                onClick = { clipboardManager.setText(AnnotatedString(viewModel.buildSupportBundle())) },
+                icon = Icons.Filled.ContentCopy,
             )
-
-            if (state.supportBundleText.isNotBlank()) {
-                OutlinedTextField(
-                    value = state.supportBundleText,
-                    onValueChange = {},
-                    readOnly = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(220.dp),
-                    textStyle = MaterialTheme.typography.bodySmall.copy(
-                        fontFamily = FontFamily.Monospace,
-                    ),
-                )
-                PosPrimaryButton(
-                    text = "Copiar al portapapeles",
-                    onClick = {
-                        clipboardManager.setText(AnnotatedString(state.supportBundleText))
-                    },
-                    icon = Icons.Filled.ContentCopy,
-                    modifier = Modifier.width(240.dp),
-                )
-            } else {
-                Text(
-                    "Genera un bundle para compartir diagnostico y logs recientes.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
         }
 
         PosNoticeRow(
@@ -115,7 +83,7 @@ private fun DiagnosticRow(
     value: String,
     highlight: Boolean = false,
 ) {
-    androidx.compose.foundation.layout.Row(
+    Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
@@ -126,9 +94,16 @@ private fun DiagnosticRow(
         )
         Text(
             value,
-            style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+            style = MaterialTheme.typography.bodyMedium,
             color = if (highlight) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
             fontWeight = if (highlight) FontWeight.Bold else FontWeight.Normal,
         )
     }
 }
+
+internal fun lastConnectionLabel(iso: String?): String = iso?.let { raw ->
+    runCatching {
+        val local = Instant.parse(raw).toLocalDateTime(TimeZone.currentSystemDefault())
+        "${local.hour}:${local.minute.toString().padStart(2, '0')}"
+    }.getOrNull()
+} ?: DiagnosticsStrings.EMPTY_VALUE

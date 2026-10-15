@@ -31,6 +31,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.posfab.shared.core.model.terminalDisplayName
 import com.posfab.shared.ui.components.PosBrandMark
 import com.posfab.shared.ui.components.PosBrandPanel
 import com.posfab.shared.ui.components.PosErrorBanner
@@ -64,7 +65,6 @@ fun LoginScreenContent(
         val brandWeight = if (maxWidth >= 1200.dp) 0.35f else 0.42f
 
         Row(modifier = Modifier.fillMaxSize()) {
-            // LEFT PANEL — Brand
             PosBrandPanel(
                 modifier = Modifier
                     .weight(brandWeight)
@@ -90,14 +90,13 @@ fun LoginScreenContent(
                     )
                     Spacer(Modifier.height(PosSpacing.xxl))
                     Text(
-                        text = "${LoginStrings.TERMINAL_LABEL}: ${state.terminalCode}",
+                        text = terminalDisplayName(state.terminalCode),
                         style = MaterialTheme.typography.labelMedium,
                         color = PosTextSecondary,
                     )
                 }
             }
 
-            // RIGHT PANEL — Form
             Surface(
                 modifier = Modifier
                     .weight(1f - brandWeight)

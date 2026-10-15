@@ -1,5 +1,6 @@
 package com.posfab.shared.auth.domain
 
+import com.posfab.shared.core.model.Permission
 import com.posfab.shared.core.model.UserRole
 import kotlinx.serialization.Serializable
 
@@ -14,6 +15,7 @@ data class AuthUser(
     val id: String,
     val username: String,
     val roles: Set<UserRole>,
+    val permissions: Set<Permission>,
 )
 
 @Serializable
