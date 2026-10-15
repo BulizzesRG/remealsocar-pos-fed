@@ -1,8 +1,10 @@
 package com.posfab.shared.features.sale.ui
 
-import com.posfab.shared.features.sale.domain.CashCheckoutResult
+import com.posfab.shared.features.sale.domain.CheckoutResult
+import com.posfab.shared.features.sale.domain.SaleChannel
 import com.posfab.shared.features.sale.domain.SaleDraft
 import com.posfab.shared.features.sale.domain.SaleLine
+import com.posfab.shared.features.sale.domain.SalePaymentType
 import com.posfab.shared.features.sale.domain.SaleProduct
 import com.posfab.shared.features.sale.domain.roundMoney
 
@@ -32,7 +34,8 @@ data class CashierSaleState(
     val isCheckoutInFlight: Boolean = false,
     val checkoutIdempotencyKey: String? = null,
     val paidInput: String = "",
-    val lastResult: CashCheckoutResult? = null,
+    val paymentType: SalePaymentType = SalePaymentType.CASH,
+    val lastResult: CheckoutResult? = null,
     val confirm: SaleConfirm? = null,
     val notice: String? = null,
     val errorMessage: String? = null,
@@ -40,13 +43,23 @@ data class CashierSaleState(
     val draft: SaleDraft? get() = activeDraftId?.let(::accountById)
     val isBusy: Boolean get() = pendingMutations > 0
     val isPaidLocked: Boolean get() = checkoutIdempotencyKey != null
+    val channel: SaleChannel get() = draft?.channel ?: SaleChannel.TAKEAWAY
+    val listTotal: Double get() = draft?.totals?.listTotal ?: 0.0
     val cashTotal: Double get() = draft?.totals?.cashTotal ?: 0.0
-    val paidAmount: Double? get() = paidInput.toDoubleOrNull()
-    val change: Double? get() = paidAmount?.let { roundMoney(it - cashTotal) }
+    val cashDiscount: Double get() = draft?.totals?.cashDiscount ?: 0.0
+    val amountDue: Double get() = if (paymentType == SalePaymentType.CARD) listTotal else cashTotal
+    val paidAmount: Double?
+        get() = if (paymentType == SalePaymentType.CASH) paidInput.toDoubleOrNull() else amountDue
+    val change: Double?
+        get() = if (paymentType == SalePaymentType.CASH) paidAmount?.let { roundMoney(it - amountDue) } else null
     val canConfirmCharge: Boolean
-        get() = paidAmount?.let { roundMoney(it) >= roundMoney(cashTotal) } == true && !isCheckoutInFlight
+        get() = !isCheckoutInFlight && (paymentType != SalePaymentType.CASH || paidCoversAmountDue)
+    private val paidCoversAmountDue: Boolean
+        get() = paidAmount?.let { roundMoney(it) >= roundMoney(amountDue) } == true
     val canCharge: Boolean
-        get() = phase == SalePhase.Selling && draft?.lines?.isNotEmpty() == true && cashTotal > 0 && !isBusy
+        get() = phase == SalePhase.Selling && draft?.lines?.isNotEmpty() == true && listTotal > 0 && !isBusy
+    val canSetChannel: Boolean
+        get() = phase == SalePhase.Selling && !isBusy && !isCheckoutInFlight && confirm == null
     val selectedLine: SaleLine? get() = selectedLineId?.let { id -> draft?.lines?.firstOrNull { it.id == id } }
     val canOpenAccount: Boolean
         get() = (phase == SalePhase.Selling || phase == SalePhase.Done) &&

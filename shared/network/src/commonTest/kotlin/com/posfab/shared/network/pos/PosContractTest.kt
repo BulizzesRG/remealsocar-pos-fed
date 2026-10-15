@@ -38,6 +38,26 @@ class PosContractTest {
         assertNull(dto.totals.cashTotal)
         assertEquals("0", dto.totals.cashDiscount)
         assertEquals("22.00", dto.totals.total)
+        assertEquals("TAKEAWAY", dto.channel)
+    }
+
+    @Test
+    fun draft_with_channel_decodes() {
+        val body = """
+            {"id":7,"type":"SALE","status":"OPEN","terminalId":1,"version":4,"channel":"ONSITE",
+             "lines":[],
+             "totals":{"amount":"0.00","subtotal":"0.00","tax":"0.00","total":"0.00",
+             "cashDiscount":"0.00","cashTotal":"0.00"}}
+        """.trimIndent()
+        val dto = json.decodeFromString<DraftDto>(body)
+        assertEquals("ONSITE", dto.channel)
+        assertEquals(4, dto.version)
+    }
+
+    @Test
+    fun draft_channel_request_encodes() {
+        val encoded = json.encodeToString(DraftChannelRequestDto.serializer(), DraftChannelRequestDto("ONSITE", 3))
+        assertEquals("""{"channel":"ONSITE","expectedVersion":3}""", encoded)
     }
 
     @Test

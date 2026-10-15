@@ -30,10 +30,14 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -53,6 +57,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.posfab.shared.ui.theme.PosLayout
 import com.posfab.shared.ui.theme.PosSpacing
@@ -516,11 +521,6 @@ private fun formatMoney(value: Double): String {
     return "$sign$whole.$suffix"
 }
 
-/**
- * Read-only outlined field that opens a menu with [options]. [label] names the field and
- * [optionLabel] renders each option (and the selected one). When [selected] is null the
- * [placeholder] is shown.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun <T> PosDropdownField(
@@ -573,6 +573,31 @@ fun <T> PosDropdownField(
                     enabled = false,
                     contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding,
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun <T> PosChoiceRow(
+    options: List<Pair<T, String>>,
+    selected: T,
+    onSelect: (T) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    height: Dp? = null,
+    textStyle: TextStyle? = null,
+) {
+    SingleChoiceSegmentedButtonRow(modifier = modifier) {
+        options.forEachIndexed { index, (value, label) ->
+            SegmentedButton(
+                selected = selected == value,
+                onClick = { onSelect(value) },
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+                enabled = enabled,
+                modifier = if (height != null) Modifier.height(height) else Modifier,
+            ) {
+                Text(label, style = textStyle ?: LocalTextStyle.current)
             }
         }
     }

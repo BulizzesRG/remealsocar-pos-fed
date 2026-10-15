@@ -10,10 +10,12 @@ import com.posfab.shared.auth.session.SessionManager
 import com.posfab.shared.core.model.UserRole
 import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
-import com.posfab.shared.features.sale.domain.CashCheckoutResult
+import com.posfab.shared.features.sale.domain.CheckoutResult
+import com.posfab.shared.features.sale.domain.SaleChannel
 import com.posfab.shared.features.sale.domain.SaleDraft
 import com.posfab.shared.features.sale.domain.SaleKitchenKind
 import com.posfab.shared.features.sale.domain.SaleMutationResult
+import com.posfab.shared.features.sale.domain.SalePaymentType
 import com.posfab.shared.features.sale.domain.SaleProduct
 import com.posfab.shared.features.sale.repository.SaleRepositoryImpl
 import com.posfab.shared.network.catalog.BusinessConfigDto
@@ -34,6 +36,7 @@ import com.posfab.shared.network.pos.BarcodeLookupUomDto
 import com.posfab.shared.network.pos.CancelDraftRequestDto
 import com.posfab.shared.network.pos.CheckoutRequestDto
 import com.posfab.shared.network.pos.CheckoutResponseDto
+import com.posfab.shared.network.pos.DraftChannelRequestDto
 import com.posfab.shared.network.pos.DraftCreateRequestDto
 import com.posfab.shared.network.pos.DraftCreateResponseDto
 import com.posfab.shared.network.pos.DraftDto
@@ -198,6 +201,8 @@ class SaleRepositoryImplTest {
 
         assertEquals(4L, product.unitId)
         assertEquals(21.0, product.cashPrice)
+        assertEquals(22.1, product.listPrice)
+        assertNull(product.listOnsitePrice)
         assertEquals(SaleKitchenKind.FONDA, product.kitchenKind)
         assertTrue(product.isSellable)
 
@@ -207,22 +212,141 @@ class SaleRepositoryImplTest {
     }
 
     @Test
-    fun checkout_cash_sends_paid_cash_amount_and_key_and_maps_total() = runTest {
-        val posApi = FakePosApi()
-        val result = repository(posApi).checkoutCash(draftId = 7L, paidAmount = 100.0, idempotencyKey = "key-1")
+    fun checkout_sends_payment_type_per_type() = runTest {
+        SalePaymentType.entries.forEach { type ->
+            val posApi = FakePosApi()
+            val result = repository(posApi).checkout(
+                draftId = 7L,
+                paymentType = type,
+                paidAmount = 100.0,
+                idempotencyKey = "key-${type.name}",
+            )
 
-        val request = posApi.checkoutRequests.single()
-        assertEquals("PAID", request.paymentStatus)
-        assertEquals("CASH", request.paymentType)
-        assertEquals("100.00", request.paidAmount)
-        assertEquals("key-1", request.idempotencyKey)
-        val charged = assertIs<AppResult.Success<CashCheckoutResult>>(result).value
-        assertEquals(63.0, charged.cashTotal)
-        assertEquals(37.0, charged.change)
-        assertEquals("F-1", charged.folio)
+            val request = posApi.checkoutRequests.single()
+            assertEquals("PAID", request.paymentStatus)
+            assertEquals(type.name, request.paymentType)
+            assertEquals("100.00", request.paidAmount)
+            assertEquals("key-${type.name}", request.idempotencyKey)
+            val charged = assertIs<AppResult.Success<CheckoutResult>>(result).value
+            assertEquals(type, charged.paymentType)
+            assertEquals(63.0, charged.totalCharged)
+            assertEquals(100.0, charged.paidAmount)
+            assertEquals("F-1", charged.folio)
+            if (type == SalePaymentType.CASH) {
+                assertEquals(37.0, charged.change)
+            } else {
+                assertNull(charged.change)
+            }
+        }
     }
 
-    private fun product() = SaleProduct(id = 1L, name = "Coca", barcode = null, unitId = 1L, cashPrice = 18.0)
+    @Test
+    fun set_channel_posts_channel_and_version_and_maps_the_draft() = runTest {
+        val posApi = FakePosApi()
+        val result = repository(posApi).setChannel(7L, SaleChannel.ONSITE, expectedVersion = 1)
+
+        assertEquals(DraftChannelRequestDto("ONSITE", 1), posApi.channelRequests.single())
+        val success = assertIs<SaleMutationResult.Success>(result)
+        assertEquals(7L, success.draft.id)
+        assertEquals(SaleChannel.ONSITE, success.draft.channel)
+        assertEquals(2, success.draft.version)
+        assertEquals(emptyList(), posApi.getDraftCalls)
+    }
+
+    @Test
+    fun set_channel_conflict_refetches_the_same_draft() = runTest {
+        val posApi = FakePosApi().apply { setChannelResult = AppResult.Failure(AppError.Conflict) }
+        val result = repository(posApi).setChannel(7L, SaleChannel.ONSITE, expectedVersion = 1)
+
+        val refetched = assertIs<SaleMutationResult.ConflictRefetched>(result)
+        assertEquals(7L, refetched.draft.id)
+        assertEquals(SaleChannel.TAKEAWAY, refetched.draft.channel)
+        assertEquals(listOf(7L), posApi.getDraftCalls)
+    }
+
+    @Test
+    fun draft_lines_map_list_and_cash_prices() = runTest {
+        val line = DraftLineDto(
+            id = 11L,
+            lineNo = 1,
+            productId = 5L,
+            unitId = 2L,
+            qty = "2.000000",
+            unitPrice = "22.00",
+            cashUnitPrice = "21.00",
+            productName = "Cigarro suelto",
+            unitCode = "PZA",
+            lineTotal = "44.00",
+        )
+        val posApi = FakePosApi().apply {
+            openDrafts = AppResult.Success(
+                DraftListDto(
+                    listOf(draftDto(id = 7, cashTotal = "42.00", listTotal = "44.00", cashDiscount = "2.00", lines = listOf(line))),
+                ),
+            )
+        }
+        val draft = assertIs<AppResult.Success<List<SaleDraft>>>(repository(posApi).openDrafts()).value.single()
+
+        val mapped = draft.lines.single()
+        assertEquals(22.0, mapped.unitPrice)
+        assertEquals(21.0, mapped.cashUnitPrice)
+        assertEquals(44.0, mapped.lineTotal)
+        assertEquals(2.0, mapped.qty)
+        assertEquals(44.0, draft.totals.listTotal)
+        assertEquals(42.0, draft.totals.cashTotal)
+        assertEquals(2.0, draft.totals.cashDiscount)
+        assertEquals(SaleChannel.TAKEAWAY, draft.channel)
+    }
+
+    @Test
+    fun draft_line_without_cash_price_falls_back_to_the_list_price() = runTest {
+        val line = DraftLineDto(
+            id = 11L,
+            lineNo = 1,
+            productId = 5L,
+            unitId = 2L,
+            qty = "3",
+            unitPrice = "10.00",
+            productName = "Abierto",
+            unitCode = "PZA",
+            lineTotal = "",
+        )
+        val posApi = FakePosApi().apply {
+            openDrafts = AppResult.Success(DraftListDto(listOf(draftDto(id = 7, channel = "onsite", lines = listOf(line)))))
+        }
+        val draft = assertIs<AppResult.Success<List<SaleDraft>>>(repository(posApi).openDrafts()).value.single()
+
+        val mapped = draft.lines.single()
+        assertEquals(10.0, mapped.unitPrice)
+        assertEquals(10.0, mapped.cashUnitPrice)
+        assertEquals(30.0, mapped.lineTotal)
+        assertEquals(SaleChannel.ONSITE, draft.channel)
+    }
+
+    @Test
+    fun search_maps_list_prices() = runTest {
+        val items = listOf(
+            listItem(id = "3", name = "Coca", cash = "18.00", list = "18.90", listOnsite = "20.00"),
+            listItem(id = "5", name = "Chicle", cash = "2.00"),
+        )
+        val result = repository(FakePosApi(), FakeCatalogApi(items)).searchProducts("c", 8)
+
+        val products = assertIs<AppResult.Success<List<SaleProduct>>>(result).value
+        assertEquals(18.9, products[0].listPrice)
+        assertEquals(20.0, products[0].listOnsitePrice)
+        assertEquals(2.0, products[1].listPrice)
+        assertNull(products[1].listOnsitePrice)
+    }
+
+    private fun product() = SaleProduct(
+        id = 1L,
+        name = "Coca",
+        barcode = null,
+        unitId = 1L,
+        cashPrice = 18.0,
+        listPrice = 18.9,
+        listOnsitePrice = null,
+    )
 
     private fun lookup(active: Boolean = true, matchedUnitId: Long? = null) = BarcodeLookupResponseDto(
         product = BarcodeLookupProductDto(
@@ -246,6 +370,8 @@ class SaleRepositoryImplTest {
         cash: String?,
         priceType: String = "PIECE",
         kitchenKind: String? = null,
+        list: String? = cash,
+        listOnsite: String? = null,
     ) = ProductListItemDto(
         id = id,
         name = name,
@@ -255,7 +381,7 @@ class SaleRepositoryImplTest {
         active = true,
         priceType = priceType,
         kitchenKind = kitchenKind,
-        prices = cash?.let { ProductPricesDto(cashTakeaway = it, listTakeaway = it) },
+        prices = cash?.let { ProductPricesDto(cashTakeaway = it, listTakeaway = list ?: it, listOnsite = listOnsite) },
     )
 
     private companion object {
@@ -268,14 +394,26 @@ internal fun draftDto(
     cashTotal: String = "0",
     lines: List<DraftLineDto> = emptyList(),
     status: String = "OPEN",
+    listTotal: String = cashTotal,
+    cashDiscount: String = "0",
+    channel: String = "TAKEAWAY",
+    version: Int = 1,
 ) = DraftDto(
     id = id,
     type = "SALE",
     status = status,
     terminalId = 3L,
-    version = 1,
+    version = version,
     lines = lines,
-    totals = DraftTotalsDto(amount = cashTotal, subtotal = cashTotal, tax = "0", total = cashTotal, cashTotal = cashTotal),
+    totals = DraftTotalsDto(
+        amount = listTotal,
+        subtotal = listTotal,
+        tax = "0",
+        total = listTotal,
+        cashDiscount = cashDiscount,
+        cashTotal = cashTotal,
+    ),
+    channel = channel,
 )
 
 private class NoRefreshAuthRepository(private val manager: SessionManager) : AuthRepository {
@@ -298,6 +436,8 @@ private class FakePosApi : PosApi {
     val createCalls = mutableListOf<DraftCreateRequestDto>()
     val getDraftCalls = mutableListOf<Long>()
     val checkoutRequests = mutableListOf<CheckoutRequestDto>()
+    val channelRequests = mutableListOf<DraftChannelRequestDto>()
+    var setChannelResult: AppResult<DraftDto>? = null
     val log = mutableListOf<String>()
 
     override suspend fun currentCashSession(accessToken: String, terminalId: Long): AppResult<Boolean> =
@@ -347,6 +487,16 @@ private class FakePosApi : PosApi {
     ): AppResult<CheckoutResponseDto> {
         checkoutRequests += request
         return AppResult.Success(CheckoutResponseDto(id = 1L, folio = "F-1", totalAmount = "63.00"))
+    }
+
+    override suspend fun setDraftChannel(
+        accessToken: String,
+        draftId: Long,
+        request: DraftChannelRequestDto,
+    ): AppResult<DraftDto> {
+        channelRequests += request
+        return setChannelResult
+            ?: AppResult.Success(draftDto(id = draftId, channel = request.channel, version = request.expectedVersion + 1))
     }
 
     override suspend fun cancelDraft(accessToken: String, draftId: Long, request: CancelDraftRequestDto): AppResult<Unit> =

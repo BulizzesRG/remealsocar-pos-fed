@@ -15,6 +15,7 @@ data class DraftDto(
     val version: Int,
     val lines: List<DraftLineDto>,
     val totals: DraftTotalsDto,
+    @SerialName("channel") val channel: String = "TAKEAWAY",
 )
 
 @Serializable
@@ -104,6 +105,12 @@ data class CheckoutResponseDto(
     val subtotal: String? = null,
     @SerialName("cashDiscount") val cashDiscount: String? = null,
     @SerialName("totalAmount") val totalAmount: String? = null,
+)
+
+@Serializable
+data class DraftChannelRequestDto(
+    val channel: String,
+    @SerialName("expectedVersion") val expectedVersion: Int,
 )
 
 @Serializable

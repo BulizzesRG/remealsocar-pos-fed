@@ -23,11 +23,13 @@ import com.posfab.shared.features.reports.manager.IntegrityResult
 import com.posfab.shared.features.reports.manager.ManagerDailyTotal
 import com.posfab.shared.features.reports.manager.ManagerRepository
 import com.posfab.shared.features.reports.manager.WasteItem
-import com.posfab.shared.features.sale.domain.CashCheckoutResult
 import com.posfab.shared.features.sale.domain.CashSessionCheck
+import com.posfab.shared.features.sale.domain.CheckoutResult
+import com.posfab.shared.features.sale.domain.SaleChannel
 import com.posfab.shared.features.sale.domain.SaleDraft
 import com.posfab.shared.features.sale.domain.SaleLine
 import com.posfab.shared.features.sale.domain.SaleMutationResult
+import com.posfab.shared.features.sale.domain.SalePaymentType
 import com.posfab.shared.features.sale.domain.SaleProduct
 import com.posfab.shared.features.sale.domain.SaleTotals
 import com.posfab.shared.features.sale.repository.SaleRepository
@@ -60,9 +62,10 @@ class StoreRolloutSmokeTest {
         val add = sale.addLine(draft.id, product, 1.0, draft.version)
         assertIs<SaleMutationResult.Success>(add)
 
-        val checkoutCash = sale.checkoutCash(draft.id, 50.0, "idem-cash-1")
-        assertIs<AppResult.Success<CashCheckoutResult>>(checkoutCash)
-        assertEquals(30.0, checkoutCash.value.cashTotal)
+        val checkoutCash = sale.checkout(draft.id, SalePaymentType.CASH, 50.0, "idem-cash-1")
+        assertIs<AppResult.Success<CheckoutResult>>(checkoutCash)
+        assertEquals(SalePaymentType.CASH, checkoutCash.value.paymentType)
+        assertEquals(30.0, checkoutCash.value.totalCharged)
         assertEquals(20.0, checkoutCash.value.change)
 
         val closed = cash.close(1L, 1060.0)
@@ -86,11 +89,11 @@ class StoreRolloutSmokeTest {
         sale.addLine(draft.id, product, 1.0, draft.version)
 
         val key = "idem-checkout-xyz"
-        val first = sale.checkoutCash(draft.id, 30.0, key)
+        val first = sale.checkout(draft.id, SalePaymentType.CASH, 30.0, key)
         assertIs<AppResult.Failure>(first)
 
-        val second = sale.checkoutCash(draft.id, 30.0, key)
-        assertIs<AppResult.Success<CashCheckoutResult>>(second)
+        val second = sale.checkout(draft.id, SalePaymentType.CASH, 30.0, key)
+        assertIs<AppResult.Success<CheckoutResult>>(second)
 
         assertEquals(2, backend.checkoutCalls)
         assertEquals(1, backend.processedCheckoutKeys.size)
@@ -116,7 +119,7 @@ private class FakeStoreBackend :
         status = "OPEN",
         version = 1,
         lines = emptyList(),
-        totals = SaleTotals(cashTotal = 0.0),
+        totals = SaleTotals(cashTotal = 0.0, listTotal = 0.0, cashDiscount = 0.0),
     )
 
     private val product = SaleProduct(
@@ -125,6 +128,8 @@ private class FakeStoreBackend :
         barcode = "7501",
         unitId = 1L,
         cashPrice = 30.0,
+        listPrice = 31.5,
+        listOnsitePrice = null,
     )
 
     override suspend fun login(username: String, password: String, terminalCode: String): AppResult<UserSession> {
@@ -212,7 +217,7 @@ private class FakeStoreBackend :
                 status = "OPEN",
                 version = 1,
                 lines = emptyList(),
-                totals = SaleTotals(cashTotal = 0.0),
+                totals = SaleTotals(cashTotal = 0.0, listTotal = 0.0, cashDiscount = 0.0),
             )
         }
         return AppResult.Success(listOf(currentDraft))
@@ -229,19 +234,25 @@ private class FakeStoreBackend :
         expectedVersion: Int,
     ): SaleMutationResult {
         val price = product.cashPrice ?: 0.0
+        val listPrice = product.listPrice ?: price
         val line = SaleLine(
             id = lineCounter++,
             productId = product.id,
             productName = product.name,
             qty = qty,
             unitId = product.unitId,
+            unitPrice = listPrice,
             cashUnitPrice = price,
-            lineTotal = qty * price,
+            lineTotal = qty * listPrice,
         )
         currentDraft = currentDraft.copy(
             version = currentDraft.version + 1,
             lines = listOf(line),
-            totals = SaleTotals(cashTotal = qty * price),
+            totals = SaleTotals(
+                cashTotal = qty * price,
+                listTotal = qty * listPrice,
+                cashDiscount = qty * (listPrice - price),
+            ),
         )
         return SaleMutationResult.Success(currentDraft)
     }
@@ -260,25 +271,32 @@ private class FakeStoreBackend :
 
     override suspend fun cancelDraft(draftId: Long, expectedVersion: Int): AppResult<Unit> = AppResult.Success(Unit)
 
-    override suspend fun checkoutCash(
+    override suspend fun setChannel(draftId: Long, channel: SaleChannel, expectedVersion: Int): SaleMutationResult {
+        currentDraft = currentDraft.copy(channel = channel, version = currentDraft.version + 1)
+        return SaleMutationResult.Success(currentDraft)
+    }
+
+    override suspend fun checkout(
         draftId: Long,
+        paymentType: SalePaymentType,
         paidAmount: Double,
         idempotencyKey: String,
-    ): AppResult<CashCheckoutResult> {
+    ): AppResult<CheckoutResult> {
         checkoutCalls += 1
         if (failFirstCheckout && checkoutCalls == 1) {
             return AppResult.Failure(AppError.Network("timeout"))
         }
-        val total = currentDraft.totals.cashTotal
+        val total = if (paymentType == SalePaymentType.CARD) currentDraft.totals.listTotal else currentDraft.totals.cashTotal
         if (idempotencyKey !in processedCheckoutKeys) {
             processedCheckoutKeys += idempotencyKey
             currentDraft = currentDraft.copy(status = "CHECKED_OUT")
         }
         return AppResult.Success(
-            CashCheckoutResult(
+            CheckoutResult(
                 saleId = processedCheckoutKeys.size.toLong(),
                 folio = "F-${processedCheckoutKeys.size}",
-                cashTotal = total,
+                paymentType = paymentType,
+                totalCharged = total,
                 paidAmount = paidAmount,
             )
         )
@@ -291,7 +309,7 @@ private class FakeStoreBackend :
             status = "OPEN",
             version = 1,
             lines = emptyList(),
-            totals = SaleTotals(cashTotal = 0.0),
+            totals = SaleTotals(cashTotal = 0.0, listTotal = 0.0, cashDiscount = 0.0),
         )
         return AppResult.Success(currentDraft)
     }

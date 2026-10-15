@@ -42,6 +42,11 @@ interface PosApi {
         draftId: Long,
         request: CheckoutRequestDto,
     ): AppResult<CheckoutResponseDto>
+    suspend fun setDraftChannel(
+        accessToken: String,
+        draftId: Long,
+        request: DraftChannelRequestDto,
+    ): AppResult<DraftDto>
     suspend fun cancelDraft(accessToken: String, draftId: Long, request: CancelDraftRequestDto): AppResult<Unit>
     suspend fun findByBarcode(accessToken: String, barcode: String): AppResult<BarcodeLookupResponseDto>
 }
@@ -138,6 +143,18 @@ class PosApiClient(
         request: CheckoutRequestDto,
     ): AppResult<CheckoutResponseDto> = safeCall {
         httpClient.post("${config.apiBaseUrl}/pos/drafts/$draftId/checkout") {
+            bearer(accessToken)
+            contentType(ContentType.Application.Json)
+            setBody(request)
+        }
+    }
+
+    override suspend fun setDraftChannel(
+        accessToken: String,
+        draftId: Long,
+        request: DraftChannelRequestDto,
+    ): AppResult<DraftDto> = safeCall {
+        httpClient.post("${config.apiBaseUrl}/pos/drafts/$draftId/channel") {
             bearer(accessToken)
             contentType(ContentType.Application.Json)
             setBody(request)

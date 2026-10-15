@@ -1,10 +1,12 @@
 package com.posfab.shared.features.sale.usecase
 
 import com.posfab.shared.core.result.AppResult
-import com.posfab.shared.features.sale.domain.CashCheckoutResult
 import com.posfab.shared.features.sale.domain.CashSessionCheck
+import com.posfab.shared.features.sale.domain.CheckoutResult
+import com.posfab.shared.features.sale.domain.SaleChannel
 import com.posfab.shared.features.sale.domain.SaleDraft
 import com.posfab.shared.features.sale.domain.SaleMutationResult
+import com.posfab.shared.features.sale.domain.SalePaymentType
 import com.posfab.shared.features.sale.domain.SaleProduct
 import com.posfab.shared.features.sale.repository.SaleRepository
 
@@ -39,6 +41,13 @@ class SaleUseCases(private val repository: SaleRepository) {
     suspend fun cancelDraft(draftId: Long, expectedVersion: Int): AppResult<Unit> =
         repository.cancelDraft(draftId, expectedVersion)
 
-    suspend fun checkoutCash(draftId: Long, paidAmount: Double, idempotencyKey: String): AppResult<CashCheckoutResult> =
-        repository.checkoutCash(draftId, paidAmount, idempotencyKey)
+    suspend fun setChannel(draftId: Long, channel: SaleChannel, expectedVersion: Int): SaleMutationResult =
+        repository.setChannel(draftId, channel, expectedVersion)
+
+    suspend fun checkout(
+        draftId: Long,
+        paymentType: SalePaymentType,
+        paidAmount: Double,
+        idempotencyKey: String,
+    ): AppResult<CheckoutResult> = repository.checkout(draftId, paymentType, paidAmount, idempotencyKey)
 }

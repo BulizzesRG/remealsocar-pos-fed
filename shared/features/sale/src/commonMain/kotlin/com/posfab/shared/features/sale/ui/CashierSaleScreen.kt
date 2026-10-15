@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Remove
@@ -68,9 +69,11 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -79,11 +82,14 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.posfab.shared.features.sale.domain.CashCheckoutResult
+import com.posfab.shared.features.sale.domain.CheckoutResult
+import com.posfab.shared.features.sale.domain.SaleChannel
 import com.posfab.shared.features.sale.domain.SaleDraft
 import com.posfab.shared.features.sale.domain.SaleKitchenKind
 import com.posfab.shared.features.sale.domain.SaleLine
+import com.posfab.shared.features.sale.domain.SalePaymentType
 import com.posfab.shared.features.sale.domain.SaleProduct
+import com.posfab.shared.ui.components.PosChoiceRow
 import com.posfab.shared.ui.components.PosConfirmDialog
 import com.posfab.shared.ui.components.PosDestructiveButton
 import com.posfab.shared.ui.components.PosErrorBanner
@@ -185,8 +191,8 @@ private fun SellingView(state: CashierSaleState, viewModel: CashierSaleViewModel
     var paidFocused by remember { mutableStateOf(false) }
     val focusSearch: () -> Unit = { runCatching { searchFocus.requestFocus() } }
 
-    LaunchedEffect(state.phase) {
-        if (state.phase != SalePhase.Charging) paidFocused = false
+    LaunchedEffect(state.phase, state.paymentType) {
+        if (state.phase != SalePhase.Charging || state.paymentType != SalePaymentType.CASH) paidFocused = false
         if (state.phase == SalePhase.Selling || state.phase == SalePhase.Done) focusSearch()
     }
 
@@ -196,7 +202,8 @@ private fun SellingView(state: CashierSaleState, viewModel: CashierSaleViewModel
             .onPreviewKeyEvent { event ->
                 if (!event.isEnterUp() || state.confirm != null) return@onPreviewKeyEvent false
                 when {
-                    state.phase == SalePhase.Charging && paidFocused -> {
+                    state.phase == SalePhase.Charging &&
+                        (paidFocused || state.paymentType != SalePaymentType.CASH) -> {
                         viewModel.confirmCharge()
                         true
                     }
@@ -216,20 +223,37 @@ private fun SellingView(state: CashierSaleState, viewModel: CashierSaleViewModel
                 modifier = Modifier.weight(1f).fillMaxHeight(),
                 verticalArrangement = Arrangement.spacedBy(PosSpacing.sm),
             ) {
-                AccountStrip(
-                    accounts = state.accounts,
-                    activeDraftId = state.activeDraftId,
-                    canOpen = state.canOpenAccount,
-                    enabled = state.phase != SalePhase.Charging && state.confirm == null,
-                    onSelect = { id ->
-                        viewModel.selectAccount(id)
-                        focusSearch()
-                    },
-                    onNew = {
-                        viewModel.openAccount()
-                        focusSearch()
-                    },
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(PosSpacing.md),
+                ) {
+                    AccountStrip(
+                        accounts = state.accounts,
+                        activeDraftId = state.activeDraftId,
+                        canOpen = state.canOpenAccount,
+                        enabled = state.phase != SalePhase.Charging && state.confirm == null,
+                        onSelect = { id ->
+                            viewModel.selectAccount(id)
+                            focusSearch()
+                        },
+                        onNew = {
+                            viewModel.openAccount()
+                            focusSearch()
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                    PosChoiceRow(
+                        options = listOf(
+                            SaleChannel.TAKEAWAY to SaleStrings.CHANNEL_TAKEAWAY,
+                            SaleChannel.ONSITE to SaleStrings.CHANNEL_ONSITE,
+                        ),
+                        selected = state.channel,
+                        onSelect = viewModel::setChannel,
+                        enabled = state.canSetChannel,
+                        height = 48.dp,
+                        modifier = Modifier.width(240.dp).focusProperties { canFocus = false },
+                    )
+                }
                 PosNoticeRow(notice = state.notice, errorMessage = null)
                 if (state.phase != SalePhase.Charging) {
                     state.errorMessage?.let { PosErrorBanner(error = it) }
@@ -293,6 +317,7 @@ private fun AccountStrip(
     enabled: Boolean,
     onSelect: (Long) -> Unit,
     onNew: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val scrollState = rememberScrollState()
     val chipRanges = remember { mutableStateMapOf<Long, IntRange>() }
@@ -306,7 +331,7 @@ private fun AccountStrip(
         }
     }
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .alpha(if (enabled) 1f else DISABLED_ALPHA)
             .horizontalScroll(scrollState),
@@ -348,12 +373,12 @@ private fun AccountChip(
     val label = if (isEmpty) {
         SaleStrings.EMPTY_ACCOUNT
     } else {
-        SaleStrings.accountChip(account.totals.cashTotal, account.lines.size)
+        SaleStrings.accountChip(account.totals.listTotal, account.lines.size)
     }
     val description = if (isEmpty) {
         SaleStrings.EMPTY_ACCOUNT_DESCRIPTION
     } else {
-        SaleStrings.accountDescription(account.totals.cashTotal, account.lines.size)
+        SaleStrings.accountDescription(account.totals.listTotal, account.lines.size)
     }
     Surface(
         shape = MaterialTheme.shapes.medium,
@@ -429,7 +454,26 @@ private fun CartPanel(state: CashierSaleState, viewModel: CashierSaleViewModel, 
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(SaleStrings.TOTAL, style = MaterialTheme.typography.headlineLarge)
-            PosMoneyText(amount = state.cashTotal, style = MaterialTheme.typography.displaySmall)
+            PosMoneyText(amount = state.listTotal, style = MaterialTheme.typography.displaySmall)
+        }
+        if (state.cashDiscount > 0.0) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(PosSpacing.xs, Alignment.End),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    SaleStrings.IN_CASH,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    SaleStrings.money(state.cashTotal),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
         }
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -447,7 +491,7 @@ private fun CartPanel(state: CashierSaleState, viewModel: CashierSaleViewModel, 
                 }
             }
             PosPrimaryButton(
-                text = SaleStrings.chargeLabel(state.cashTotal),
+                text = SaleStrings.chargeLabel(state.listTotal),
                 onClick = viewModel::startCharge,
                 enabled = state.canCharge,
                 icon = Icons.Filled.Payments,
@@ -477,7 +521,7 @@ private fun CartLineRow(line: SaleLine, selected: Boolean, onClick: () -> Unit) 
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    "${SaleStrings.qtyTimes(line.qty)}  ${SaleStrings.money(line.cashUnitPrice)}",
+                    "${SaleStrings.qtyTimes(line.qty)}  ${SaleStrings.money(line.unitPrice)}",
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
@@ -535,7 +579,7 @@ private fun SelectedLineActions(line: SaleLine, qtyInput: String, viewModel: Cas
 }
 
 @Composable
-private fun DonePanel(result: CashCheckoutResult, onNext: () -> Unit, modifier: Modifier = Modifier) {
+private fun DonePanel(result: CheckoutResult, onNext: () -> Unit, modifier: Modifier = Modifier) {
     Box(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         Surface(
             shape = MaterialTheme.shapes.large,
@@ -554,15 +598,19 @@ private fun DonePanel(result: CashCheckoutResult, onNext: () -> Unit, modifier: 
                     tint = MaterialTheme.colorScheme.primary,
                 )
                 Text(SaleStrings.CHARGED, style = MaterialTheme.typography.headlineMedium)
-                if (result.change <= 0.0) {
-                    Text(SaleStrings.EXACT_PAYMENT, style = MaterialTheme.typography.titleLarge)
-                } else {
-                    Text(
-                        SaleStrings.CHANGE,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    PosMoneyText(amount = result.change, style = MaterialTheme.typography.displayMedium)
+                Text(SaleStrings.paymentTypeLabel(result.paymentType), style = MaterialTheme.typography.titleLarge)
+                PosMoneyText(amount = result.totalCharged, style = MaterialTheme.typography.headlineMedium)
+                result.change?.let { change ->
+                    if (change <= 0.0) {
+                        Text(SaleStrings.EXACT_PAYMENT, style = MaterialTheme.typography.titleLarge)
+                    } else {
+                        Text(
+                            SaleStrings.CHANGE,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        PosMoneyText(amount = change, style = MaterialTheme.typography.displayMedium)
+                    }
                 }
                 if (result.folio.isNotBlank()) {
                     Text(
@@ -603,7 +651,7 @@ private fun ProductPanel(
             verticalArrangement = Arrangement.spacedBy(PosSpacing.sm),
         ) {
             state.searchResults.forEach { product ->
-                SearchResultRow(product = product, onClick = { onAdd(product) })
+                SearchResultRow(product = product, channel = state.channel, onClick = { onAdd(product) })
             }
             SaleKitchenKind.entries.forEach { kind ->
                 val products = state.kitchenProducts.filter { it.kitchenKind == kind }
@@ -619,7 +667,7 @@ private fun ProductPanel(
                         verticalArrangement = Arrangement.spacedBy(PosSpacing.sm),
                     ) {
                         products.forEach { product ->
-                            KitchenCard(product = product, onClick = { onAdd(product) })
+                            KitchenCard(product = product, channel = state.channel, onClick = { onAdd(product) })
                         }
                     }
                 }
@@ -629,7 +677,7 @@ private fun ProductPanel(
 }
 
 @Composable
-private fun SearchResultRow(product: SaleProduct, onClick: () -> Unit) {
+private fun SearchResultRow(product: SaleProduct, channel: SaleChannel, onClick: () -> Unit) {
     Surface(
         shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.surfaceVariant,
@@ -647,7 +695,7 @@ private fun SearchResultRow(product: SaleProduct, onClick: () -> Unit) {
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            product.cashPrice?.let {
+            product.shownPrice(channel)?.let {
                 PosMoneyText(amount = it, style = MaterialTheme.typography.bodyLarge, color = LocalContentColor.current)
             }
         }
@@ -655,7 +703,7 @@ private fun SearchResultRow(product: SaleProduct, onClick: () -> Unit) {
 }
 
 @Composable
-private fun KitchenCard(product: SaleProduct, onClick: () -> Unit) {
+private fun KitchenCard(product: SaleProduct, channel: SaleChannel, onClick: () -> Unit) {
     Card(onClick = onClick, modifier = Modifier.width(150.dp).height(88.dp)) {
         Column(
             modifier = Modifier.fillMaxSize().padding(PosSpacing.sm),
@@ -667,14 +715,13 @@ private fun KitchenCard(product: SaleProduct, onClick: () -> Unit) {
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            product.cashPrice?.let {
+            product.shownPrice(channel)?.let {
                 PosMoneyText(amount = it, style = MaterialTheme.typography.bodyMedium, color = LocalContentColor.current)
             }
         }
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ChargeOverlay(
     state: CashierSaleState,
@@ -683,8 +730,10 @@ private fun ChargeOverlay(
 ) {
     val amountEnabled = !state.isCheckoutInFlight && !state.isPaidLocked
     val paidFocus = remember { FocusRequester() }
-    LaunchedEffect(Unit) {
-        runCatching { paidFocus.requestFocus() }
+    LaunchedEffect(state.paymentType) {
+        if (state.paymentType == SalePaymentType.CASH && amountEnabled) {
+            runCatching { paidFocus.requestFocus() }
+        }
     }
     Box(
         modifier = Modifier
@@ -703,67 +752,33 @@ private fun ChargeOverlay(
                 modifier = Modifier.padding(PosSpacing.xl),
                 verticalArrangement = Arrangement.spacedBy(PosSpacing.lg),
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(SaleStrings.TOTAL, style = MaterialTheme.typography.headlineSmall)
-                    PosMoneyText(amount = state.cashTotal, style = MaterialTheme.typography.displayMedium)
-                }
-                Text(SaleStrings.CHARGE_QUESTION, style = MaterialTheme.typography.titleMedium)
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(PosSpacing.sm),
-                    verticalArrangement = Arrangement.spacedBy(PosSpacing.sm),
-                ) {
-                    PosSecondaryButton(
-                        text = SaleStrings.EXACT,
-                        onClick = viewModel::payExact,
-                        enabled = amountEnabled,
-                    )
-                    SaleStrings.QUICK_BILLS.forEach { bill ->
-                        PosSecondaryButton(
-                            text = SaleStrings.quickBill(bill),
-                            onClick = { viewModel.payWith(bill) },
-                            enabled = amountEnabled,
-                        )
-                    }
-                }
-                PosTextField(
-                    value = state.paidInput,
-                    onValueChange = viewModel::onPaidInputChange,
-                    label = SaleStrings.PAID_LABEL,
+                PosChoiceRow(
+                    options = listOf(
+                        SalePaymentType.CASH to SaleStrings.PAYMENT_CASH,
+                        SalePaymentType.TRANSFER to SaleStrings.PAYMENT_TRANSFER,
+                        SalePaymentType.CARD to SaleStrings.PAYMENT_CARD,
+                    ),
+                    selected = state.paymentType,
+                    onSelect = viewModel::selectPaymentType,
                     enabled = amountEnabled,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .focusRequester(paidFocus)
-                        .onFocusChanged { onPaidFocusChange(it.hasFocus || it.isFocused) },
+                    height = 56.dp,
+                    textStyle = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.fillMaxWidth().focusProperties { canFocus = false },
                 )
                 if (state.isPaidLocked) {
-                    Text(
-                        SaleStrings.RETRY_WITH_DONE,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    PaidLockedHint()
                 }
-                state.change?.let { change ->
-                    if (change >= 0.0) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(SaleStrings.CHANGE, style = MaterialTheme.typography.titleLarge)
-                            PosMoneyText(amount = change, style = MaterialTheme.typography.displaySmall)
-                        }
-                    } else {
-                        Text(
-                            SaleStrings.missing(-change),
-                            style = MaterialTheme.typography.displaySmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
+                ChargeAmounts(state = state)
+                if (state.paymentType == SalePaymentType.CASH) {
+                    CashPaymentInput(
+                        state = state,
+                        viewModel = viewModel,
+                        amountEnabled = amountEnabled,
+                        paidModifier = Modifier
+                            .fillMaxWidth()
+                            .focusRequester(paidFocus)
+                            .onFocusChanged { onPaidFocusChange(it.hasFocus || it.isFocused) },
+                    )
                 }
                 state.errorMessage?.let { PosErrorBanner(error = it) }
                 Row(
@@ -777,16 +792,150 @@ private fun ChargeOverlay(
                         modifier = Modifier.weight(1f),
                     )
                     PosPrimaryButton(
-                        text = SaleStrings.DONE_CONFIRM,
+                        text = SaleStrings.confirmLabel(state.paymentType, state.amountDue),
                         onClick = viewModel::confirmCharge,
                         enabled = state.canConfirmCharge,
                         isLoading = state.isCheckoutInFlight,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f).height(56.dp),
                     )
                 }
             }
         }
     }
+}
+
+@Composable
+private fun ChargeAmounts(state: CashierSaleState) {
+    Column(verticalArrangement = Arrangement.spacedBy(PosSpacing.xs)) {
+        if (state.paymentType == SalePaymentType.CARD) {
+            AmountRow(
+                label = SaleStrings.AMOUNT_DUE,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            ) {
+                PosMoneyText(amount = state.listTotal, style = MaterialTheme.typography.displayMedium)
+            }
+        } else {
+            AmountRow(label = SaleStrings.TOTAL) {
+                Text(SaleStrings.money(state.listTotal), style = MaterialTheme.typography.titleLarge)
+            }
+            if (state.cashDiscount > 0.0) {
+                AmountRow(label = SaleStrings.CASH_DISCOUNT, muted = true) {
+                    Text(
+                        SaleStrings.discount(state.cashDiscount),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            AmountRow(
+                label = SaleStrings.AMOUNT_DUE,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            ) {
+                PosMoneyText(amount = state.amountDue, style = MaterialTheme.typography.displayMedium)
+            }
+        }
+    }
+}
+
+@Composable
+private fun AmountRow(
+    label: String,
+    modifier: Modifier = Modifier,
+    muted: Boolean = false,
+    amount: @Composable () -> Unit,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (muted) {
+            Text(
+                label,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            Text(label, style = MaterialTheme.typography.headlineSmall)
+        }
+        amount()
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CashPaymentInput(
+    state: CashierSaleState,
+    viewModel: CashierSaleViewModel,
+    amountEnabled: Boolean,
+    paidModifier: Modifier,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(PosSpacing.lg)) {
+        Text(SaleStrings.CHARGE_QUESTION, style = MaterialTheme.typography.titleMedium)
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(PosSpacing.sm),
+            verticalArrangement = Arrangement.spacedBy(PosSpacing.sm),
+        ) {
+            PosSecondaryButton(
+                text = SaleStrings.EXACT,
+                onClick = viewModel::payExact,
+                enabled = amountEnabled,
+            )
+            SaleStrings.QUICK_BILLS.forEach { bill ->
+                PosSecondaryButton(
+                    text = SaleStrings.quickBill(bill),
+                    onClick = { viewModel.payWith(bill) },
+                    enabled = amountEnabled,
+                )
+            }
+        }
+        PosTextField(
+            value = state.paidInput,
+            onValueChange = viewModel::onPaidInputChange,
+            label = SaleStrings.PAID_LABEL,
+            enabled = amountEnabled,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            modifier = paidModifier,
+        )
+        state.change?.let { change ->
+            if (change >= 0.0) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(SaleStrings.CHANGE, style = MaterialTheme.typography.titleLarge)
+                    PosMoneyText(amount = change, style = MaterialTheme.typography.displaySmall)
+                }
+            } else {
+                Text(
+                    SaleStrings.missing(-change),
+                    style = MaterialTheme.typography.displaySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PaidLockedHint() {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(PosSpacing.sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.size(18.dp))
+        Text(
+            SaleStrings.PAID_LOCKED,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+private fun SaleProduct.shownPrice(channel: SaleChannel): Double? {
+    val list = if (channel == SaleChannel.ONSITE) listOnsitePrice ?: listPrice else listPrice
+    return list ?: cashPrice
 }
 
 private fun SaleKitchenKind.label(): String = when (this) {

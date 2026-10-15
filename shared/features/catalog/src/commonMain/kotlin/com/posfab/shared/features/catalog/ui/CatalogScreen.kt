@@ -26,9 +26,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -60,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import com.posfab.shared.features.catalog.domain.CatalogProductSummary
 import com.posfab.shared.features.catalog.domain.KitchenKind
 import com.posfab.shared.features.catalog.domain.PriceType
+import com.posfab.shared.ui.components.PosChoiceRow
 import com.posfab.shared.ui.components.PosConfirmDialog
 import com.posfab.shared.ui.components.PosErrorBanner
 import com.posfab.shared.ui.components.PosMoneyText
@@ -405,7 +403,7 @@ private fun ProductFormPane(state: CatalogState, viewModel: CatalogViewModel) {
 
             PosSectionCard {
                 SectionLabel(CatalogStrings.HOW_SOLD)
-                ChoiceRow(
+                PosChoiceRow(
                     options = listOf(
                         PriceType.PIECE to CatalogStrings.BY_PIECE,
                         PriceType.WEIGHT to CatalogStrings.BY_WEIGHT,
@@ -413,6 +411,7 @@ private fun ProductFormPane(state: CatalogState, viewModel: CatalogViewModel) {
                     ),
                     selected = form.priceType,
                     onSelect = viewModel::onPriceTypeChange,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
 
@@ -450,7 +449,7 @@ private fun ProductFormPane(state: CatalogState, viewModel: CatalogViewModel) {
 
             PosSectionCard {
                 SectionLabel(CatalogStrings.KITCHEN)
-                ChoiceRow(
+                PosChoiceRow(
                     options = listOf(
                         null to CatalogStrings.KITCHEN_NONE,
                         KitchenKind.FONDA to CatalogStrings.KITCHEN_FONDA,
@@ -458,6 +457,7 @@ private fun ProductFormPane(state: CatalogState, viewModel: CatalogViewModel) {
                     ),
                     selected = form.kitchenKind,
                     onSelect = viewModel::onKitchenKindChange,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
 
@@ -533,25 +533,6 @@ private fun ProductFormPane(state: CatalogState, viewModel: CatalogViewModel) {
 @Composable
 private fun SectionLabel(text: String) {
     Text(text, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
-}
-
-@Composable
-private fun <T> ChoiceRow(
-    options: List<Pair<T, String>>,
-    selected: T,
-    onSelect: (T) -> Unit,
-) {
-    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-        options.forEachIndexed { index, (value, label) ->
-            SegmentedButton(
-                selected = selected == value,
-                onClick = { onSelect(value) },
-                shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
-            ) {
-                Text(label)
-            }
-        }
-    }
 }
 
 @Composable

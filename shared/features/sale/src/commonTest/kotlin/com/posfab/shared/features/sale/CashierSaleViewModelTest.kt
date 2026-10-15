@@ -2,12 +2,14 @@ package com.posfab.shared.features.sale
 
 import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
-import com.posfab.shared.features.sale.domain.CashCheckoutResult
 import com.posfab.shared.features.sale.domain.CashSessionCheck
+import com.posfab.shared.features.sale.domain.CheckoutResult
+import com.posfab.shared.features.sale.domain.SaleChannel
 import com.posfab.shared.features.sale.domain.SaleDraft
 import com.posfab.shared.features.sale.domain.SaleKitchenKind
 import com.posfab.shared.features.sale.domain.SaleLine
 import com.posfab.shared.features.sale.domain.SaleMutationResult
+import com.posfab.shared.features.sale.domain.SalePaymentType
 import com.posfab.shared.features.sale.domain.SalePriceType
 import com.posfab.shared.features.sale.domain.SaleProduct
 import com.posfab.shared.features.sale.domain.SaleTotals
@@ -401,7 +403,7 @@ class CashierSaleViewModelTest {
         advanceUntilIdle()
 
         assertEquals(1, repo.resolveLotsCalls)
-        assertEquals(listOf("resolveLots", "checkoutCash"), repo.callLog)
+        assertEquals(listOf("resolveLots", "checkout"), repo.callLog)
         assertEquals(SalePhase.Done, vm.state.value.phase)
     }
 
@@ -941,6 +943,320 @@ class CashierSaleViewModelTest {
         assertFalse(state.isCheckoutInFlight)
         assertNotNull(state.errorMessage)
     }
+
+    @Test
+    fun charge_opens_on_cash() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.torta)
+        advanceUntilIdle()
+
+        vm.startCharge()
+        assertEquals(SalePaymentType.CASH, vm.state.value.paymentType)
+        assertEquals("", vm.state.value.paidInput)
+
+        vm.selectPaymentType(SalePaymentType.CARD)
+        assertEquals(SalePaymentType.CARD, vm.state.value.paymentType)
+        vm.cancelCharge()
+        assertEquals(SalePaymentType.CASH, vm.state.value.paymentType)
+
+        vm.startCharge()
+        assertEquals(SalePhase.Charging, vm.state.value.phase)
+        assertEquals(SalePaymentType.CASH, vm.state.value.paymentType)
+        assertFalse(vm.state.value.canConfirmCharge)
+    }
+
+    @Test
+    fun transfer_confirms_without_paid_input_and_sends_cash_total() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.torta)
+        advanceUntilIdle()
+
+        vm.startCharge()
+        vm.selectPaymentType(SalePaymentType.TRANSFER)
+        val charging = vm.state.value
+        assertEquals("", charging.paidInput)
+        assertEquals(40.0, charging.amountDue)
+        assertEquals(40.0, charging.paidAmount)
+        assertNull(charging.change)
+        assertTrue(charging.canConfirmCharge)
+
+        vm.confirmCharge()
+        advanceUntilIdle()
+
+        assertEquals(SalePhase.Done, vm.state.value.phase)
+        assertEquals(SalePaymentType.TRANSFER, repo.lastPaymentType)
+        assertEquals(40.0, repo.lastPaidAmount)
+        val result = vm.state.value.lastResult!!
+        assertEquals(SalePaymentType.TRANSFER, result.paymentType)
+        assertEquals(40.0, result.totalCharged)
+        assertNull(result.change)
+        assertEquals(SalePaymentType.CASH, vm.state.value.paymentType)
+    }
+
+    @Test
+    fun card_sends_list_total_and_has_no_change() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.torta)
+        advanceUntilIdle()
+
+        vm.startCharge()
+        vm.selectPaymentType(SalePaymentType.CARD)
+        assertEquals(42.0, vm.state.value.amountDue)
+        assertEquals(42.0, vm.state.value.paidAmount)
+        assertNull(vm.state.value.change)
+
+        vm.confirmCharge()
+        advanceUntilIdle()
+
+        assertEquals(SalePaymentType.CARD, repo.lastPaymentType)
+        assertEquals(42.0, repo.lastPaidAmount)
+        val result = vm.state.value.lastResult!!
+        assertEquals(SalePaymentType.CARD, result.paymentType)
+        assertEquals(42.0, result.totalCharged)
+        assertNull(result.change)
+    }
+
+    @Test
+    fun switching_payment_type_clears_the_paid_input() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.torta)
+        advanceUntilIdle()
+
+        vm.startCharge()
+        vm.payWith(50)
+        assertEquals("50", vm.state.value.paidInput)
+
+        vm.selectPaymentType(SalePaymentType.CARD)
+        assertEquals("", vm.state.value.paidInput)
+
+        vm.selectPaymentType(SalePaymentType.CASH)
+        assertEquals(SalePaymentType.CASH, vm.state.value.paymentType)
+        assertEquals("", vm.state.value.paidInput)
+        assertNull(vm.state.value.paidAmount)
+        assertFalse(vm.state.value.canConfirmCharge)
+    }
+
+    @Test
+    fun switching_payment_type_is_blocked_while_paid_locked() = runTest(dispatcher) {
+        val repo = FakeSaleRepository().apply { failFirstCheckoutWithNetwork = true }
+        val vm = start(repo)
+        vm.addProduct(repo.torta)
+        advanceUntilIdle()
+
+        vm.startCharge()
+        vm.payWith(50)
+        vm.confirmCharge()
+        advanceUntilIdle()
+        assertTrue(vm.state.value.isPaidLocked)
+
+        vm.selectPaymentType(SalePaymentType.CARD)
+        assertEquals(SalePaymentType.CASH, vm.state.value.paymentType)
+        assertEquals("50", vm.state.value.paidInput)
+
+        vm.confirmCharge()
+        advanceUntilIdle()
+
+        assertEquals(2, repo.checkoutCalls)
+        assertEquals(1, repo.checkoutKeys.distinct().size)
+        assertEquals(SalePaymentType.CASH, repo.lastPaymentType)
+        assertEquals(50.0, repo.lastPaidAmount)
+        assertEquals(SalePhase.Done, vm.state.value.phase)
+    }
+
+    @Test
+    fun set_channel_sends_expected_version_and_applies_the_repriced_draft() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.torta)
+        advanceUntilIdle()
+        val before = vm.state.value.draft!!
+        assertEquals(42.0, before.lines.single().unitPrice)
+
+        vm.setChannel(SaleChannel.ONSITE)
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(1, repo.setChannelCalls)
+        assertEquals(before.version, repo.lastChannelExpectedVersion)
+        assertEquals(SaleChannel.ONSITE, state.channel)
+        assertEquals(repo.drafts.getValue(before.id).version, state.draft!!.version)
+        assertEquals(44.0, state.draft!!.lines.single().unitPrice)
+        assertEquals(44.0, state.listTotal)
+        assertEquals(SaleStrings.channelNotice(SaleChannel.ONSITE), state.notice)
+        assertEquals(0, state.pendingMutations)
+    }
+
+    @Test
+    fun set_channel_same_value_is_a_no_op() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        val version = vm.state.value.draft!!.version
+
+        vm.setChannel(SaleChannel.TAKEAWAY)
+        advanceUntilIdle()
+
+        assertEquals(0, repo.setChannelCalls)
+        assertEquals(0, vm.state.value.pendingMutations)
+        assertEquals(version, vm.state.value.draft!!.version)
+        assertNull(vm.state.value.notice)
+    }
+
+    @Test
+    fun set_channel_conflict_refetches_by_id() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.torta)
+        advanceUntilIdle()
+        val draftId = vm.state.value.draft!!.id
+        repo.forceConflictOnNextSetChannel = true
+
+        vm.setChannel(SaleChannel.ONSITE)
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(1, repo.setChannelCalls)
+        assertEquals(draftId, state.activeDraftId)
+        assertEquals(SaleChannel.TAKEAWAY, state.channel)
+        assertEquals(repo.drafts.getValue(draftId).version, state.draft!!.version)
+        assertEquals(SaleStrings.SALE_CHANGED, state.notice)
+    }
+
+    @Test
+    fun back_after_network_failure_clears_the_key_and_reopens_on_cash() = runTest(dispatcher) {
+        val repo = FakeSaleRepository().apply { failFirstCheckoutWithNetwork = true }
+        val vm = start(repo)
+        vm.addProduct(repo.torta)
+        advanceUntilIdle()
+
+        vm.startCharge()
+        vm.selectPaymentType(SalePaymentType.TRANSFER)
+        vm.confirmCharge()
+        advanceUntilIdle()
+        assertTrue(vm.state.value.isPaidLocked)
+
+        vm.cancelCharge()
+        assertEquals(SalePhase.Selling, vm.state.value.phase)
+        assertNull(vm.state.value.checkoutIdempotencyKey)
+
+        vm.startCharge()
+        val state = vm.state.value
+        assertEquals(SalePhase.Charging, state.phase)
+        assertEquals(SalePaymentType.CASH, state.paymentType)
+        assertFalse(state.isPaidLocked)
+        assertEquals("", state.paidInput)
+    }
+
+    @Test
+    fun set_channel_on_a_draft_closed_elsewhere_removes_the_account() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(openDraftsSeed = listOf(1L, 2L))
+        val vm = start(repo)
+        vm.addProduct(repo.torta)
+        advanceUntilIdle()
+        assertEquals(1L, vm.state.value.activeDraftId)
+
+        repo.closeElsewhere(1L, "CANCELLED")
+        vm.setChannel(SaleChannel.ONSITE)
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(1, repo.setChannelCalls)
+        assertEquals(listOf(2L), state.accounts.map { it.id })
+        assertEquals(2L, state.activeDraftId)
+        assertEquals(SaleStrings.ACCOUNT_CLOSED, state.notice)
+        assertEquals(SalePhase.Selling, state.phase)
+    }
+
+    @Test
+    fun set_channel_is_ignored_while_charging() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.torta)
+        advanceUntilIdle()
+
+        vm.startCharge()
+        assertFalse(vm.state.value.canSetChannel)
+        vm.setChannel(SaleChannel.ONSITE)
+        advanceUntilIdle()
+        assertEquals(0, repo.setChannelCalls)
+        assertEquals(SaleChannel.TAKEAWAY, vm.state.value.channel)
+
+        vm.cancelCharge()
+        vm.requestClear()
+        assertFalse(vm.state.value.canSetChannel)
+        vm.setChannel(SaleChannel.ONSITE)
+        advanceUntilIdle()
+        assertEquals(0, repo.setChannelCalls)
+    }
+
+    @Test
+    fun channel_is_per_account() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.torta)
+        advanceUntilIdle()
+        val firstId = vm.state.value.activeDraftId!!
+        vm.setChannel(SaleChannel.ONSITE)
+        advanceUntilIdle()
+
+        vm.openAccount()
+        advanceUntilIdle()
+        val secondId = vm.state.value.activeDraftId!!
+        assertNotEquals(firstId, secondId)
+        assertEquals(SaleChannel.TAKEAWAY, vm.state.value.channel)
+
+        vm.selectAccount(firstId)
+        assertEquals(SaleChannel.ONSITE, vm.state.value.channel)
+        assertEquals(SaleChannel.TAKEAWAY, vm.state.value.accountById(secondId)!!.channel)
+    }
+
+    @Test
+    fun cart_totals_come_from_the_draft() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.torta)
+        vm.addProduct(repo.cigarro)
+        advanceUntilIdle()
+
+        assertEquals(64.0, vm.state.value.listTotal)
+        assertEquals(61.0, vm.state.value.cashTotal)
+        assertEquals(3.0, vm.state.value.cashDiscount)
+        assertTrue(vm.state.value.canCharge)
+
+        val suggested = FakeSaleRepository()
+        val other = start(suggested)
+        other.addProduct(suggested.chicle)
+        advanceUntilIdle()
+
+        assertEquals(5.0, other.state.value.listTotal)
+        assertEquals(5.0, other.state.value.cashTotal)
+        assertEquals(0.0, other.state.value.cashDiscount)
+    }
+
+    @Test
+    fun cash_checkout_sends_cash_type() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.torta)
+        advanceUntilIdle()
+
+        vm.startCharge()
+        assertEquals(40.0, vm.state.value.amountDue)
+        vm.payWith(100)
+        assertEquals(60.0, vm.state.value.change)
+        vm.confirmCharge()
+        advanceUntilIdle()
+
+        assertEquals(SalePaymentType.CASH, repo.lastPaymentType)
+        assertEquals(100.0, repo.lastPaidAmount)
+        val result = vm.state.value.lastResult!!
+        assertEquals(SalePaymentType.CASH, result.paymentType)
+        assertEquals(40.0, result.totalCharged)
+        assertEquals(60.0, result.change)
+    }
 }
 
 private class FakeSaleRepository(
@@ -949,25 +1265,36 @@ private class FakeSaleRepository(
 ) : SaleRepository {
     val cigarro = SaleProduct(
         id = 1L, name = "Cigarro suelto", barcode = "7501000100015", unitId = 1L, cashPrice = 21.0,
+        listPrice = 22.0, listOnsitePrice = null,
     )
     val cafe = SaleProduct(
         id = 2L, name = "Cafe de olla", barcode = "7501000100022", unitId = 1L, cashPrice = 30.0, lotTracked = true,
+        listPrice = 31.5, listOnsitePrice = null,
     )
     val jamon = SaleProduct(
         id = 3L, name = "Jamon", barcode = "7501000100039", unitId = 2L, cashPrice = 120.0,
+        listPrice = 126.0, listOnsitePrice = null,
         priceType = SalePriceType.WEIGHT,
+    )
+    val chicle = SaleProduct(
+        id = 6L, name = "Chicle", barcode = "7501000100060", unitId = 1L, cashPrice = 5.0,
+        listPrice = 5.0, listOnsitePrice = null,
     )
     val searchPool = listOf(cigarro, cafe)
     val kitchenPool = listOf(
         SaleProduct(
             id = 4L, name = "Comida", barcode = null, unitId = 1L, cashPrice = 63.0,
+            listPrice = 66.0, listOnsitePrice = 66.0,
             kitchenKind = SaleKitchenKind.FONDA,
         ),
         SaleProduct(
             id = 5L, name = "Torta", barcode = null, unitId = 1L, cashPrice = 40.0,
+            listPrice = 42.0, listOnsitePrice = 44.0,
             kitchenKind = SaleKitchenKind.TORTERIA,
         ),
     )
+
+    val torta: SaleProduct get() = kitchenPool[1]
 
     val drafts: MutableMap<Long, SaleDraft> = openDraftsSeed.associateWith { emptyDraft(it) }.toMutableMap()
 
@@ -979,6 +1306,7 @@ private class FakeSaleRepository(
     var conflictAfterServerCharged = false
     var failNextNewDraft = false
     var failNextDraftReadWithNetwork = false
+    var forceConflictOnNextSetChannel = false
 
     var addLineCalls = 0
     var updateQtyCalls = 0
@@ -988,7 +1316,10 @@ private class FakeSaleRepository(
     var resolveLotsCalls = 0
     var openDraftsCalls = 0
     var newDraftCalls = 0
+    var setChannelCalls = 0
+    var lastChannelExpectedVersion: Int? = null
     var lastPaidAmount: Double? = null
+    var lastPaymentType: SalePaymentType? = null
     val checkoutKeys = mutableListOf<String>()
     val callLog = mutableListOf<String>()
 
@@ -1000,16 +1331,20 @@ private class FakeSaleRepository(
     }
 
     private fun emptyDraft(id: Long) = SaleDraft(
-        id = id, status = "OPEN", version = 1, lines = emptyList(), totals = SaleTotals(cashTotal = 0.0),
+        id = id, status = "OPEN", version = 1, lines = emptyList(), totals = SaleTotals(cashTotal = 0.0, listTotal = 0.0, cashDiscount = 0.0),
     )
 
     private fun round2(value: Double) = kotlin.math.round(value * 100) / 100
 
-    private fun SaleDraft.withLines(lines: List<SaleLine>) = copy(
-        version = version + 1,
-        lines = lines,
-        totals = SaleTotals(cashTotal = lines.sumOf { it.lineTotal }),
-    )
+    private fun SaleDraft.withLines(lines: List<SaleLine>): SaleDraft {
+        val cashTotal = round2(lines.sumOf { it.qty * it.cashUnitPrice })
+        val listTotal = round2(lines.sumOf { it.lineTotal })
+        return copy(
+            version = version + 1,
+            lines = lines,
+            totals = SaleTotals(cashTotal = cashTotal, listTotal = listTotal, cashDiscount = round2(listTotal - cashTotal)),
+        )
+    }
 
     private fun notFound(): AppError = AppError.Validation("Request rejected: 404")
 
@@ -1061,7 +1396,7 @@ private class FakeSaleRepository(
     override suspend fun kitchenProducts(): AppResult<List<SaleProduct>> = AppResult.Success(kitchenPool)
 
     override suspend fun findProductByBarcode(barcode: String): AppResult<SaleProduct?> =
-        AppResult.Success((searchPool + jamon + kitchenPool).firstOrNull { it.barcode == barcode })
+        AppResult.Success((searchPool + jamon + kitchenPool + chicle).firstOrNull { it.barcode == barcode })
 
     override suspend fun addLine(
         draftId: Long,
@@ -1072,14 +1407,16 @@ private class FakeSaleRepository(
         addLineCalls += 1
         return mutate(draftId, expectedVersion) { draft ->
             val price = product.cashPrice ?: 0.0
+            val listPrice = product.listPriceFor(draft.channel) ?: price
             val line = SaleLine(
                 id = nextLineId++,
                 productId = product.id,
                 productName = product.name,
                 qty = qty,
                 unitId = product.unitId,
+                unitPrice = listPrice,
                 cashUnitPrice = price,
-                lineTotal = round2(qty * price),
+                lineTotal = round2(qty * listPrice),
                 lotTracked = product.lotTracked,
             )
             draft.withLines(draft.lines + line)
@@ -1103,7 +1440,7 @@ private class FakeSaleRepository(
         return mutate(draftId, expectedVersion) { draft ->
             draft.withLines(
                 draft.lines.map {
-                    if (it.id == lineId) it.copy(qty = qty, lineTotal = round2(qty * it.cashUnitPrice)) else it
+                    if (it.id == lineId) it.copy(qty = qty, lineTotal = round2(qty * it.unitPrice)) else it
                 }
             )
         }
@@ -1129,15 +1466,43 @@ private class FakeSaleRepository(
         return AppResult.Success(Unit)
     }
 
-    override suspend fun checkoutCash(
+    override suspend fun setChannel(draftId: Long, channel: SaleChannel, expectedVersion: Int): SaleMutationResult {
+        setChannelCalls += 1
+        lastChannelExpectedVersion = expectedVersion
+        if (forceConflictOnNextSetChannel) {
+            forceConflictOnNextSetChannel = false
+            val draft = drafts[draftId] ?: return SaleMutationResult.Failure(notFound())
+            val bumped = draft.copy(version = draft.version + 1)
+            drafts[draftId] = bumped
+            return SaleMutationResult.ConflictRefetched(bumped)
+        }
+        return mutate(draftId, expectedVersion) { draft ->
+            draft.copy(channel = channel).withLines(
+                draft.lines.map { line ->
+                    val listPrice = productById(line.productId)?.listPriceFor(channel) ?: line.unitPrice
+                    line.copy(unitPrice = listPrice, lineTotal = round2(line.qty * listPrice))
+                }
+            )
+        }
+    }
+
+    private fun productById(id: Long): SaleProduct? =
+        (searchPool + jamon + kitchenPool + chicle).firstOrNull { it.id == id }
+
+    private fun SaleProduct.listPriceFor(channel: SaleChannel): Double? =
+        if (channel == SaleChannel.ONSITE) listOnsitePrice ?: listPrice else listPrice
+
+    override suspend fun checkout(
         draftId: Long,
+        paymentType: SalePaymentType,
         paidAmount: Double,
         idempotencyKey: String,
-    ): AppResult<CashCheckoutResult> {
+    ): AppResult<CheckoutResult> {
         checkoutCalls += 1
-        callLog += "checkoutCash"
+        callLog += "checkout"
         checkoutKeys += idempotencyKey
         lastPaidAmount = paidAmount
+        lastPaymentType = paymentType
         if (checkoutDelayMs > 0) delay(checkoutDelayMs)
         if (failFirstCheckoutWithNetwork && checkoutCalls == 1) {
             return AppResult.Failure(AppError.Network("network down"))
@@ -1153,7 +1518,13 @@ private class FakeSaleRepository(
         val draft = drafts[draftId] ?: return AppResult.Failure(notFound())
         drafts[draftId] = draft.copy(status = "CHECKED_OUT", version = draft.version + 1)
         return AppResult.Success(
-            CashCheckoutResult(saleId = 1L, folio = "FOL-0001", cashTotal = draft.totals.cashTotal, paidAmount = paidAmount)
+            CheckoutResult(
+                saleId = 1L,
+                folio = "FOL-0001",
+                paymentType = paymentType,
+                totalCharged = if (paymentType == SalePaymentType.CARD) draft.totals.listTotal else draft.totals.cashTotal,
+                paidAmount = paidAmount,
+            ),
         )
     }
 }

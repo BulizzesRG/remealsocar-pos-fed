@@ -4,12 +4,15 @@ import com.posfab.shared.core.BaseViewModel
 import com.posfab.shared.core.logging.AppLogger
 import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
-import com.posfab.shared.features.sale.domain.CashCheckoutResult
 import com.posfab.shared.features.sale.domain.CashSessionCheck
+import com.posfab.shared.features.sale.domain.CheckoutResult
+import com.posfab.shared.features.sale.domain.SaleChannel
 import com.posfab.shared.features.sale.domain.SaleDraft
 import com.posfab.shared.features.sale.domain.SaleLine
 import com.posfab.shared.features.sale.domain.SaleMutationResult
+import com.posfab.shared.features.sale.domain.SalePaymentType
 import com.posfab.shared.features.sale.domain.SaleProduct
+import com.posfab.shared.features.sale.domain.SaleTotals
 import com.posfab.shared.features.sale.usecase.SaleUseCases
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -271,16 +274,53 @@ class CashierSaleViewModel(
     fun startCharge() {
         _state.update {
             if (it.canCharge) {
-                it.copy(phase = SalePhase.Charging, paidInput = "", errorMessage = null, notice = null)
+                it.copy(
+                    phase = SalePhase.Charging,
+                    paymentType = SalePaymentType.CASH,
+                    paidInput = "",
+                    errorMessage = null,
+                    notice = null,
+                )
             } else {
                 it
             }
         }
     }
 
+    fun selectPaymentType(type: SalePaymentType) {
+        _state.update {
+            if (
+                it.phase == SalePhase.Charging &&
+                !it.isCheckoutInFlight &&
+                !it.isPaidLocked &&
+                it.paymentType != type
+            ) {
+                it.copy(paymentType = type, paidInput = "", errorMessage = null)
+            } else {
+                it
+            }
+        }
+    }
+
+    fun setChannel(channel: SaleChannel) {
+        val snapshot = _state.value
+        if (!snapshot.canSetChannel || snapshot.channel == channel) return
+        enqueueOnAccount { draftId ->
+            val account = _state.value.accountById(draftId) ?: return@enqueueOnAccount
+            if (account.channel == channel) return@enqueueOnAccount
+            val result = saleUseCases.setChannel(draftId, channel, account.version)
+            applyMutationResult(
+                draftId = draftId,
+                result = result,
+                selectLine = { _state.value.selectedLineId },
+                successNotice = SaleStrings.channelNotice(channel),
+            )
+        }
+    }
+
     fun payExact() {
         if (_state.value.isPaidLocked) return
-        _state.update { it.copy(paidInput = formatAmount(it.cashTotal)) }
+        _state.update { it.copy(paidInput = formatAmount(it.amountDue)) }
         confirmCharge()
     }
 
@@ -299,6 +339,7 @@ class CashierSaleViewModel(
             if (it.phase == SalePhase.Charging && !it.isCheckoutInFlight) {
                 it.copy(
                     phase = SalePhase.Selling,
+                    paymentType = SalePaymentType.CASH,
                     paidInput = "",
                     checkoutIdempotencyKey = null,
                     errorMessage = null,
@@ -313,6 +354,7 @@ class CashierSaleViewModel(
         val snapshot = _state.value
         if (snapshot.phase != SalePhase.Charging || !snapshot.canConfirmCharge || snapshot.isBusy) return
         val draft = snapshot.draft ?: return
+        val paymentType = snapshot.paymentType
         val paid = snapshot.paidAmount ?: return
         val key = snapshot.checkoutIdempotencyKey ?: buildCheckoutKey(draft.id)
         val previous = _state.getAndUpdate {
@@ -323,16 +365,16 @@ class CashierSaleViewModel(
             }
         }
         if (previous.isCheckoutInFlight) return
-        scope.launch { runCheckout(draft, paid, key) }
+        scope.launch { runCheckout(draft, paymentType, paid, key) }
     }
 
     fun startNextSale() {
         enqueue { resumeSelling() }
     }
 
-    private suspend fun runCheckout(draft: SaleDraft, paid: Double, key: String) {
+    private suspend fun runCheckout(draft: SaleDraft, paymentType: SalePaymentType, paid: Double, key: String) {
         try {
-            checkout(draft, paid, key)
+            checkout(draft, paymentType, paid, key)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
@@ -340,7 +382,7 @@ class CashierSaleViewModel(
         }
     }
 
-    private suspend fun checkout(draft: SaleDraft, paid: Double, key: String) {
+    private suspend fun checkout(draft: SaleDraft, paymentType: SalePaymentType, paid: Double, key: String) {
         var chargedDraft = draft
         if (draft.lines.any { it.lotTracked }) {
             when (val resolved = saleUseCases.resolveLots(draft.id)) {
@@ -354,7 +396,7 @@ class CashierSaleViewModel(
                 }
             }
         }
-        when (val result = saleUseCases.checkoutCash(chargedDraft.id, paid, key)) {
+        when (val result = saleUseCases.checkout(chargedDraft.id, paymentType, paid, key)) {
             is AppResult.Failure ->
                 if (result.error is AppError.Conflict) {
                     recoverFromCheckoutConflict(chargedDraft.id)
@@ -362,8 +404,8 @@ class CashierSaleViewModel(
                     failCheckout(result.error, key)
                 }
             is AppResult.Success -> {
-                val charged = if (result.value.cashTotal <= 0.0) {
-                    result.value.copy(cashTotal = chargedDraft.totals.cashTotal)
+                val charged = if (result.value.totalCharged <= 0.0) {
+                    result.value.copy(totalCharged = chargedDraft.totals.amountFor(paymentType))
                 } else {
                     result.value
                 }
@@ -373,6 +415,7 @@ class CashierSaleViewModel(
                         lastResult = charged,
                         isCheckoutInFlight = false,
                         checkoutIdempotencyKey = null,
+                        paymentType = SalePaymentType.CASH,
                         paidInput = "",
                         selectedLineId = null,
                         qtyInput = "",
@@ -406,6 +449,7 @@ class CashierSaleViewModel(
                         isCheckoutInFlight = false,
                         checkoutIdempotencyKey = null,
                         paidInput = "",
+                        paymentType = SalePaymentType.CASH,
                     )
                 }
                 when {
@@ -618,11 +662,15 @@ class CashierSaleViewModel(
         lastResult = null,
         selectedLineId = null,
         qtyInput = "",
+        paymentType = SalePaymentType.CASH,
         paidInput = "",
         checkoutIdempotencyKey = null,
         notice = null,
         errorMessage = null,
     )
+
+    private fun SaleTotals.amountFor(paymentType: SalePaymentType): Double =
+        if (paymentType == SalePaymentType.CARD) listTotal else cashTotal
 
     private fun lineIn(draftId: Long, lineId: Long): SaleLine? =
         _state.value.accountById(draftId)?.lines?.firstOrNull { it.id == lineId }
@@ -652,7 +700,7 @@ class CashierSaleViewModel(
 
     private fun isSelling(): Boolean = _state.value.phase == SalePhase.Selling
 
-    private fun runHardwareHooks(result: CashCheckoutResult, lines: List<SaleLine>) {
+    private fun runHardwareHooks(result: CheckoutResult, lines: List<SaleLine>) {
         scope.launch {
             runCatching { cardPaymentAdapter.onSaleCompleted(result) }
                 .onFailure { AppLogger.w("hardware.card_adapter_failed sale_id=${result.saleId}") }

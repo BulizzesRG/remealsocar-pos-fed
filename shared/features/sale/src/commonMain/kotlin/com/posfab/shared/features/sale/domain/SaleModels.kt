@@ -30,12 +30,33 @@ enum class SaleKitchenKind {
     }
 }
 
+enum class SaleChannel {
+    TAKEAWAY,
+    ONSITE,
+    ;
+
+    companion object {
+        fun fromRaw(raw: String?): SaleChannel {
+            val normalized = raw?.trim()?.uppercase() ?: return TAKEAWAY
+            return entries.firstOrNull { it.name == normalized } ?: TAKEAWAY
+        }
+    }
+}
+
+enum class SalePaymentType {
+    CASH,
+    TRANSFER,
+    CARD,
+}
+
 data class SaleProduct(
     val id: Long,
     val name: String,
     val barcode: String?,
     val unitId: Long,
     val cashPrice: Double?,
+    val listPrice: Double?,
+    val listOnsitePrice: Double?,
     val priceType: SalePriceType = SalePriceType.PIECE,
     val kitchenKind: SaleKitchenKind? = null,
     val lotTracked: Boolean = false,
@@ -49,6 +70,7 @@ data class SaleLine(
     val productName: String,
     val qty: Double,
     val unitId: Long,
+    val unitPrice: Double,
     val cashUnitPrice: Double,
     val lineTotal: Double,
     val lotId: Long? = null,
@@ -57,8 +79,8 @@ data class SaleLine(
 
 data class SaleTotals(
     val cashTotal: Double,
-    val listTotal: Double = cashTotal,
-    val cashDiscount: Double = 0.0,
+    val listTotal: Double,
+    val cashDiscount: Double,
 )
 
 data class SaleDraft(
@@ -67,17 +89,20 @@ data class SaleDraft(
     val version: Int,
     val lines: List<SaleLine>,
     val totals: SaleTotals,
+    val channel: SaleChannel = SaleChannel.TAKEAWAY,
 ) {
     val isOpen: Boolean get() = status == "OPEN"
 }
 
-data class CashCheckoutResult(
+data class CheckoutResult(
     val saleId: Long,
     val folio: String,
-    val cashTotal: Double,
+    val paymentType: SalePaymentType,
+    val totalCharged: Double,
     val paidAmount: Double,
 ) {
-    val change: Double get() = roundMoney(paidAmount - cashTotal)
+    val change: Double?
+        get() = if (paymentType == SalePaymentType.CASH) roundMoney(paidAmount - totalCharged) else null
 }
 
 sealed interface SaleMutationResult {

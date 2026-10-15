@@ -3,12 +3,14 @@ package com.posfab.shared.features.sale.repository
 import com.posfab.shared.auth.refresh.AuthorizedApiExecutor
 import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
-import com.posfab.shared.features.sale.domain.CashCheckoutResult
 import com.posfab.shared.features.sale.domain.CashSessionCheck
+import com.posfab.shared.features.sale.domain.CheckoutResult
+import com.posfab.shared.features.sale.domain.SaleChannel
 import com.posfab.shared.features.sale.domain.SaleDraft
 import com.posfab.shared.features.sale.domain.SaleKitchenKind
 import com.posfab.shared.features.sale.domain.SaleLine
 import com.posfab.shared.features.sale.domain.SaleMutationResult
+import com.posfab.shared.features.sale.domain.SalePaymentType
 import com.posfab.shared.features.sale.domain.SalePriceType
 import com.posfab.shared.features.sale.domain.SaleProduct
 import com.posfab.shared.features.sale.domain.SaleTotals
@@ -18,6 +20,7 @@ import com.posfab.shared.network.catalog.ProductListItemDto
 import com.posfab.shared.network.pos.AddLineRequestDto
 import com.posfab.shared.network.pos.CancelDraftRequestDto
 import com.posfab.shared.network.pos.CheckoutRequestDto
+import com.posfab.shared.network.pos.DraftChannelRequestDto
 import com.posfab.shared.network.pos.DraftCreateRequestDto
 import com.posfab.shared.network.pos.DraftDto
 import com.posfab.shared.network.pos.DraftLineDto
@@ -82,6 +85,8 @@ class SaleRepositoryImpl(
                         barcode = barcode,
                         unitId = result.value.matchedUom?.unitId ?: dto.baseUnitId,
                         cashPrice = dto.prices?.cashTakeaway?.toDoubleOrNull(),
+                        listPrice = dto.prices?.listTakeaway?.toDoubleOrNull(),
+                        listOnsitePrice = dto.prices?.listOnsite?.toDoubleOrNull(),
                         priceType = SalePriceType.fromRaw(dto.priceType),
                         kitchenKind = SaleKitchenKind.fromRaw(dto.kitchenKind),
                         lotTracked = dto.requiresLotTracking,
@@ -150,18 +155,24 @@ class SaleRepositoryImpl(
     override suspend fun cancelDraft(draftId: Long, expectedVersion: Int): AppResult<Unit> =
         authorized { posApi.cancelDraft(it, draftId, CancelDraftRequestDto(expectedVersion)) }
 
-    override suspend fun checkoutCash(
+    override suspend fun setChannel(draftId: Long, channel: SaleChannel, expectedVersion: Int): SaleMutationResult =
+        mutationWithConflictRefetch(draftId) {
+            posApi.setDraftChannel(it, draftId, DraftChannelRequestDto(channel.name, expectedVersion))
+        }
+
+    override suspend fun checkout(
         draftId: Long,
+        paymentType: SalePaymentType,
         paidAmount: Double,
         idempotencyKey: String,
-    ): AppResult<CashCheckoutResult> = checkoutMutex.withLock {
+    ): AppResult<CheckoutResult> = checkoutMutex.withLock {
         val result = authorized {
             posApi.checkoutDraft(
                 accessToken = it,
                 draftId = draftId,
                 request = CheckoutRequestDto(
                     paymentStatus = PAYMENT_STATUS_PAID,
-                    paymentType = PAYMENT_TYPE_CASH,
+                    paymentType = paymentType.name,
                     paidAmount = formatMoney(paidAmount),
                     idempotencyKey = idempotencyKey,
                 ),
@@ -169,10 +180,11 @@ class SaleRepositoryImpl(
         }
         when (result) {
             is AppResult.Success -> AppResult.Success(
-                CashCheckoutResult(
+                CheckoutResult(
                     saleId = result.value.id,
                     folio = result.value.folio.orEmpty(),
-                    cashTotal = result.value.totalAmount?.toDoubleOrNull() ?: 0.0,
+                    paymentType = paymentType,
+                    totalCharged = result.value.totalAmount?.toDoubleOrNull() ?: 0.0,
                     paidAmount = paidAmount,
                 ),
             )
@@ -232,19 +244,21 @@ class SaleRepositoryImpl(
             listTotal = totals.total.toDoubleOrNull() ?: 0.0,
             cashDiscount = totals.cashDiscount.toDoubleOrNull() ?: 0.0,
         ),
+        channel = SaleChannel.fromRaw(channel),
     )
 
     private fun DraftLineDto.toDomain(): SaleLine {
         val quantity = qty.toDoubleOrNull() ?: 0.0
-        val price = (cashUnitPrice ?: unitPrice)?.toDoubleOrNull() ?: 0.0
+        val listPrice = unitPrice?.toDoubleOrNull() ?: cashUnitPrice?.toDoubleOrNull() ?: 0.0
         return SaleLine(
             id = id,
             productId = productId,
             productName = productName,
             qty = quantity,
             unitId = unitId,
-            cashUnitPrice = price,
-            lineTotal = roundMoney(quantity * price),
+            unitPrice = listPrice,
+            cashUnitPrice = cashUnitPrice?.toDoubleOrNull() ?: listPrice,
+            lineTotal = lineTotal.toDoubleOrNull() ?: roundMoney(quantity * listPrice),
             lotId = lotId,
             lotTracked = lotTracked,
         )
@@ -261,6 +275,8 @@ class SaleRepositoryImpl(
             barcode = barcode,
             unitId = baseUnitId,
             cashPrice = cashPrice,
+            listPrice = prices?.listTakeaway?.toDoubleOrNull(),
+            listOnsitePrice = prices?.listOnsite?.toDoubleOrNull(),
             priceType = type,
             kitchenKind = SaleKitchenKind.fromRaw(kitchenKind),
             lotTracked = lotTracked,
@@ -285,7 +301,6 @@ class SaleRepositoryImpl(
     private companion object {
         const val DRAFT_TYPE_SALE = "SALE"
         const val PAYMENT_STATUS_PAID = "PAID"
-        const val PAYMENT_TYPE_CASH = "CASH"
         const val BARCODE_NOT_FOUND = "Barcode not found"
         const val INSUFFICIENT_STOCK = "Insufficient stock"
         const val KITCHEN_LIMIT = 200

@@ -1,5 +1,7 @@
 package com.posfab.shared.features.sale.ui
 
+import com.posfab.shared.features.sale.domain.SaleChannel
+import com.posfab.shared.features.sale.domain.SalePaymentType
 import kotlin.math.abs
 import kotlin.math.round
 
@@ -28,7 +30,6 @@ internal object SaleStrings {
     const val EXACT = "Exacto"
     const val PAID_LABEL = "Paga con"
     const val CHANGE = "Cambio"
-    const val DONE_CONFIRM = "Listo"
     const val BACK = "Volver"
     const val CHARGED = "Cobrado"
     const val EXACT_PAYMENT = "Pago exacto"
@@ -52,8 +53,29 @@ internal object SaleStrings {
     const val ACCOUNT_CLOSED = "Esta cuenta ya se cerró"
     const val CHECKOUT_CONFLICT = "No se pudo cobrar. La venta se volvió a cargar, revísala y cobra de nuevo"
     const val POSSIBLY_CHARGED = "Es posible que la venta ya se haya cobrado. Revisa Ventas del día"
-    const val RETRY_WITH_DONE = "Vuelve a intentar con Listo"
+    const val PAID_LOCKED = "Cobro en curso: ya no se puede cambiar la forma ni el monto. Vuelve a intentar con el botón de cobrar"
+    const val PAYMENT_CASH = "Efectivo"
+    const val PAYMENT_TRANSFER = "Transferencia"
+    const val PAYMENT_CARD = "Tarjeta"
+    const val CHANNEL_TAKEAWAY = "Para llevar"
+    const val CHANNEL_ONSITE = "Aquí"
+    const val CASH_DISCOUNT = "Descuento por pago en efectivo"
+    const val AMOUNT_DUE = "A pagar"
+    const val IN_CASH = "En efectivo"
     val QUICK_BILLS: List<Int> = listOf(20, 50, 100, 200, 500)
+
+    fun channelNotice(channel: SaleChannel): String = when (channel) {
+        SaleChannel.ONSITE -> "Precios de aquí"
+        SaleChannel.TAKEAWAY -> "Precios para llevar"
+    }
+
+    fun paymentTypeLabel(type: SalePaymentType): String = when (type) {
+        SalePaymentType.CASH -> PAYMENT_CASH
+        SalePaymentType.TRANSFER -> PAYMENT_TRANSFER
+        SalePaymentType.CARD -> PAYMENT_CARD
+    }
+
+    fun discount(amount: Double): String = "\u2212${money(amount)}"
 
     fun notFoundWithCode(code: String): String = "No hay ningún producto con el código $code"
 
@@ -61,6 +83,12 @@ internal object SaleStrings {
 
     fun accountDescription(total: Double, count: Int): String =
         "Cuenta con ${money(total)}, $count ${if (count == 1) "producto" else "productos"}"
+
+    fun confirmLabel(type: SalePaymentType, amount: Double): String = when (type) {
+        SalePaymentType.CASH -> "Cobrar ${money(amount)} en efectivo"
+        SalePaymentType.TRANSFER -> "Cobrar ${money(amount)} con transferencia"
+        SalePaymentType.CARD -> "Cobrar ${money(amount)} con tarjeta"
+    }
 
     fun chargeLabel(total: Double): String = "Cobrar ${money(total)}"
 
