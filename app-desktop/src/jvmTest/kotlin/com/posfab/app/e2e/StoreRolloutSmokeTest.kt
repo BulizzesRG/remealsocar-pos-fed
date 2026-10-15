@@ -28,6 +28,7 @@ import com.posfab.shared.features.sale.domain.CheckoutResult
 import com.posfab.shared.features.sale.domain.SaleChannel
 import com.posfab.shared.features.sale.domain.SaleDraft
 import com.posfab.shared.features.sale.domain.SaleLine
+import com.posfab.shared.features.sale.domain.SaleLineInput
 import com.posfab.shared.features.sale.domain.SaleMutationResult
 import com.posfab.shared.features.sale.domain.SalePaymentType
 import com.posfab.shared.features.sale.domain.SaleProduct
@@ -59,7 +60,7 @@ class StoreRolloutSmokeTest {
 
         val draft = (sale.openDrafts() as AppResult.Success).value.first()
         val product = (sale.searchProducts("cafe", 5) as AppResult.Success).value.first()
-        val add = sale.addLine(draft.id, product, 1.0, draft.version)
+        val add = sale.addLine(draft.id, product, SaleLineInput.Qty(1.0), draft.version)
         assertIs<SaleMutationResult.Success>(add)
 
         val checkoutCash = sale.checkout(draft.id, SalePaymentType.CASH, 50.0, "idem-cash-1")
@@ -86,7 +87,7 @@ class StoreRolloutSmokeTest {
 
         val draft = (sale.openDrafts() as AppResult.Success).value.first()
         val product = (sale.searchProducts("cafe", 5) as AppResult.Success).value.first()
-        sale.addLine(draft.id, product, 1.0, draft.version)
+        sale.addLine(draft.id, product, SaleLineInput.Qty(1.0), draft.version)
 
         val key = "idem-checkout-xyz"
         val first = sale.checkout(draft.id, SalePaymentType.CASH, 30.0, key)
@@ -227,14 +228,22 @@ private class FakeStoreBackend :
     override suspend fun kitchenProducts(): AppResult<List<SaleProduct>> = AppResult.Success(emptyList())
     override suspend fun findProductByBarcode(barcode: String): AppResult<SaleProduct?> = AppResult.Success(product)
 
+    override suspend fun variosProduct(): AppResult<SaleProduct?> = AppResult.Success(null)
+
     override suspend fun addLine(
         draftId: Long,
         product: SaleProduct,
-        qty: Double,
+        input: SaleLineInput,
         expectedVersion: Int,
     ): SaleMutationResult {
-        val price = product.cashPrice ?: 0.0
-        val listPrice = product.listPrice ?: price
+        val openAmount = (input as? SaleLineInput.OpenPrice)?.amount
+        val price = openAmount ?: product.cashPrice ?: 0.0
+        val listPrice = openAmount ?: product.listPrice ?: price
+        val qty = when (input) {
+            is SaleLineInput.Qty -> input.qty
+            is SaleLineInput.Amount -> input.amount / price
+            is SaleLineInput.OpenPrice -> 1.0
+        }
         val line = SaleLine(
             id = lineCounter++,
             productId = product.id,
@@ -244,6 +253,7 @@ private class FakeStoreBackend :
             unitPrice = listPrice,
             cashUnitPrice = price,
             lineTotal = qty * listPrice,
+            priceType = product.priceType,
         )
         currentDraft = currentDraft.copy(
             version = currentDraft.version + 1,
@@ -257,10 +267,10 @@ private class FakeStoreBackend :
         return SaleMutationResult.Success(currentDraft)
     }
 
-    override suspend fun updateLineQty(
+    override suspend fun updateLine(
         draftId: Long,
         lineId: Long,
-        qty: Double,
+        input: SaleLineInput,
         expectedVersion: Int,
     ): SaleMutationResult = SaleMutationResult.Success(currentDraft)
 

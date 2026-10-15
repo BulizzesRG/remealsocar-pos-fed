@@ -6,6 +6,8 @@ object SaleErrorText {
     private val knownMessages: List<Pair<String, String>> = listOf(
         "Open cash session is required" to SaleStrings.CASH_SESSION_REQUIRED,
         "has no price" to SaleStrings.NO_PRICE,
+        "amount is too small" to SaleStrings.AMOUNT_TOO_SMALL,
+        "cannot be charged exactly" to SaleStrings.AMOUNT_NOT_EXACT,
         "Draft has no lines" to SaleStrings.NOTHING_TO_CHARGE,
         "Draft version mismatch" to SaleStrings.SALE_CHANGED,
         "Insufficient stock" to SaleStrings.INSUFFICIENT_STOCK,

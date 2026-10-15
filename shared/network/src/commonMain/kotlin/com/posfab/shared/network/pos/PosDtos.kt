@@ -38,6 +38,7 @@ data class DraftLineDto(
     @SerialName("lotId") val lotId: Long? = null,
     @SerialName("lotTracked") val lotTracked: Boolean = false,
     val notes: String? = null,
+    @SerialName("priceType") val priceType: String = "PIECE",
 )
 
 @Serializable
@@ -70,7 +71,8 @@ data class DraftCreateResponseDto(
 data class AddLineRequestDto(
     @SerialName("productId") val productId: Long,
     @SerialName("unitId") val unitId: Long,
-    val qty: String,
+    val qty: String? = null,
+    @SerialName("amount") val amount: String? = null,
     @SerialName("unitPrice") val unitPrice: String? = null,
     @SerialName("unitCost") val unitCost: String? = null,
     @SerialName("lotId") val lotId: Long? = null,
@@ -82,6 +84,7 @@ data class UpdateLineRequestDto(
     @SerialName("productId") val productId: Long? = null,
     @SerialName("unitId") val unitId: Long? = null,
     val qty: String? = null,
+    @SerialName("amount") val amount: String? = null,
     @SerialName("unitPrice") val unitPrice: String? = null,
     @SerialName("unitCost") val unitCost: String? = null,
     @SerialName("lotId") val lotId: Long? = null,

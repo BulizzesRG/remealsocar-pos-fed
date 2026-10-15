@@ -1,7 +1,9 @@
 package com.posfab.shared.features.sale.ui
 
 import com.posfab.shared.features.sale.domain.SaleChannel
+import com.posfab.shared.features.sale.domain.SaleLine
 import com.posfab.shared.features.sale.domain.SalePaymentType
+import com.posfab.shared.features.sale.domain.SalePriceType
 import kotlin.math.abs
 import kotlin.math.round
 
@@ -38,7 +40,6 @@ internal object SaleStrings {
     const val CLEAR_MESSAGE = "Se quitarán todos los productos"
     const val CLEAR_CONFIRM = "Vaciar"
     const val CLEAR_CANCEL = "Seguir"
-    const val NOT_SELLABLE_YET = "Este producto todavía no se puede vender desde aquí"
     const val KITCHEN_UNAVAILABLE = "No se pudo cargar el tablero de cocina"
     const val SALE_CHANGED = "La venta cambió, se volvió a cargar"
     const val CASH_SESSION_REQUIRED = "La caja está cerrada. Ábrela para cobrar"
@@ -62,7 +63,28 @@ internal object SaleStrings {
     const val CASH_DISCOUNT = "Descuento por pago en efectivo"
     const val AMOUNT_DUE = "A pagar"
     const val IN_CASH = "En efectivo"
+    const val PROMPT_OPEN_TITLE = "¿Cuánto?"
+    const val PROMPT_WEIGHT_TITLE = "¿Cuánto pesa?"
+    const val AMOUNT_LABEL = "Importe"
+    const val KILOS_LABEL = "Kilos"
+    const val PESOS_LABEL = "Pesos"
+    const val KG_SUFFIX = "kg"
+    const val PESOS_SUFFIX = "$"
+    const val ADD = "Agregar"
+    const val CHANGE_LINE = "Cambiar"
+    const val CANCEL = "Cancelar"
+    const val OPEN_PRICE = "Precio abierto"
+    const val VARIOS = "Varios"
+    const val AMOUNT_TOO_SMALL = "Ese importe es muy chico para este producto"
+    const val AMOUNT_NOT_EXACT = "No se puede cobrar ese importe exacto"
     val QUICK_BILLS: List<Int> = listOf(20, 50, 100, 200, 500)
+    val QUICK_AMOUNTS: List<Int> = listOf(3, 5, 10)
+    val QUICK_WEIGHTS: List<Pair<Double, String>> = listOf(
+        0.25 to "¼ kg",
+        0.5 to "½ kg",
+        0.75 to "¾ kg",
+        1.0 to "1 kg",
+    )
 
     fun channelNotice(channel: SaleChannel): String = when (channel) {
         SaleChannel.ONSITE -> "Precios de aquí"
@@ -93,6 +115,28 @@ internal object SaleStrings {
     fun chargeLabel(total: Double): String = "Cobrar ${money(total)}"
 
     fun added(name: String): String = "Agregado: $name"
+
+    fun changed(name: String): String = "Cambiado: $name"
+
+    fun kilosInput(qty: Double): String {
+        val grams = round(qty * 1000.0).toLong()
+        val absolute = abs(grams)
+        val sign = if (grams < 0) "-" else ""
+        return "$sign${absolute / 1000}.${(absolute % 1000).toString().padStart(3, '0')}"
+    }
+
+    fun kilos(qty: Double): String = "${kilosInput(qty)} kg"
+
+    fun perKilo(price: Double): String = "${money(price)} / kg"
+
+    fun weightFormula(kilos: Double, price: Double): String = "${kilos(kilos)} × ${money(price)}"
+
+    fun pesosPreview(amount: Double, kilos: Double): String = "${money(amount)} ≈ ${kilos(kilos)}"
+
+    fun lineQty(line: SaleLine): String = when (line.priceType) {
+        SalePriceType.WEIGHT -> "${kilos(line.qty)} × ${money(line.unitPrice)}"
+        else -> "${qtyTimes(line.qty)}  ${money(line.unitPrice)}"
+    }
 
     fun notAdded(name: String): String = "No se agregó $name, vuelve a escanear"
 

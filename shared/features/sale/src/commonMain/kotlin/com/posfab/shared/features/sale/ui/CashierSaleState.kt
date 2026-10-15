@@ -21,6 +21,21 @@ sealed interface SaleConfirm {
     data object ClearCart : SaleConfirm
 }
 
+enum class WeightMode { KILOS, PESOS }
+
+sealed interface SalePrompt {
+    val product: SaleProduct
+    val lineId: Long?
+
+    data class OpenAmount(override val product: SaleProduct, override val lineId: Long? = null) : SalePrompt
+
+    data class Weight(
+        override val product: SaleProduct,
+        override val lineId: Long? = null,
+        val mode: WeightMode = WeightMode.KILOS,
+    ) : SalePrompt
+}
+
 data class CashierSaleState(
     val phase: SalePhase = SalePhase.Loading,
     val accounts: List<SaleDraft> = emptyList(),
@@ -39,6 +54,9 @@ data class CashierSaleState(
     val confirm: SaleConfirm? = null,
     val notice: String? = null,
     val errorMessage: String? = null,
+    val prompt: SalePrompt? = null,
+    val promptInput: String = "",
+    val variosProduct: SaleProduct? = null,
 ) {
     val draft: SaleDraft? get() = activeDraftId?.let(::accountById)
     val isBusy: Boolean get() = pendingMutations > 0
@@ -57,17 +75,31 @@ data class CashierSaleState(
     private val paidCoversAmountDue: Boolean
         get() = paidAmount?.let { roundMoney(it) >= roundMoney(amountDue) } == true
     val canCharge: Boolean
-        get() = phase == SalePhase.Selling && draft?.lines?.isNotEmpty() == true && listTotal > 0 && !isBusy
+        get() = phase == SalePhase.Selling && draft?.lines?.isNotEmpty() == true && listTotal > 0 && !isBusy && prompt == null
     val canSetChannel: Boolean
-        get() = phase == SalePhase.Selling && !isBusy && !isCheckoutInFlight && confirm == null
+        get() = phase == SalePhase.Selling && !isBusy && !isCheckoutInFlight && confirm == null && prompt == null
     val selectedLine: SaleLine? get() = selectedLineId?.let { id -> draft?.lines?.firstOrNull { it.id == id } }
     val canOpenAccount: Boolean
         get() = (phase == SalePhase.Selling || phase == SalePhase.Done) &&
             accounts.size < MAX_ACCOUNTS &&
             draft?.lines?.isNotEmpty() != false &&
-            !isCheckoutInFlight
+            !isCheckoutInFlight &&
+            prompt == null
     val canCloseEmptyAccount: Boolean
         get() = phase == SalePhase.Selling && draft?.lines?.isEmpty() == true && accounts.size > 1
+
+    val promptValue: Double? get() = promptInput.toDoubleOrNull()?.takeIf { it > 0.0 }
+    val canConfirmPrompt: Boolean
+        get() = prompt != null && promptValue != null && phase == SalePhase.Selling
+    val promptKilos: Double?
+        get() {
+            val weight = prompt as? SalePrompt.Weight ?: return null
+            val value = promptValue ?: return null
+            return when (weight.mode) {
+                WeightMode.KILOS -> value
+                WeightMode.PESOS -> weight.product.cashPriceFor(channel)?.takeIf { it > 0.0 }?.let { value / it }
+            }
+        }
 
     fun accountById(id: Long): SaleDraft? = accounts.firstOrNull { it.id == id }
 }

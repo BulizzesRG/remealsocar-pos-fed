@@ -27,9 +27,11 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AttachMoney
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.QrCodeScanner
@@ -77,6 +79,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -88,7 +91,9 @@ import com.posfab.shared.features.sale.domain.SaleDraft
 import com.posfab.shared.features.sale.domain.SaleKitchenKind
 import com.posfab.shared.features.sale.domain.SaleLine
 import com.posfab.shared.features.sale.domain.SalePaymentType
+import com.posfab.shared.features.sale.domain.SalePriceType
 import com.posfab.shared.features.sale.domain.SaleProduct
+import com.posfab.shared.features.sale.domain.roundMoney
 import com.posfab.shared.ui.components.PosChoiceRow
 import com.posfab.shared.ui.components.PosConfirmDialog
 import com.posfab.shared.ui.components.PosDestructiveButton
@@ -191,16 +196,35 @@ private fun SellingView(state: CashierSaleState, viewModel: CashierSaleViewModel
     var paidFocused by remember { mutableStateOf(false) }
     val focusSearch: () -> Unit = { runCatching { searchFocus.requestFocus() } }
 
+    val promptOpen = state.prompt != null
+    var wasPromptOpen by remember { mutableStateOf(promptOpen) }
+
     LaunchedEffect(state.phase, state.paymentType) {
         if (state.phase != SalePhase.Charging || state.paymentType != SalePaymentType.CASH) paidFocused = false
-        if (state.phase == SalePhase.Selling || state.phase == SalePhase.Done) focusSearch()
+        if (state.prompt == null && (state.phase == SalePhase.Selling || state.phase == SalePhase.Done)) focusSearch()
+    }
+
+    LaunchedEffect(promptOpen) {
+        if (wasPromptOpen && !promptOpen && (state.phase == SalePhase.Selling || state.phase == SalePhase.Done)) {
+            focusSearch()
+        }
+        wasPromptOpen = promptOpen
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .onPreviewKeyEvent { event ->
-                if (!event.isEnterUp() || state.confirm != null) return@onPreviewKeyEvent false
+                if (state.prompt != null && event.isEscapeUp()) {
+                    viewModel.dismissPrompt()
+                    return@onPreviewKeyEvent true
+                }
+                if (!event.isEnterUp()) return@onPreviewKeyEvent false
+                if (state.prompt != null) {
+                    viewModel.confirmPrompt()
+                    return@onPreviewKeyEvent true
+                }
+                if (state.confirm != null) return@onPreviewKeyEvent false
                 when {
                     state.phase == SalePhase.Charging &&
                         (paidFocused || state.paymentType != SalePaymentType.CASH) -> {
@@ -231,7 +255,7 @@ private fun SellingView(state: CashierSaleState, viewModel: CashierSaleViewModel
                         accounts = state.accounts,
                         activeDraftId = state.activeDraftId,
                         canOpen = state.canOpenAccount,
-                        enabled = state.phase != SalePhase.Charging && state.confirm == null,
+                        enabled = state.phase != SalePhase.Charging && state.confirm == null && state.prompt == null,
                         onSelect = { id ->
                             viewModel.selectAccount(id)
                             focusSearch()
@@ -255,7 +279,7 @@ private fun SellingView(state: CashierSaleState, viewModel: CashierSaleViewModel
                     )
                 }
                 PosNoticeRow(notice = state.notice, errorMessage = null)
-                if (state.phase != SalePhase.Charging) {
+                if (state.phase != SalePhase.Charging && state.prompt == null) {
                     state.errorMessage?.let { PosErrorBanner(error = it) }
                 }
                 val result = state.lastResult
@@ -279,6 +303,7 @@ private fun SellingView(state: CashierSaleState, viewModel: CashierSaleViewModel
                     viewModel.addProduct(product)
                     focusSearch()
                 },
+                onVarios = viewModel::addProduct,
                 searchModifier = Modifier
                     .fillMaxWidth()
                     .focusRequester(searchFocus)
@@ -293,6 +318,10 @@ private fun SellingView(state: CashierSaleState, viewModel: CashierSaleViewModel
                 viewModel = viewModel,
                 onPaidFocusChange = { paidFocused = it },
             )
+        }
+
+        state.prompt?.let { prompt ->
+            LinePromptOverlay(prompt = prompt, state = state, viewModel = viewModel)
         }
 
         if (state.confirm == SaleConfirm.ClearCart) {
@@ -521,7 +550,7 @@ private fun CartLineRow(line: SaleLine, selected: Boolean, onClick: () -> Unit) 
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    "${SaleStrings.qtyTimes(line.qty)}  ${SaleStrings.money(line.unitPrice)}",
+                    SaleStrings.lineQty(line),
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
@@ -536,6 +565,28 @@ private fun CartLineRow(line: SaleLine, selected: Boolean, onClick: () -> Unit) 
 
 @Composable
 private fun SelectedLineActions(line: SaleLine, qtyInput: String, viewModel: CashierSaleViewModel) {
+    if (line.priceType != SalePriceType.PIECE) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(PosSpacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            PosSecondaryButton(
+                text = SaleStrings.CHANGE_LINE,
+                onClick = viewModel::changeSelectedLine,
+                icon = Icons.Filled.Edit,
+                modifier = Modifier.heightIn(min = 48.dp),
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            PosDestructiveButton(
+                text = SaleStrings.REMOVE,
+                onClick = viewModel::removeSelectedLine,
+                icon = Icons.Filled.Delete,
+                modifier = Modifier.heightIn(min = 48.dp),
+            )
+        }
+        return
+    }
     var qtyFocused by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -635,6 +686,7 @@ private fun ProductPanel(
     state: CashierSaleState,
     onQueryChange: (String) -> Unit,
     onAdd: (SaleProduct) -> Unit,
+    onVarios: (SaleProduct) -> Unit,
     searchModifier: Modifier,
     modifier: Modifier = Modifier,
 ) {
@@ -646,6 +698,14 @@ private fun ProductPanel(
             leadingIcon = { Icon(Icons.Filled.QrCodeScanner, contentDescription = null) },
             modifier = searchModifier,
         )
+        state.variosProduct?.let { varios ->
+            PosSecondaryButton(
+                text = SaleStrings.VARIOS,
+                onClick = { onVarios(varios) },
+                icon = Icons.Filled.AttachMoney,
+                modifier = Modifier.fillMaxWidth().height(48.dp).focusProperties { canFocus = false },
+            )
+        }
         Column(
             modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(PosSpacing.sm),
@@ -695,9 +755,11 @@ private fun SearchResultRow(product: SaleProduct, channel: SaleChannel, onClick:
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            product.shownPrice(channel)?.let {
-                PosMoneyText(amount = it, style = MaterialTheme.typography.bodyLarge, color = LocalContentColor.current)
-            }
+            ProductPriceLabel(
+                product = product,
+                channel = channel,
+                style = MaterialTheme.typography.bodyLarge,
+            )
         }
     }
 }
@@ -715,26 +777,42 @@ private fun KitchenCard(product: SaleProduct, channel: SaleChannel, onClick: () 
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            product.shownPrice(channel)?.let {
-                PosMoneyText(amount = it, style = MaterialTheme.typography.bodyMedium, color = LocalContentColor.current)
-            }
+            ProductPriceLabel(
+                product = product,
+                channel = channel,
+                style = MaterialTheme.typography.bodyMedium,
+            )
         }
     }
 }
 
 @Composable
-private fun ChargeOverlay(
-    state: CashierSaleState,
-    viewModel: CashierSaleViewModel,
-    onPaidFocusChange: (Boolean) -> Unit,
-) {
-    val amountEnabled = !state.isCheckoutInFlight && !state.isPaidLocked
-    val paidFocus = remember { FocusRequester() }
-    LaunchedEffect(state.paymentType) {
-        if (state.paymentType == SalePaymentType.CASH && amountEnabled) {
-            runCatching { paidFocus.requestFocus() }
+private fun ProductPriceLabel(product: SaleProduct, channel: SaleChannel, style: TextStyle) {
+    when (product.priceType) {
+        SalePriceType.OPEN -> Text(
+            SaleStrings.OPEN_PRICE,
+            style = style,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        SalePriceType.WEIGHT -> product.shownPrice(channel)?.let {
+            Text(
+                SaleStrings.perKilo(it),
+                style = style,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        SalePriceType.PIECE -> product.shownPrice(channel)?.let {
+            PosMoneyText(amount = it, style = style, color = LocalContentColor.current)
         }
     }
+}
+
+@Composable
+private fun ModalScrim(content: @Composable () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -752,54 +830,217 @@ private fun ChargeOverlay(
                 modifier = Modifier.padding(PosSpacing.xl),
                 verticalArrangement = Arrangement.spacedBy(PosSpacing.lg),
             ) {
-                PosChoiceRow(
-                    options = listOf(
-                        SalePaymentType.CASH to SaleStrings.PAYMENT_CASH,
-                        SalePaymentType.TRANSFER to SaleStrings.PAYMENT_TRANSFER,
-                        SalePaymentType.CARD to SaleStrings.PAYMENT_CARD,
-                    ),
-                    selected = state.paymentType,
-                    onSelect = viewModel::selectPaymentType,
-                    enabled = amountEnabled,
-                    height = 56.dp,
-                    textStyle = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.fillMaxWidth().focusProperties { canFocus = false },
+                content()
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun LinePromptOverlay(prompt: SalePrompt, state: CashierSaleState, viewModel: CashierSaleViewModel) {
+    val promptFocus = remember { FocusRequester() }
+    val weight = prompt as? SalePrompt.Weight
+    val mode = weight?.mode
+    val product = prompt.product
+    val price = product.shownPrice(state.channel)
+    LaunchedEffect(mode) {
+        runCatching { promptFocus.requestFocus() }
+    }
+    ModalScrim {
+        Text(
+            if (weight == null) SaleStrings.PROMPT_OPEN_TITLE else SaleStrings.PROMPT_WEIGHT_TITLE,
+            style = MaterialTheme.typography.headlineSmall,
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(PosSpacing.xs)) {
+            Text(
+                product.name,
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (weight != null) {
+                Text(
+                    SaleStrings.perKilo(price ?: 0.0),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (state.isPaidLocked) {
-                    PaidLockedHint()
-                }
-                ChargeAmounts(state = state)
-                if (state.paymentType == SalePaymentType.CASH) {
-                    CashPaymentInput(
-                        state = state,
-                        viewModel = viewModel,
-                        amountEnabled = amountEnabled,
-                        paidModifier = Modifier
-                            .fillMaxWidth()
-                            .focusRequester(paidFocus)
-                            .onFocusChanged { onPaidFocusChange(it.hasFocus || it.isFocused) },
-                    )
-                }
-                state.errorMessage?.let { PosErrorBanner(error = it) }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(PosSpacing.md),
-                ) {
-                    PosSecondaryButton(
-                        text = SaleStrings.BACK,
-                        onClick = viewModel::cancelCharge,
-                        enabled = !state.isCheckoutInFlight,
-                        modifier = Modifier.weight(1f),
-                    )
-                    PosPrimaryButton(
-                        text = SaleStrings.confirmLabel(state.paymentType, state.amountDue),
-                        onClick = viewModel::confirmCharge,
-                        enabled = state.canConfirmCharge,
-                        isLoading = state.isCheckoutInFlight,
-                        modifier = Modifier.weight(1f).height(56.dp),
-                    )
+            }
+        }
+        if (weight != null) {
+            PosChoiceRow(
+                options = listOf(
+                    WeightMode.KILOS to SaleStrings.KILOS_LABEL,
+                    WeightMode.PESOS to SaleStrings.PESOS_LABEL,
+                ),
+                selected = weight.mode,
+                onSelect = viewModel::setWeightMode,
+                height = 48.dp,
+                modifier = Modifier.fillMaxWidth().focusProperties { canFocus = false },
+            )
+        }
+        if (mode != WeightMode.PESOS) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(PosSpacing.sm),
+                verticalArrangement = Arrangement.spacedBy(PosSpacing.sm),
+            ) {
+                if (weight == null) {
+                    SaleStrings.QUICK_AMOUNTS.forEach { amount ->
+                        PosSecondaryButton(
+                            text = SaleStrings.quickBill(amount),
+                            onClick = { viewModel.pickQuickAmount(amount) },
+                            modifier = Modifier.focusProperties { canFocus = false },
+                        )
+                    }
+                } else {
+                    SaleStrings.QUICK_WEIGHTS.forEach { (kilos, label) ->
+                        PosSecondaryButton(
+                            text = label,
+                            onClick = { viewModel.pickWeight(kilos) },
+                            modifier = Modifier.focusProperties { canFocus = false },
+                        )
+                    }
                 }
             }
+        }
+        PosTextField(
+            value = state.promptInput,
+            onValueChange = viewModel::onPromptInputChange,
+            label = when (mode) {
+                null -> SaleStrings.AMOUNT_LABEL
+                WeightMode.KILOS -> SaleStrings.KILOS_LABEL
+                WeightMode.PESOS -> SaleStrings.PESOS_LABEL
+            },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            trailingIcon = { Text(if (mode == WeightMode.KILOS) SaleStrings.KG_SUFFIX else SaleStrings.PESOS_SUFFIX) },
+            modifier = Modifier.fillMaxWidth().focusRequester(promptFocus),
+        )
+        state.errorMessage?.let { PosErrorBanner(error = it) }
+        promptPreview(state, mode, price ?: 0.0)?.let { preview ->
+            Column(
+                modifier = Modifier
+                    .alpha(if (preview.isPlaceholder) PLACEHOLDER_ALPHA else 1f)
+                    .semantics { liveRegion = LiveRegionMode.Polite },
+            ) {
+                Text(
+                    preview.result,
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    preview.formula,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(PosSpacing.md),
+        ) {
+            PosSecondaryButton(
+                text = SaleStrings.CANCEL,
+                onClick = viewModel::dismissPrompt,
+                modifier = Modifier.weight(1f).height(56.dp).focusProperties { canFocus = false },
+            )
+            PosPrimaryButton(
+                text = if (prompt.lineId == null) SaleStrings.ADD else SaleStrings.CHANGE_LINE,
+                onClick = viewModel::confirmPrompt,
+                enabled = state.canConfirmPrompt,
+                modifier = Modifier.weight(1f).height(56.dp).focusProperties { canFocus = false },
+            )
+        }
+    }
+}
+
+private data class PromptPreview(val result: String, val formula: String, val isPlaceholder: Boolean)
+
+private fun promptPreview(state: CashierSaleState, mode: WeightMode?, price: Double): PromptPreview? {
+    val value = state.promptValue
+    val kilos = state.promptKilos
+    return when (mode) {
+        null -> null
+        WeightMode.KILOS -> if (kilos == null) {
+            PromptPreview(SaleStrings.money(0.0), SaleStrings.weightFormula(0.0, price), isPlaceholder = true)
+        } else {
+            PromptPreview(
+                SaleStrings.money(roundMoney(kilos * price)),
+                SaleStrings.weightFormula(kilos, price),
+                isPlaceholder = false,
+            )
+        }
+        WeightMode.PESOS -> if (value == null || kilos == null) {
+            PromptPreview(SaleStrings.kilos(0.0), SaleStrings.pesosPreview(0.0, 0.0), isPlaceholder = true)
+        } else {
+            PromptPreview(SaleStrings.kilos(kilos), SaleStrings.pesosPreview(value, kilos), isPlaceholder = false)
+        }
+    }
+}
+
+private const val PLACEHOLDER_ALPHA = 0.6f
+
+@Composable
+private fun ChargeOverlay(
+    state: CashierSaleState,
+    viewModel: CashierSaleViewModel,
+    onPaidFocusChange: (Boolean) -> Unit,
+) {
+    val amountEnabled = !state.isCheckoutInFlight && !state.isPaidLocked
+    val paidFocus = remember { FocusRequester() }
+    LaunchedEffect(state.paymentType) {
+        if (state.paymentType == SalePaymentType.CASH && amountEnabled) {
+            runCatching { paidFocus.requestFocus() }
+        }
+    }
+    ModalScrim {
+        PosChoiceRow(
+            options = listOf(
+                SalePaymentType.CASH to SaleStrings.PAYMENT_CASH,
+                SalePaymentType.TRANSFER to SaleStrings.PAYMENT_TRANSFER,
+                SalePaymentType.CARD to SaleStrings.PAYMENT_CARD,
+            ),
+            selected = state.paymentType,
+            onSelect = viewModel::selectPaymentType,
+            enabled = amountEnabled,
+            height = 56.dp,
+            textStyle = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.fillMaxWidth().focusProperties { canFocus = false },
+        )
+        if (state.isPaidLocked) {
+            PaidLockedHint()
+        }
+        ChargeAmounts(state = state)
+        if (state.paymentType == SalePaymentType.CASH) {
+            CashPaymentInput(
+                state = state,
+                viewModel = viewModel,
+                amountEnabled = amountEnabled,
+                paidModifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(paidFocus)
+                    .onFocusChanged { onPaidFocusChange(it.hasFocus || it.isFocused) },
+            )
+        }
+        state.errorMessage?.let { PosErrorBanner(error = it) }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(PosSpacing.md),
+        ) {
+            PosSecondaryButton(
+                text = SaleStrings.BACK,
+                onClick = viewModel::cancelCharge,
+                enabled = !state.isCheckoutInFlight,
+                modifier = Modifier.weight(1f),
+            )
+            PosPrimaryButton(
+                text = SaleStrings.confirmLabel(state.paymentType, state.amountDue),
+                onClick = viewModel::confirmCharge,
+                enabled = state.canConfirmCharge,
+                isLoading = state.isCheckoutInFlight,
+                modifier = Modifier.weight(1f).height(56.dp),
+            )
         }
     }
 }
@@ -933,10 +1174,7 @@ private fun PaidLockedHint() {
     }
 }
 
-private fun SaleProduct.shownPrice(channel: SaleChannel): Double? {
-    val list = if (channel == SaleChannel.ONSITE) listOnsitePrice ?: listPrice else listPrice
-    return list ?: cashPrice
-}
+private fun SaleProduct.shownPrice(channel: SaleChannel): Double? = listPriceFor(channel) ?: cashPriceFor(channel)
 
 private fun SaleKitchenKind.label(): String = when (this) {
     SaleKitchenKind.FONDA -> SaleStrings.KITCHEN_FONDA
@@ -945,5 +1183,7 @@ private fun SaleKitchenKind.label(): String = when (this) {
 
 private fun KeyEvent.isEnterUp(): Boolean =
     type == KeyEventType.KeyUp && (key == Key.Enter || key == Key.NumPadEnter)
+
+private fun KeyEvent.isEscapeUp(): Boolean = type == KeyEventType.KeyUp && key == Key.Escape
 
 private const val DISABLED_ALPHA = 0.5f

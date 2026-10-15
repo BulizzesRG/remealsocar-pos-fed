@@ -9,6 +9,7 @@ import com.posfab.shared.features.sale.domain.SaleChannel
 import com.posfab.shared.features.sale.domain.SaleDraft
 import com.posfab.shared.features.sale.domain.SaleKitchenKind
 import com.posfab.shared.features.sale.domain.SaleLine
+import com.posfab.shared.features.sale.domain.SaleLineInput
 import com.posfab.shared.features.sale.domain.SaleMutationResult
 import com.posfab.shared.features.sale.domain.SalePaymentType
 import com.posfab.shared.features.sale.domain.SalePriceType
@@ -87,6 +88,7 @@ class SaleRepositoryImpl(
                         cashPrice = dto.prices?.cashTakeaway?.toDoubleOrNull(),
                         listPrice = dto.prices?.listTakeaway?.toDoubleOrNull(),
                         listOnsitePrice = dto.prices?.listOnsite?.toDoubleOrNull(),
+                        cashOnsitePrice = dto.prices?.cashOnsite?.toDoubleOrNull(),
                         priceType = SalePriceType.fromRaw(dto.priceType),
                         kitchenKind = SaleKitchenKind.fromRaw(dto.kitchenKind),
                         lotTracked = dto.requiresLotTracking,
@@ -96,36 +98,55 @@ class SaleRepositoryImpl(
             is AppResult.Failure -> if (result.error.isBarcodeNotFound()) AppResult.Success(null) else result
         }
 
+    override suspend fun variosProduct(): AppResult<SaleProduct?> =
+        when (val result = authorized { catalogApi.listProducts(it, VARIOS_NAME, SEARCH_FETCH_LIMIT, 0, true) }) {
+            is AppResult.Success -> AppResult.Success(
+                result.value.items
+                    .asSequence()
+                    .mapNotNull { it.toSellableProduct() }
+                    .firstOrNull { it.priceType == SalePriceType.OPEN && it.name.trim().equals(VARIOS_NAME, ignoreCase = true) },
+            )
+            is AppResult.Failure -> result
+        }
+
     override suspend fun addLine(
         draftId: Long,
         product: SaleProduct,
-        qty: Double,
+        input: SaleLineInput,
         expectedVersion: Int,
     ): SaleMutationResult = mutationWithConflictRefetch(draftId) {
+        val fields = input.toFields()
         posApi.addDraftLine(
             accessToken = it,
             draftId = draftId,
             request = AddLineRequestDto(
                 productId = product.id,
                 unitId = product.unitId,
-                qty = formatQty(qty),
-                unitPrice = null,
+                qty = fields.qty,
+                amount = fields.amount,
+                unitPrice = fields.unitPrice,
                 expectedVersion = expectedVersion,
             ),
         )
     }
 
-    override suspend fun updateLineQty(
+    override suspend fun updateLine(
         draftId: Long,
         lineId: Long,
-        qty: Double,
+        input: SaleLineInput,
         expectedVersion: Int,
     ): SaleMutationResult = mutationWithConflictRefetch(draftId) {
+        val fields = input.toFields()
         posApi.updateDraftLine(
             accessToken = it,
             draftId = draftId,
             lineId = lineId,
-            request = UpdateLineRequestDto(qty = formatQty(qty), expectedVersion = expectedVersion),
+            request = UpdateLineRequestDto(
+                qty = fields.qty,
+                amount = fields.amount,
+                unitPrice = fields.unitPrice,
+                expectedVersion = expectedVersion,
+            ),
         )
     }
 
@@ -261,14 +282,15 @@ class SaleRepositoryImpl(
             lineTotal = lineTotal.toDoubleOrNull() ?: roundMoney(quantity * listPrice),
             lotId = lotId,
             lotTracked = lotTracked,
+            priceType = SalePriceType.fromRaw(priceType),
         )
     }
 
     private fun ProductListItemDto.toSellableProduct(): SaleProduct? {
         val productId = id.toLongOrNull() ?: return null
-        val cashPrice = prices?.cashTakeaway?.toDoubleOrNull() ?: return null
+        val cashPrice = prices?.cashTakeaway?.toDoubleOrNull()
         val type = SalePriceType.fromRaw(priceType)
-        if (type != SalePriceType.PIECE) return null
+        if (type != SalePriceType.OPEN && cashPrice == null) return null
         return SaleProduct(
             id = productId,
             name = name,
@@ -277,6 +299,7 @@ class SaleRepositoryImpl(
             cashPrice = cashPrice,
             listPrice = prices?.listTakeaway?.toDoubleOrNull(),
             listOnsitePrice = prices?.listOnsite?.toDoubleOrNull(),
+            cashOnsitePrice = prices?.cashOnsite?.toDoubleOrNull(),
             priceType = type,
             kitchenKind = SaleKitchenKind.fromRaw(kitchenKind),
             lotTracked = lotTracked,
@@ -286,9 +309,22 @@ class SaleRepositoryImpl(
     private fun AppError.isBarcodeNotFound(): Boolean =
         this is AppError.Validation && message.contains(BARCODE_NOT_FOUND, ignoreCase = true)
 
+    private fun SaleLineInput.toFields(): LineFields = when (this) {
+        is SaleLineInput.Qty -> LineFields(qty = formatQty(qty))
+        is SaleLineInput.Amount -> LineFields(amount = formatMoney(amount))
+        is SaleLineInput.OpenPrice -> LineFields(qty = OPEN_PRICE_QTY, unitPrice = formatMoney(amount))
+    }
+
     private fun formatQty(qty: Double): String {
         val whole = round(qty)
-        return if (abs(qty - whole) < QTY_EPSILON) whole.toLong().toString() else qty.toString()
+        return if (abs(qty - whole) < QTY_EPSILON) whole.toLong().toString() else formatKilos(qty)
+    }
+
+    private fun formatKilos(qty: Double): String {
+        val grams = round(qty * 1000.0).toLong()
+        val sign = if (grams < 0) "-" else ""
+        val absolute = abs(grams)
+        return "$sign${absolute / 1000}.${(absolute % 1000).toString().padStart(3, '0')}"
     }
 
     private fun formatMoney(amount: Double): String {
@@ -306,5 +342,13 @@ class SaleRepositoryImpl(
         const val KITCHEN_LIMIT = 200
         const val SEARCH_FETCH_LIMIT = 50
         const val QTY_EPSILON = 1e-9
+        const val VARIOS_NAME = "Varios"
+        const val OPEN_PRICE_QTY = "1"
     }
 }
+
+private data class LineFields(
+    val qty: String? = null,
+    val amount: String? = null,
+    val unitPrice: String? = null,
+)

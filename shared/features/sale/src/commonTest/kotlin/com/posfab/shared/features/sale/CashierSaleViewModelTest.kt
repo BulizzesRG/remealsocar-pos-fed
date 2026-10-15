@@ -8,6 +8,7 @@ import com.posfab.shared.features.sale.domain.SaleChannel
 import com.posfab.shared.features.sale.domain.SaleDraft
 import com.posfab.shared.features.sale.domain.SaleKitchenKind
 import com.posfab.shared.features.sale.domain.SaleLine
+import com.posfab.shared.features.sale.domain.SaleLineInput
 import com.posfab.shared.features.sale.domain.SaleMutationResult
 import com.posfab.shared.features.sale.domain.SalePaymentType
 import com.posfab.shared.features.sale.domain.SalePriceType
@@ -18,7 +19,9 @@ import com.posfab.shared.features.sale.ui.CashierSaleViewModel
 import com.posfab.shared.features.sale.ui.MAX_ACCOUNTS
 import com.posfab.shared.features.sale.ui.SaleConfirm
 import com.posfab.shared.features.sale.ui.SalePhase
+import com.posfab.shared.features.sale.ui.SalePrompt
 import com.posfab.shared.features.sale.ui.SaleStrings
+import com.posfab.shared.features.sale.ui.WeightMode
 import com.posfab.shared.features.sale.usecase.SaleUseCases
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -79,7 +82,7 @@ class CashierSaleViewModelTest {
         assertEquals(1, lines.size)
         assertEquals(2.0, lines.first().qty)
         assertEquals(1, repo.addLineCalls)
-        assertEquals(1, repo.updateQtyCalls)
+        assertEquals(1, repo.updateLineCalls)
         assertEquals("", vm.state.value.query)
     }
 
@@ -148,7 +151,7 @@ class CashierSaleViewModelTest {
     }
 
     @Test
-    fun scanning_a_weight_product_is_not_sellable_yet() = runTest(dispatcher) {
+    fun scanning_a_weight_product_opens_the_weight_prompt_in_kilos() = runTest(dispatcher) {
         val repo = FakeSaleRepository()
         val vm = start(repo)
 
@@ -156,9 +159,502 @@ class CashierSaleViewModelTest {
         vm.onSubmit()
         advanceUntilIdle()
 
-        assertEquals(SaleStrings.NOT_SELLABLE_YET, vm.state.value.errorMessage)
+        val prompt = assertIs<SalePrompt.Weight>(vm.state.value.prompt)
+        assertEquals(repo.jamon, prompt.product)
+        assertEquals(WeightMode.KILOS, prompt.mode)
+        assertNull(prompt.lineId)
+        assertEquals("", vm.state.value.promptInput)
+        assertNull(vm.state.value.errorMessage)
         assertTrue(vm.state.value.draft!!.lines.isEmpty())
         assertEquals(0, repo.addLineCalls)
+    }
+
+    @Test
+    fun weight_prompt_in_kilos_adds_the_typed_kilos() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.jamon)
+
+        vm.onPromptInputChange("0.35")
+        assertEquals(0.35, vm.state.value.promptKilos)
+        assertTrue(vm.state.value.canConfirmPrompt)
+        vm.confirmPrompt()
+        assertNull(vm.state.value.prompt)
+        advanceUntilIdle()
+
+        assertEquals(SaleLineInput.Qty(0.35), repo.lastLineInput)
+        val line = vm.state.value.draft!!.lines.single()
+        assertEquals(0.35, line.qty)
+        assertEquals(SalePriceType.WEIGHT, line.priceType)
+        assertEquals(line.id, vm.state.value.selectedLineId)
+        assertEquals(SaleStrings.added(repo.jamon.name), vm.state.value.notice)
+        assertEquals("", vm.state.value.promptInput)
+    }
+
+    @Test
+    fun weight_prompt_in_pesos_sends_the_amount_not_kilos() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.jamon)
+
+        vm.onPromptInputChange("0.5")
+        vm.setWeightMode(WeightMode.PESOS)
+        assertEquals("", vm.state.value.promptInput)
+        assertEquals(WeightMode.PESOS, (vm.state.value.prompt as SalePrompt.Weight).mode)
+        vm.onPromptInputChange("20")
+        assertEquals(20.0 / 120.0, vm.state.value.promptKilos)
+        vm.confirmPrompt()
+        advanceUntilIdle()
+
+        assertEquals(SaleLineInput.Amount(20.0), repo.lastLineInput)
+        assertEquals(20.0, vm.state.value.cashTotal)
+    }
+
+    @Test
+    fun quick_weight_buttons_fill_the_field_without_adding() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.jamon)
+        vm.setWeightMode(WeightMode.PESOS)
+
+        vm.pickWeight(0.25)
+        advanceUntilIdle()
+
+        assertEquals("0.250", vm.state.value.promptInput)
+        assertEquals(WeightMode.KILOS, (vm.state.value.prompt as SalePrompt.Weight).mode)
+        assertEquals(0, repo.addLineCalls)
+
+        vm.confirmPrompt()
+        advanceUntilIdle()
+        assertEquals(0.25, vm.state.value.draft!!.lines.single().qty)
+    }
+
+    @Test
+    fun open_price_product_adds_a_line_with_qty_1_and_the_amount() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+
+        vm.addProduct(repo.varios)
+        assertIs<SalePrompt.OpenAmount>(vm.state.value.prompt)
+        vm.onPromptInputChange("12.50")
+        vm.confirmPrompt()
+        advanceUntilIdle()
+
+        assertEquals(SaleLineInput.OpenPrice(12.5), repo.lastLineInput)
+        val line = vm.state.value.draft!!.lines.single()
+        assertEquals(1.0, line.qty)
+        assertEquals(12.5, line.unitPrice)
+        assertEquals(SalePriceType.OPEN, line.priceType)
+        assertEquals(12.5, vm.state.value.listTotal)
+    }
+
+    @Test
+    fun quick_open_amounts_fill_the_field() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+
+        vm.pickQuickAmount(5)
+        assertEquals("", vm.state.value.promptInput)
+
+        vm.addProduct(repo.varios)
+        vm.pickQuickAmount(5)
+        advanceUntilIdle()
+        assertEquals("5", vm.state.value.promptInput)
+        assertEquals(0, repo.addLineCalls)
+
+        vm.confirmPrompt()
+        advanceUntilIdle()
+        assertEquals(5.0, vm.state.value.draft!!.lines.single().unitPrice)
+    }
+
+    @Test
+    fun same_open_product_twice_makes_two_lines() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+
+        listOf("5", "12.50").forEach { amount ->
+            vm.addProduct(repo.varios)
+            vm.onPromptInputChange(amount)
+            vm.confirmPrompt()
+            advanceUntilIdle()
+        }
+
+        val lines = vm.state.value.draft!!.lines
+        assertEquals(2, lines.size)
+        assertEquals(listOf(5.0, 12.5), lines.map { it.unitPrice })
+        assertEquals(2, repo.addLineCalls)
+        assertEquals(0, repo.updateLineCalls)
+        assertEquals(lines.last().id, vm.state.value.selectedLineId)
+    }
+
+    @Test
+    fun prompt_input_is_sanitized_per_mode() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+
+        vm.onPromptInputChange("12")
+        assertEquals("", vm.state.value.promptInput)
+
+        vm.addProduct(repo.jamon)
+        vm.onPromptInputChange("0.3456")
+        assertEquals("0.345", vm.state.value.promptInput)
+        vm.onPromptInputChange("abc")
+        assertEquals("", vm.state.value.promptInput)
+        vm.onPromptInputChange("123.5")
+        assertEquals("12.5", vm.state.value.promptInput)
+
+        vm.setWeightMode(WeightMode.PESOS)
+        vm.onPromptInputChange("20.555")
+        assertEquals("20.55", vm.state.value.promptInput)
+
+        vm.dismissPrompt()
+        vm.addProduct(repo.varios)
+        vm.onPromptInputChange("1234567")
+        assertEquals("12345", vm.state.value.promptInput)
+
+        vm.dismissPrompt()
+        vm.addProduct(repo.cigarro)
+        advanceUntilIdle()
+        vm.startCharge()
+        vm.onPaidInputChange("1234567")
+        assertEquals("123456", vm.state.value.paidInput)
+    }
+
+    @Test
+    fun invalid_prompt_input_does_not_confirm() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.jamon)
+
+        listOf("", ".", "0", "0.000").forEach { input ->
+            vm.onPromptInputChange(input)
+            assertFalse(vm.state.value.canConfirmPrompt)
+            vm.confirmPrompt()
+        }
+        advanceUntilIdle()
+
+        assertNotNull(vm.state.value.prompt)
+        assertEquals(0, repo.addLineCalls)
+    }
+
+    @Test
+    fun dismissing_the_prompt_adds_nothing() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.jamon)
+        vm.onPromptInputChange("0.5")
+
+        vm.dismissPrompt()
+        vm.confirmPrompt()
+        advanceUntilIdle()
+
+        assertNull(vm.state.value.prompt)
+        assertEquals("", vm.state.value.promptInput)
+        assertEquals(0, repo.addLineCalls)
+        assertTrue(vm.state.value.draft!!.lines.isEmpty())
+    }
+
+    @Test
+    fun weight_product_without_price_shows_no_price() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+
+        vm.onQueryChange(repo.arrozSuelto.barcode!!)
+        vm.onSubmit()
+        advanceUntilIdle()
+
+        assertEquals(SaleStrings.NO_PRICE, vm.state.value.errorMessage)
+        assertNull(vm.state.value.prompt)
+
+        vm.addProduct(repo.arrozSuelto)
+        assertEquals(SaleStrings.NO_PRICE, vm.state.value.errorMessage)
+        assertNull(vm.state.value.prompt)
+        assertEquals(0, repo.addLineCalls)
+    }
+
+    @Test
+    fun prompt_is_blocked_while_charging() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.cigarro)
+        advanceUntilIdle()
+        vm.startCharge()
+
+        vm.addProduct(repo.jamon)
+        vm.addProduct(repo.varios)
+        advanceUntilIdle()
+
+        assertNull(vm.state.value.prompt)
+        assertEquals(SaleStrings.FINISH_CHARGE_FIRST, vm.state.value.notice)
+        assertEquals(1, repo.addLineCalls)
+        assertEquals(SalePhase.Charging, vm.state.value.phase)
+    }
+
+    @Test
+    fun open_prompt_blocks_account_switch_channel_and_clear() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(openDraftsSeed = listOf(1L, 2L))
+        val vm = start(repo)
+        vm.addProduct(repo.cigarro)
+        advanceUntilIdle()
+        val newDraftsBefore = repo.newDraftCalls
+
+        vm.addProduct(repo.jamon)
+        assertFalse(vm.state.value.canSetChannel)
+        assertFalse(vm.state.value.canOpenAccount)
+        assertFalse(vm.state.value.canCharge)
+
+        vm.selectAccount(2L)
+        vm.setChannel(SaleChannel.ONSITE)
+        vm.requestClear()
+        vm.openAccount()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(1L, state.activeDraftId)
+        assertEquals(0, repo.setChannelCalls)
+        assertNull(state.confirm)
+        assertEquals(newDraftsBefore, repo.newDraftCalls)
+        assertEquals(0, repo.cancelCalls)
+        assertNotNull(state.prompt)
+
+        vm.dismissPrompt()
+        assertTrue(vm.state.value.canSetChannel)
+        vm.selectAccount(2L)
+        assertEquals(2L, vm.state.value.activeDraftId)
+    }
+
+    @Test
+    fun changing_a_weight_line_reopens_the_prompt_prefilled_and_updates_it() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.jamon)
+        vm.onPromptInputChange("0.35")
+        vm.confirmPrompt()
+        advanceUntilIdle()
+        val lineId = vm.state.value.draft!!.lines.single().id
+        vm.selectLine(lineId)
+
+        vm.changeSelectedLine()
+
+        val prompt = assertIs<SalePrompt.Weight>(vm.state.value.prompt)
+        assertEquals(lineId, prompt.lineId)
+        assertEquals(WeightMode.KILOS, prompt.mode)
+        assertEquals(repo.jamon.id, prompt.product.id)
+        assertEquals("0.350", vm.state.value.promptInput)
+
+        vm.onPromptInputChange("0.5")
+        vm.confirmPrompt()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SaleLineInput.Qty(0.5), repo.lastLineInput)
+        assertEquals(1, repo.addLineCalls)
+        assertEquals(1, repo.updateLineCalls)
+        assertEquals(0.5, state.draft!!.lines.single().qty)
+        assertEquals(lineId, state.selectedLineId)
+        assertEquals("Cambiado: Jamon", state.notice)
+        assertNull(state.prompt)
+    }
+
+    @Test
+    fun changing_an_open_line_updates_its_price() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.varios)
+        vm.onPromptInputChange("5")
+        vm.confirmPrompt()
+        advanceUntilIdle()
+        val lineId = vm.state.value.draft!!.lines.single().id
+
+        vm.changeSelectedLine()
+        val prompt = assertIs<SalePrompt.OpenAmount>(vm.state.value.prompt)
+        assertEquals(lineId, prompt.lineId)
+        assertEquals("5.00", vm.state.value.promptInput)
+
+        vm.onPromptInputChange("8")
+        vm.confirmPrompt()
+        advanceUntilIdle()
+
+        assertEquals(SaleLineInput.OpenPrice(8.0), repo.lastLineInput)
+        val line = vm.state.value.draft!!.lines.single()
+        assertEquals(8.0, line.unitPrice)
+        assertEquals(1.0, line.qty)
+        assertEquals(SaleStrings.changed(repo.varios.name), vm.state.value.notice)
+    }
+
+    @Test
+    fun changing_a_pesos_line_reopens_in_pesos_with_the_cash_amount() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.jamon)
+        vm.setWeightMode(WeightMode.PESOS)
+        vm.onPromptInputChange("20")
+        vm.confirmPrompt()
+        advanceUntilIdle()
+        val line = vm.state.value.draft!!.lines.single()
+        assertEquals(0.166667, line.qty)
+
+        vm.changeSelectedLine()
+
+        val prompt = assertIs<SalePrompt.Weight>(vm.state.value.prompt)
+        assertEquals(line.id, prompt.lineId)
+        assertEquals(WeightMode.PESOS, prompt.mode)
+        assertEquals("20.00", vm.state.value.promptInput)
+
+        vm.confirmPrompt()
+        advanceUntilIdle()
+
+        assertEquals(SaleLineInput.Amount(20.0), repo.lastLineInput)
+        assertEquals(1, repo.updateLineCalls)
+        assertEquals(20.0, vm.state.value.cashTotal)
+    }
+
+    @Test
+    fun qty_buttons_ignore_weight_and_open_lines() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.jamon)
+        vm.onPromptInputChange("0.35")
+        vm.confirmPrompt()
+        advanceUntilIdle()
+        vm.addProduct(repo.varios)
+        vm.onPromptInputChange("5")
+        vm.confirmPrompt()
+        advanceUntilIdle()
+        val (weightLine, openLine) = vm.state.value.draft!!.lines
+
+        listOf(weightLine, openLine).forEach { line ->
+            vm.selectLine(line.id)
+            vm.incrementQty()
+            vm.decrementQty()
+            vm.onQtyInputChange("3")
+            vm.applyQty()
+            advanceUntilIdle()
+        }
+
+        assertEquals(0, repo.updateLineCalls)
+        val lines = vm.state.value.draft!!.lines
+        assertEquals(0.35, lines.first { it.id == weightLine.id }.qty)
+        assertEquals(1.0, lines.first { it.id == openLine.id }.qty)
+    }
+
+    @Test
+    fun prompt_does_not_open_while_the_clear_dialog_is_up() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.cigarro)
+        advanceUntilIdle()
+        vm.requestClear()
+        assertEquals(SaleConfirm.ClearCart, vm.state.value.confirm)
+
+        vm.addProduct(repo.jamon)
+        vm.onQueryChange(repo.jamon.barcode!!)
+        vm.onSubmit()
+        advanceUntilIdle()
+
+        assertNull(vm.state.value.prompt)
+        assertNull(vm.state.value.errorMessage)
+        assertEquals(SaleConfirm.ClearCart, vm.state.value.confirm)
+        assertEquals(1, repo.addLineCalls)
+    }
+
+    @Test
+    fun scanning_a_weight_product_from_done_opens_the_prompt_on_the_next_sale() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.cigarro)
+        advanceUntilIdle()
+        val firstDraftId = vm.state.value.draft!!.id
+        vm.startCharge()
+        vm.payExact()
+        advanceUntilIdle()
+        assertEquals(SalePhase.Done, vm.state.value.phase)
+
+        vm.onQueryChange(repo.jamon.barcode!!)
+        vm.onSubmit()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SalePhase.Selling, state.phase)
+        assertNull(state.lastResult)
+        assertNotEquals(firstDraftId, state.activeDraftId)
+        assertIs<SalePrompt.Weight>(state.prompt)
+
+        vm.onPromptInputChange("1")
+        vm.confirmPrompt()
+        advanceUntilIdle()
+        assertEquals(1.0, vm.state.value.draft!!.lines.single().qty)
+        assertNotEquals(firstDraftId, vm.state.value.draft!!.id)
+    }
+
+    @Test
+    fun varios_product_loads_with_the_board_and_is_absent_when_missing() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        assertEquals(repo.varios, vm.state.value.variosProduct)
+
+        val missing = start(FakeSaleRepository().apply { variosMissing = true })
+        assertNull(missing.state.value.variosProduct)
+        assertNull(missing.state.value.errorMessage)
+        assertEquals(SalePhase.Selling, missing.state.value.phase)
+    }
+
+    @Test
+    fun prompt_confirm_on_a_closed_account_removes_it() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.jamon)
+        repo.closeElsewhere(1L, "CANCELLED")
+
+        vm.onPromptInputChange("0.5")
+        vm.confirmPrompt()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertNull(state.accountById(1L))
+        assertNotEquals(1L, state.activeDraftId)
+        assertTrue(state.draft!!.lines.isEmpty())
+        assertEquals(SaleStrings.ACCOUNT_CLOSED, state.notice)
+        assertNull(state.prompt)
+    }
+
+    @Test
+    fun prompt_add_retries_once_after_conflict() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.jamon)
+        repo.forceConflictOnNextAdd = true
+
+        vm.onPromptInputChange("0.5")
+        vm.confirmPrompt()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(2, repo.addLineCalls)
+        assertEquals(0.5, state.draft!!.lines.single().qty)
+        assertEquals(repo.drafts.getValue(1L).version, state.draft!!.version)
+        assertEquals(SaleStrings.added(repo.jamon.name), state.notice)
+    }
+
+    @Test
+    fun piece_products_still_merge_quantities() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+
+        vm.addProduct(repo.cigarro)
+        vm.addProduct(repo.cigarro)
+        advanceUntilIdle()
+
+        assertNull(vm.state.value.prompt)
+        val line = vm.state.value.draft!!.lines.single()
+        assertEquals(2.0, line.qty)
+        assertEquals(SaleLineInput.Qty(2.0), repo.lastLineInput)
+        assertEquals(1, repo.addLineCalls)
+        assertEquals(1, repo.updateLineCalls)
+
+        vm.selectLine(line.id)
+        vm.changeSelectedLine()
+        assertNull(vm.state.value.prompt)
     }
 
     @Test
@@ -443,7 +939,7 @@ class CashierSaleViewModelTest {
 
         assertEquals(SaleStrings.FINISH_CHARGE_FIRST, vm.state.value.notice)
         assertEquals(1, repo.addLineCalls)
-        assertEquals(0, repo.updateQtyCalls)
+        assertEquals(0, repo.updateLineCalls)
         val line = vm.state.value.draft!!.lines.single()
         assertEquals(1.0, line.qty)
         assertEquals(SalePhase.Charging, vm.state.value.phase)
@@ -1273,7 +1769,17 @@ private class FakeSaleRepository(
     )
     val jamon = SaleProduct(
         id = 3L, name = "Jamon", barcode = "7501000100039", unitId = 2L, cashPrice = 120.0,
-        listPrice = 126.0, listOnsitePrice = null,
+        listPrice = 126.0, listOnsitePrice = 137.0, cashOnsitePrice = 130.0,
+        priceType = SalePriceType.WEIGHT,
+    )
+    val varios = SaleProduct(
+        id = 7L, name = "Varios", barcode = null, unitId = 1L, cashPrice = null,
+        listPrice = null, listOnsitePrice = null,
+        priceType = SalePriceType.OPEN,
+    )
+    val arrozSuelto = SaleProduct(
+        id = 8L, name = "Arroz suelto", barcode = "20000028", unitId = 2L, cashPrice = null,
+        listPrice = null, listOnsitePrice = null,
         priceType = SalePriceType.WEIGHT,
     )
     val chicle = SaleProduct(
@@ -1307,9 +1813,12 @@ private class FakeSaleRepository(
     var failNextNewDraft = false
     var failNextDraftReadWithNetwork = false
     var forceConflictOnNextSetChannel = false
+    var forceConflictOnNextAdd = false
+    var variosMissing = false
+    var lastLineInput: SaleLineInput? = null
 
     var addLineCalls = 0
-    var updateQtyCalls = 0
+    var updateLineCalls = 0
     var searchCalls = 0
     var checkoutCalls = 0
     var cancelCalls = 0
@@ -1395,19 +1904,33 @@ private class FakeSaleRepository(
 
     override suspend fun kitchenProducts(): AppResult<List<SaleProduct>> = AppResult.Success(kitchenPool)
 
+    private val allProducts: List<SaleProduct> get() = searchPool + jamon + kitchenPool + chicle + varios + arrozSuelto
+
     override suspend fun findProductByBarcode(barcode: String): AppResult<SaleProduct?> =
-        AppResult.Success((searchPool + jamon + kitchenPool + chicle).firstOrNull { it.barcode == barcode })
+        AppResult.Success(allProducts.firstOrNull { it.barcode == barcode })
+
+    override suspend fun variosProduct(): AppResult<SaleProduct?> = AppResult.Success(varios.takeUnless { variosMissing })
 
     override suspend fun addLine(
         draftId: Long,
         product: SaleProduct,
-        qty: Double,
+        input: SaleLineInput,
         expectedVersion: Int,
     ): SaleMutationResult {
         addLineCalls += 1
+        lastLineInput = input
+        if (forceConflictOnNextAdd) {
+            forceConflictOnNextAdd = false
+            val draft = drafts[draftId] ?: return SaleMutationResult.Failure(notFound())
+            val bumped = draft.copy(version = draft.version + 1)
+            drafts[draftId] = bumped
+            return SaleMutationResult.ConflictRefetched(bumped)
+        }
         return mutate(draftId, expectedVersion) { draft ->
-            val price = product.cashPrice ?: 0.0
-            val listPrice = product.listPriceFor(draft.channel) ?: price
+            val openAmount = (input as? SaleLineInput.OpenPrice)?.amount
+            val price = openAmount ?: product.cashPriceFor(draft.channel) ?: 0.0
+            val listPrice = openAmount ?: product.listPriceFor(draft.channel) ?: price
+            val qty = input.qtyFor(price)
             val line = SaleLine(
                 id = nextLineId++,
                 productId = product.id,
@@ -1418,18 +1941,20 @@ private class FakeSaleRepository(
                 cashUnitPrice = price,
                 lineTotal = round2(qty * listPrice),
                 lotTracked = product.lotTracked,
+                priceType = product.priceType,
             )
             draft.withLines(draft.lines + line)
         }
     }
 
-    override suspend fun updateLineQty(
+    override suspend fun updateLine(
         draftId: Long,
         lineId: Long,
-        qty: Double,
+        input: SaleLineInput,
         expectedVersion: Int,
     ): SaleMutationResult {
-        updateQtyCalls += 1
+        updateLineCalls += 1
+        lastLineInput = input
         if (forceConflictOnNextUpdate) {
             forceConflictOnNextUpdate = false
             val draft = drafts[draftId] ?: return SaleMutationResult.Failure(notFound())
@@ -1439,12 +1964,33 @@ private class FakeSaleRepository(
         }
         return mutate(draftId, expectedVersion) { draft ->
             draft.withLines(
-                draft.lines.map {
-                    if (it.id == lineId) it.copy(qty = qty, lineTotal = round2(qty * it.unitPrice)) else it
+                draft.lines.map { line ->
+                    if (line.id == lineId) line.updatedWith(input) else line
                 }
             )
         }
     }
+
+    private fun SaleLineInput.qtyFor(cashPrice: Double): Double = when (this) {
+        is SaleLineInput.Qty -> qty
+        is SaleLineInput.Amount -> round6(amount / cashPrice)
+        is SaleLineInput.OpenPrice -> 1.0
+    }
+
+    private fun SaleLine.updatedWith(input: SaleLineInput): SaleLine = when (input) {
+        is SaleLineInput.OpenPrice -> copy(
+            qty = 1.0,
+            unitPrice = input.amount,
+            cashUnitPrice = input.amount,
+            lineTotal = round2(input.amount),
+        )
+        else -> {
+            val qty = input.qtyFor(cashUnitPrice)
+            copy(qty = qty, lineTotal = round2(qty * unitPrice))
+        }
+    }
+
+    private fun round6(value: Double) = kotlin.math.round(value * 1_000_000) / 1_000_000
 
     override suspend fun removeLine(draftId: Long, lineId: Long, expectedVersion: Int): SaleMutationResult =
         mutate(draftId, expectedVersion) { draft -> draft.withLines(draft.lines.filterNot { it.id == lineId }) }
@@ -1486,11 +2032,7 @@ private class FakeSaleRepository(
         }
     }
 
-    private fun productById(id: Long): SaleProduct? =
-        (searchPool + jamon + kitchenPool + chicle).firstOrNull { it.id == id }
-
-    private fun SaleProduct.listPriceFor(channel: SaleChannel): Double? =
-        if (channel == SaleChannel.ONSITE) listOnsitePrice ?: listPrice else listPrice
+    private fun productById(id: Long): SaleProduct? = allProducts.firstOrNull { it.id == id }
 
     override suspend fun checkout(
         draftId: Long,

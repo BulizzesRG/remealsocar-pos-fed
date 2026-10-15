@@ -57,11 +57,28 @@ data class SaleProduct(
     val cashPrice: Double?,
     val listPrice: Double?,
     val listOnsitePrice: Double?,
+    val cashOnsitePrice: Double? = null,
     val priceType: SalePriceType = SalePriceType.PIECE,
     val kitchenKind: SaleKitchenKind? = null,
     val lotTracked: Boolean = false,
 ) {
-    val isSellable: Boolean get() = priceType == SalePriceType.PIECE && cashPrice != null
+    val isSellable: Boolean get() = priceType == SalePriceType.OPEN || cashPrice != null
+
+    fun cashPriceFor(channel: SaleChannel): Double? = when (channel) {
+        SaleChannel.TAKEAWAY -> cashPrice
+        SaleChannel.ONSITE -> cashOnsitePrice ?: cashPrice
+    }
+
+    fun listPriceFor(channel: SaleChannel): Double? = when (channel) {
+        SaleChannel.TAKEAWAY -> listPrice
+        SaleChannel.ONSITE -> listOnsitePrice ?: listPrice
+    }
+}
+
+sealed interface SaleLineInput {
+    data class Qty(val qty: Double) : SaleLineInput
+    data class Amount(val amount: Double) : SaleLineInput
+    data class OpenPrice(val amount: Double) : SaleLineInput
 }
 
 data class SaleLine(
@@ -75,6 +92,7 @@ data class SaleLine(
     val lineTotal: Double,
     val lotId: Long? = null,
     val lotTracked: Boolean = false,
+    val priceType: SalePriceType = SalePriceType.PIECE,
 )
 
 data class SaleTotals(

@@ -14,8 +14,10 @@ import com.posfab.shared.features.sale.domain.CheckoutResult
 import com.posfab.shared.features.sale.domain.SaleChannel
 import com.posfab.shared.features.sale.domain.SaleDraft
 import com.posfab.shared.features.sale.domain.SaleKitchenKind
+import com.posfab.shared.features.sale.domain.SaleLineInput
 import com.posfab.shared.features.sale.domain.SaleMutationResult
 import com.posfab.shared.features.sale.domain.SalePaymentType
+import com.posfab.shared.features.sale.domain.SalePriceType
 import com.posfab.shared.features.sale.domain.SaleProduct
 import com.posfab.shared.features.sale.repository.SaleRepositoryImpl
 import com.posfab.shared.network.catalog.BusinessConfigDto
@@ -50,6 +52,7 @@ import com.posfab.shared.network.pos.ValidateDraftResponseDto
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -98,7 +101,7 @@ class SaleRepositoryImplTest {
     @Test
     fun conflict_on_add_refetches_the_same_draft() = runTest {
         val posApi = FakePosApi().apply { addLineResult = AppResult.Failure(AppError.Conflict) }
-        val result = repository(posApi).addLine(7L, product(), 1.0, expectedVersion = 1)
+        val result = repository(posApi).addLine(7L, product(), SaleLineInput.Qty(1.0), expectedVersion = 1)
 
         val refetched = assertIs<SaleMutationResult.ConflictRefetched>(result)
         assertEquals(7L, refetched.draft.id)
@@ -111,7 +114,7 @@ class SaleRepositoryImplTest {
             addLineResult = AppResult.Failure(AppError.Conflict)
             draftStatus = "CANCELLED"
         }
-        val result = repository(posApi).addLine(7L, product(), 1.0, expectedVersion = 1)
+        val result = repository(posApi).addLine(7L, product(), SaleLineInput.Qty(1.0), expectedVersion = 1)
 
         val closed = assertIs<SaleMutationResult.DraftClosed>(result)
         assertEquals(7L, closed.draft.id)
@@ -129,23 +132,49 @@ class SaleRepositoryImplTest {
     }
 
     @Test
-    fun search_keeps_piece_products_with_prices_and_limits_after_filtering() = runTest {
+    fun search_keeps_sellable_products_and_limits_after_filtering() = runTest {
         val items = listOf(
-            listItem(id = "1", name = "Kilo", priceType = "WEIGHT", cash = "90.00"),
-            listItem(id = "2", name = "Sin precio", cash = null),
-            listItem(id = "3", name = "Coca", cash = "18.00"),
-            listItem(id = "4", name = "Abierto", priceType = "OPEN", cash = "10.00"),
-            listItem(id = "5", name = "Chicle", cash = "2.00"),
+            listItem(id = "1", name = "Sin precio", cash = null),
+            listItem(id = "2", name = "Kilo", priceType = "WEIGHT", cash = "90.00"),
+            listItem(id = "3", name = "Kilo sin precio", priceType = "WEIGHT", cash = null),
+            listItem(id = "4", name = "Abierto", priceType = "OPEN", cash = null),
+            listItem(id = "5", name = "Coca", cash = "18.00"),
             listItem(id = "6", name = "Galletas", cash = "15.00"),
         )
         val catalogApi = FakeCatalogApi(items)
-        val result = repository(FakePosApi(), catalogApi).searchProducts("a", 2)
+        val repository = repository(FakePosApi(), catalogApi)
 
-        val products = assertIs<AppResult.Success<List<SaleProduct>>>(result).value
-        assertEquals(listOf(3L, 5L), products.map { it.id })
-        assertEquals(18.0, products.first().cashPrice)
+        val limited = assertIs<AppResult.Success<List<SaleProduct>>>(repository.searchProducts("a", 3)).value
+        assertEquals(listOf(2L, 4L, 5L), limited.map { it.id })
         assertEquals(50, catalogApi.lastLimit)
         assertEquals("a", catalogApi.lastQuery)
+
+        val all = assertIs<AppResult.Success<List<SaleProduct>>>(repository.searchProducts("a", 8)).value
+        assertEquals(listOf(2L, 4L, 5L, 6L), all.map { it.id })
+        assertEquals(SalePriceType.WEIGHT, all[0].priceType)
+        assertEquals(90.0, all[0].cashPrice)
+        assertEquals(SalePriceType.OPEN, all[1].priceType)
+        assertNull(all[1].cashPrice)
+        assertTrue(all.all { it.isSellable })
+    }
+
+    @Test
+    fun kitchen_products_include_weight_and_open_kitchen_items() = runTest {
+        val items = listOf(
+            listItem(id = "1", name = "Guisado kilo", priceType = "WEIGHT", cash = "200.00", kitchenKind = "FONDA"),
+            listItem(id = "2", name = "Agua fresca", priceType = "OPEN", cash = null, kitchenKind = "FONDA"),
+            listItem(id = "3", name = "Torta cubana", cash = "60.00", kitchenKind = "TORTERIA"),
+            listItem(id = "4", name = "Barbacoa", priceType = "WEIGHT", cash = null, kitchenKind = "FONDA"),
+            listItem(id = "5", name = "Coca", cash = "18.00"),
+        )
+        val result = repository(FakePosApi(), FakeCatalogApi(items)).kitchenProducts()
+
+        val products = assertIs<AppResult.Success<List<SaleProduct>>>(result).value
+        assertEquals(listOf("Agua fresca", "Guisado kilo", "Torta cubana"), products.map { it.name })
+        assertEquals(
+            listOf(SalePriceType.OPEN, SalePriceType.WEIGHT, SalePriceType.PIECE),
+            products.map { it.priceType },
+        )
     }
 
     @Test
@@ -155,7 +184,6 @@ class SaleRepositoryImplTest {
             listItem(id = "2", name = "Coca", cash = "18.00"),
             listItem(id = "3", name = "Sopa", cash = "40.00", kitchenKind = "FONDA"),
             listItem(id = "4", name = "Comida", cash = "63.00", kitchenKind = "FONDA"),
-            listItem(id = "5", name = "Guisado kilo", priceType = "WEIGHT", cash = "200.00", kitchenKind = "FONDA"),
         )
         val catalogApi = FakeCatalogApi(items)
         val result = repository(FakePosApi(), catalogApi).kitchenProducts()
@@ -338,6 +366,202 @@ class SaleRepositoryImplTest {
         assertNull(products[1].listOnsitePrice)
     }
 
+    @Test
+    fun add_line_with_kilos_sends_three_decimal_qty() = runTest {
+        val posApi = FakePosApi()
+        val result = repository(posApi).addLine(7L, weightProduct(), SaleLineInput.Qty(0.35), expectedVersion = 2)
+
+        assertIs<SaleMutationResult.Success>(result)
+        val request = posApi.addLineRequests.single()
+        assertEquals("0.350", request.qty)
+        assertNull(request.amount)
+        assertNull(request.unitPrice)
+        assertEquals(13L, request.productId)
+        assertEquals(3L, request.unitId)
+        assertEquals(2, request.expectedVersion)
+    }
+
+    @Test
+    fun add_line_with_pieces_sends_whole_qty() = runTest {
+        val posApi = FakePosApi()
+        repository(posApi).addLine(7L, product(), SaleLineInput.Qty(2.0), expectedVersion = 1)
+
+        val request = posApi.addLineRequests.single()
+        assertEquals("2", request.qty)
+        assertNull(request.amount)
+        assertNull(request.unitPrice)
+    }
+
+    @Test
+    fun add_line_with_pesos_sends_amount_and_no_qty() = runTest {
+        val posApi = FakePosApi()
+        repository(posApi).addLine(7L, weightProduct(), SaleLineInput.Amount(20.0), expectedVersion = 1)
+
+        val request = posApi.addLineRequests.single()
+        assertEquals("20.00", request.amount)
+        assertNull(request.qty)
+        assertNull(request.unitPrice)
+    }
+
+    @Test
+    fun add_open_line_sends_qty_1_and_unit_price() = runTest {
+        val posApi = FakePosApi()
+        repository(posApi).addLine(7L, openProduct(), SaleLineInput.OpenPrice(3.5), expectedVersion = 1)
+
+        val request = posApi.addLineRequests.single()
+        assertEquals("1", request.qty)
+        assertEquals("3.50", request.unitPrice)
+        assertNull(request.amount)
+    }
+
+    @Test
+    fun update_line_maps_the_three_inputs() = runTest {
+        val posApi = FakePosApi()
+        val repository = repository(posApi)
+
+        val kilos = repository.updateLine(7L, 11L, SaleLineInput.Qty(1.25), expectedVersion = 3)
+        repository.updateLine(7L, 11L, SaleLineInput.Qty(4.0), expectedVersion = 4)
+        repository.updateLine(7L, 11L, SaleLineInput.Amount(12.5), expectedVersion = 5)
+        repository.updateLine(7L, 12L, SaleLineInput.OpenPrice(8.0), expectedVersion = 6)
+
+        assertIs<SaleMutationResult.Success>(kilos)
+        assertEquals(
+            listOf(
+                UpdateLineRequestDto(qty = "1.250", expectedVersion = 3),
+                UpdateLineRequestDto(qty = "4", expectedVersion = 4),
+                UpdateLineRequestDto(amount = "12.50", expectedVersion = 5),
+                UpdateLineRequestDto(qty = "1", unitPrice = "8.00", expectedVersion = 6),
+            ),
+            posApi.updateLineRequests.map { it.second },
+        )
+        assertEquals(listOf(11L, 11L, 11L, 12L), posApi.updateLineRequests.map { it.first })
+    }
+
+    @Test
+    fun draft_lines_map_price_type_with_piece_default() = runTest {
+        val weight = DraftLineDto(
+            id = 11L,
+            lineNo = 1,
+            productId = 13L,
+            unitId = 3L,
+            qty = "0.350000",
+            unitPrice = "126.00",
+            cashUnitPrice = "120.00",
+            productName = "Jamón",
+            unitCode = "KG",
+            lineTotal = "44.10",
+            priceType = "WEIGHT",
+        )
+        val open = weight.copy(id = 12L, lineNo = 2, priceType = "OPEN", qty = "1", unitPrice = "5.00", cashUnitPrice = "5.00")
+        val piece = weight.copy(id = 13L, lineNo = 3, priceType = "PIECE")
+        val legacy = DraftLineDto(
+            id = 14L,
+            lineNo = 4,
+            productId = 5L,
+            unitId = 1L,
+            qty = "1",
+            unitPrice = "22.00",
+            productName = "Cigarro suelto",
+            unitCode = "PZA",
+            lineTotal = "22.00",
+        )
+        val posApi = FakePosApi().apply {
+            openDrafts = AppResult.Success(DraftListDto(listOf(draftDto(id = 7, lines = listOf(weight, open, piece, legacy)))))
+        }
+        val draft = assertIs<AppResult.Success<List<SaleDraft>>>(repository(posApi).openDrafts()).value.single()
+
+        assertEquals(
+            listOf(SalePriceType.WEIGHT, SalePriceType.OPEN, SalePriceType.PIECE, SalePriceType.PIECE),
+            draft.lines.map { it.priceType },
+        )
+        assertEquals(0.35, draft.lines.first().qty)
+    }
+
+    @Test
+    fun varios_product_is_the_active_open_product_named_varios() = runTest {
+        val items = listOf(
+            listItem(id = "1", name = "Varios chicos", priceType = "OPEN", cash = null),
+            listItem(id = "2", name = "Varios", priceType = "PIECE", cash = "10.00"),
+            listItem(id = "3", name = "varios", priceType = "OPEN", cash = null),
+        )
+        val catalogApi = FakeCatalogApi(items)
+        val result = repository(FakePosApi(), catalogApi).variosProduct()
+
+        val varios = assertIs<AppResult.Success<SaleProduct?>>(result).value
+        assertEquals(3L, varios?.id)
+        assertEquals(SalePriceType.OPEN, varios?.priceType)
+        assertEquals("Varios", catalogApi.lastQuery)
+        assertEquals(true, catalogApi.lastActive)
+
+        val none = FakeCatalogApi(items.take(2))
+        assertNull(assertIs<AppResult.Success<SaleProduct?>>(repository(FakePosApi(), none).variosProduct()).value)
+    }
+
+    @Test
+    fun varios_product_passes_failures_through() = runTest {
+        val catalogApi = FakeCatalogApi(failure = AppError.Network("down"))
+        val result = repository(FakePosApi(), catalogApi).variosProduct()
+
+        assertEquals(AppError.Network("down"), assertIs<AppResult.Failure>(result).error)
+    }
+
+    @Test
+    fun product_prices_per_channel_fall_back_to_takeaway() {
+        val product = weightProduct()
+        assertEquals(120.0, product.cashPriceFor(SaleChannel.TAKEAWAY))
+        assertEquals(126.0, product.listPriceFor(SaleChannel.TAKEAWAY))
+        assertEquals(120.0, product.cashPriceFor(SaleChannel.ONSITE))
+        assertEquals(126.0, product.listPriceFor(SaleChannel.ONSITE))
+
+        val onsite = product.copy(cashOnsitePrice = 130.0, listOnsitePrice = 136.5)
+        assertEquals(130.0, onsite.cashPriceFor(SaleChannel.ONSITE))
+        assertEquals(136.5, onsite.listPriceFor(SaleChannel.ONSITE))
+        assertEquals(120.0, onsite.cashPriceFor(SaleChannel.TAKEAWAY))
+    }
+
+    @Test
+    fun sellable_means_open_or_priced() {
+        assertTrue(openProduct().isSellable)
+        assertTrue(weightProduct().isSellable)
+        assertFalse(weightProduct().copy(cashPrice = null).isSellable)
+        assertFalse(product().copy(cashPrice = null).isSellable)
+    }
+
+    @Test
+    fun search_and_barcode_map_the_onsite_cash_price() = runTest {
+        val items = listOf(listItem(id = "3", name = "Coca", cash = "18.00", listOnsite = "20.00", cashOnsite = "19.00"))
+        val searched = assertIs<AppResult.Success<List<SaleProduct>>>(
+            repository(FakePosApi(), FakeCatalogApi(items)).searchProducts("c", 8),
+        ).value.single()
+        assertEquals(19.0, searched.cashOnsitePrice)
+
+        val posApi = FakePosApi().apply { barcode = AppResult.Success(lookup(cashOnsite = "20.00")) }
+        val scanned = assertIs<AppResult.Success<SaleProduct?>>(repository(posApi).findProductByBarcode("7501")).value
+        assertEquals(20.0, scanned?.cashOnsitePrice)
+    }
+
+    private fun weightProduct() = SaleProduct(
+        id = 13L,
+        name = "Jamón",
+        barcode = null,
+        unitId = 3L,
+        cashPrice = 120.0,
+        listPrice = 126.0,
+        listOnsitePrice = null,
+        priceType = SalePriceType.WEIGHT,
+    )
+
+    private fun openProduct() = SaleProduct(
+        id = 3L,
+        name = "Varios",
+        barcode = null,
+        unitId = 1L,
+        cashPrice = null,
+        listPrice = null,
+        listOnsitePrice = null,
+        priceType = SalePriceType.OPEN,
+    )
+
     private fun product() = SaleProduct(
         id = 1L,
         name = "Coca",
@@ -348,7 +572,11 @@ class SaleRepositoryImplTest {
         listOnsitePrice = null,
     )
 
-    private fun lookup(active: Boolean = true, matchedUnitId: Long? = null) = BarcodeLookupResponseDto(
+    private fun lookup(
+        active: Boolean = true,
+        matchedUnitId: Long? = null,
+        cashOnsite: String? = null,
+    ) = BarcodeLookupResponseDto(
         product = BarcodeLookupProductDto(
             id = 10L,
             sku = "SKU",
@@ -358,7 +586,7 @@ class SaleRepositoryImplTest {
             active = active,
             priceType = "PIECE",
             kitchenKind = "FONDA",
-            prices = ProductPricesDto(cashTakeaway = "21.00", listTakeaway = "22.10"),
+            prices = ProductPricesDto(cashTakeaway = "21.00", listTakeaway = "22.10", cashOnsite = cashOnsite),
         ),
         matchedOn = if (matchedUnitId == null) "PRODUCT" else "UOM",
         matchedUom = matchedUnitId?.let { BarcodeLookupUomDto(id = 1L, unitId = it, factorToBase = "1", barcode = "7501") },
@@ -372,6 +600,7 @@ class SaleRepositoryImplTest {
         kitchenKind: String? = null,
         list: String? = cash,
         listOnsite: String? = null,
+        cashOnsite: String? = null,
     ) = ProductListItemDto(
         id = id,
         name = name,
@@ -381,7 +610,9 @@ class SaleRepositoryImplTest {
         active = true,
         priceType = priceType,
         kitchenKind = kitchenKind,
-        prices = cash?.let { ProductPricesDto(cashTakeaway = it, listTakeaway = list ?: it, listOnsite = listOnsite) },
+        prices = cash?.let {
+            ProductPricesDto(cashTakeaway = it, listTakeaway = list ?: it, cashOnsite = cashOnsite, listOnsite = listOnsite)
+        },
     )
 
     private companion object {
@@ -438,6 +669,8 @@ private class FakePosApi : PosApi {
     val checkoutRequests = mutableListOf<CheckoutRequestDto>()
     val channelRequests = mutableListOf<DraftChannelRequestDto>()
     var setChannelResult: AppResult<DraftDto>? = null
+    val addLineRequests = mutableListOf<AddLineRequestDto>()
+    val updateLineRequests = mutableListOf<Pair<Long, UpdateLineRequestDto>>()
     val log = mutableListOf<String>()
 
     override suspend fun currentCashSession(accessToken: String, terminalId: Long): AppResult<Boolean> =
@@ -457,15 +690,20 @@ private class FakePosApi : PosApi {
         return AppResult.Success(draftDto(id = draftId, status = draftStatus))
     }
 
-    override suspend fun addDraftLine(accessToken: String, draftId: Long, request: AddLineRequestDto): AppResult<DraftDto> =
-        addLineResult ?: error("unused")
+    override suspend fun addDraftLine(accessToken: String, draftId: Long, request: AddLineRequestDto): AppResult<DraftDto> {
+        addLineRequests += request
+        return addLineResult ?: AppResult.Success(draftDto(id = draftId, version = request.expectedVersion + 1))
+    }
 
     override suspend fun updateDraftLine(
         accessToken: String,
         draftId: Long,
         lineId: Long,
         request: UpdateLineRequestDto,
-    ): AppResult<DraftDto> = error("unused")
+    ): AppResult<DraftDto> {
+        updateLineRequests += lineId to request
+        return AppResult.Success(draftDto(id = draftId, version = request.expectedVersion + 1))
+    }
 
     override suspend fun removeDraftLine(
         accessToken: String,
@@ -506,9 +744,13 @@ private class FakePosApi : PosApi {
         this.barcode
 }
 
-private class FakeCatalogApi(private val items: List<ProductListItemDto> = emptyList()) : CatalogApi {
+private class FakeCatalogApi(
+    private val items: List<ProductListItemDto> = emptyList(),
+    private val failure: AppError? = null,
+) : CatalogApi {
     var lastQuery: String? = null
     var lastLimit: Int? = null
+    var lastActive: Boolean? = null
 
     override suspend fun listProducts(
         accessToken: String,
@@ -519,6 +761,8 @@ private class FakeCatalogApi(private val items: List<ProductListItemDto> = empty
     ): AppResult<ProductListResponseDto> {
         lastQuery = query
         lastLimit = limit
+        lastActive = active
+        if (failure != null) return AppResult.Failure(failure)
         return AppResult.Success(ProductListResponseDto(items = items.take(limit), total = items.size, limit = limit, offset = offset))
     }
 

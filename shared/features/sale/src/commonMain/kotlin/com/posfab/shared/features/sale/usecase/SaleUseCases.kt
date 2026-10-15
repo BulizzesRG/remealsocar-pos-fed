@@ -5,6 +5,7 @@ import com.posfab.shared.features.sale.domain.CashSessionCheck
 import com.posfab.shared.features.sale.domain.CheckoutResult
 import com.posfab.shared.features.sale.domain.SaleChannel
 import com.posfab.shared.features.sale.domain.SaleDraft
+import com.posfab.shared.features.sale.domain.SaleLineInput
 import com.posfab.shared.features.sale.domain.SaleMutationResult
 import com.posfab.shared.features.sale.domain.SalePaymentType
 import com.posfab.shared.features.sale.domain.SaleProduct
@@ -27,11 +28,21 @@ class SaleUseCases(private val repository: SaleRepository) {
     suspend fun findProductByBarcode(barcode: String): AppResult<SaleProduct?> =
         repository.findProductByBarcode(barcode)
 
-    suspend fun addLine(draftId: Long, product: SaleProduct, qty: Double, expectedVersion: Int): SaleMutationResult =
-        repository.addLine(draftId, product, qty, expectedVersion)
+    suspend fun variosProduct(): AppResult<SaleProduct?> = repository.variosProduct()
 
-    suspend fun updateLineQty(draftId: Long, lineId: Long, qty: Double, expectedVersion: Int): SaleMutationResult =
-        repository.updateLineQty(draftId, lineId, qty, expectedVersion)
+    suspend fun addLine(
+        draftId: Long,
+        product: SaleProduct,
+        input: SaleLineInput,
+        expectedVersion: Int,
+    ): SaleMutationResult = repository.addLine(draftId, product, input, expectedVersion)
+
+    suspend fun updateLine(
+        draftId: Long,
+        lineId: Long,
+        input: SaleLineInput,
+        expectedVersion: Int,
+    ): SaleMutationResult = repository.updateLine(draftId, lineId, input, expectedVersion)
 
     suspend fun removeLine(draftId: Long, lineId: Long, expectedVersion: Int): SaleMutationResult =
         repository.removeLine(draftId, lineId, expectedVersion)

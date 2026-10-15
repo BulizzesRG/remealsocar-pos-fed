@@ -5,6 +5,7 @@ import com.posfab.shared.features.sale.domain.CashSessionCheck
 import com.posfab.shared.features.sale.domain.CheckoutResult
 import com.posfab.shared.features.sale.domain.SaleChannel
 import com.posfab.shared.features.sale.domain.SaleDraft
+import com.posfab.shared.features.sale.domain.SaleLineInput
 import com.posfab.shared.features.sale.domain.SaleMutationResult
 import com.posfab.shared.features.sale.domain.SalePaymentType
 import com.posfab.shared.features.sale.domain.SaleProduct
@@ -17,8 +18,9 @@ interface SaleRepository {
     suspend fun searchProducts(query: String, limit: Int): AppResult<List<SaleProduct>>
     suspend fun kitchenProducts(): AppResult<List<SaleProduct>>
     suspend fun findProductByBarcode(barcode: String): AppResult<SaleProduct?>
-    suspend fun addLine(draftId: Long, product: SaleProduct, qty: Double, expectedVersion: Int): SaleMutationResult
-    suspend fun updateLineQty(draftId: Long, lineId: Long, qty: Double, expectedVersion: Int): SaleMutationResult
+    suspend fun variosProduct(): AppResult<SaleProduct?>
+    suspend fun addLine(draftId: Long, product: SaleProduct, input: SaleLineInput, expectedVersion: Int): SaleMutationResult
+    suspend fun updateLine(draftId: Long, lineId: Long, input: SaleLineInput, expectedVersion: Int): SaleMutationResult
     suspend fun removeLine(draftId: Long, lineId: Long, expectedVersion: Int): SaleMutationResult
     suspend fun resolveLots(draftId: Long): AppResult<SaleDraft>
     suspend fun cancelDraft(draftId: Long, expectedVersion: Int): AppResult<Unit>

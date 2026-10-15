@@ -3,6 +3,7 @@ package com.posfab.shared.network.pos
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 
 class PosContractTest {
@@ -39,6 +40,37 @@ class PosContractTest {
         assertEquals("0", dto.totals.cashDiscount)
         assertEquals("22.00", dto.totals.total)
         assertEquals("TAKEAWAY", dto.channel)
+        assertEquals("PIECE", dto.lines.single().priceType)
+    }
+
+    @Test
+    fun draft_line_with_price_type_decodes() {
+        val body = """
+            {"id":7,"type":"SALE","status":"OPEN","terminalId":1,"version":2,
+             "lines":[{"id":11,"lineNo":1,"productId":13,"unitId":3,"qty":"0.350000",
+             "unitPrice":"126.00","cashUnitPrice":"120.00","productName":"Jamón",
+             "unitCode":"KG","lineTotal":"44.10","priceType":"WEIGHT"}],
+             "totals":{"amount":"44.10","subtotal":"44.10","tax":"0.00","total":"44.10",
+             "cashDiscount":"2.10","cashTotal":"42.00"}}
+        """.trimIndent()
+        val dto = json.decodeFromString<DraftDto>(body)
+        assertEquals("WEIGHT", dto.lines.single().priceType)
+        assertEquals("0.350000", dto.lines.single().qty)
+    }
+
+    @Test
+    fun add_line_request_with_amount_encodes_without_qty() {
+        val request = AddLineRequestDto(productId = 13L, unitId = 3L, amount = "20.00", expectedVersion = 4)
+        val encoded = json.encodeToString(AddLineRequestDto.serializer(), request)
+        assertEquals("""{"productId":13,"unitId":3,"amount":"20.00","expectedVersion":4}""", encoded)
+        assertFalse(encoded.contains("qty"))
+    }
+
+    @Test
+    fun update_line_request_with_amount_encodes_without_qty() {
+        val request = UpdateLineRequestDto(amount = "20.00", expectedVersion = 5)
+        val encoded = json.encodeToString(UpdateLineRequestDto.serializer(), request)
+        assertEquals("""{"amount":"20.00","expectedVersion":5}""", encoded)
     }
 
     @Test
