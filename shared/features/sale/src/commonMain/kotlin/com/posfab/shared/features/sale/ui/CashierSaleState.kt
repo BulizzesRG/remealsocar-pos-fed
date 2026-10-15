@@ -56,6 +56,8 @@ data class CashierSaleState(
     val errorMessage: String? = null,
     val prompt: SalePrompt? = null,
     val promptInput: String = "",
+    val promptInputRejected: Boolean = false,
+    val paidInputRejected: Boolean = false,
     val variosProduct: SaleProduct? = null,
 ) {
     val draft: SaleDraft? get() = activeDraftId?.let(::accountById)

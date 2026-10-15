@@ -42,12 +42,209 @@ import kotlin.test.assertTrue
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class CashierSaleViewModelTest {
     private val dispatcher = StandardTestDispatcher()
+    private var clock = 0L
 
     private fun TestScope.start(repo: FakeSaleRepository): CashierSaleViewModel {
-        val vm = CashierSaleViewModel(SaleUseCases(repo), dispatcher = dispatcher)
+        val vm = CashierSaleViewModel(SaleUseCases(repo), now = { clock }, dispatcher = dispatcher)
         vm.load()
         advanceUntilIdle()
         return vm
+    }
+
+    private fun typePrompt(vm: CashierSaleViewModel, text: String, stepMs: Long) {
+        text.forEach { char ->
+            clock += stepMs
+            vm.onPromptInputChange(vm.state.value.promptInput + char)
+        }
+    }
+
+    private fun typePaid(vm: CashierSaleViewModel, text: String, stepMs: Long) {
+        text.forEach { char ->
+            clock += stepMs
+            vm.onPaidInputChange(vm.state.value.paidInput + char)
+        }
+    }
+
+    @Test
+    fun scan_burst_in_the_weight_prompt_closes_it_and_scans_the_code() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.jamon)
+        typePrompt(vm, "0.5", HUMAN_MS)
+
+        clock += PAUSE_MS
+        typePrompt(vm, repo.cigarro.barcode!!, SCANNER_MS)
+        clock += SCANNER_MS
+        vm.confirmPrompt()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertNull(state.prompt)
+        assertEquals("", state.promptInput)
+        assertFalse(state.promptInputRejected)
+        assertEquals(listOf(repo.cigarro.id), state.draft!!.lines.map { it.productId })
+        assertEquals(1, repo.addLineCalls)
+    }
+
+    @Test
+    fun scan_burst_of_a_weight_product_reopens_the_prompt_for_it() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.varios)
+
+        clock += PAUSE_MS
+        typePrompt(vm, repo.jamon.barcode!!, SCANNER_MS)
+        clock += SCANNER_MS
+        vm.confirmPrompt()
+        advanceUntilIdle()
+
+        val prompt = assertIs<SalePrompt.Weight>(vm.state.value.prompt)
+        assertEquals(repo.jamon, prompt.product)
+        assertEquals(WeightMode.KILOS, prompt.mode)
+        assertEquals("", vm.state.value.promptInput)
+        assertEquals(0, repo.addLineCalls)
+    }
+
+    @Test
+    fun scan_burst_of_an_unknown_code_shows_not_found() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.jamon)
+
+        clock += PAUSE_MS
+        typePrompt(vm, "9999999999999", SCANNER_MS)
+        clock += SCANNER_MS
+        vm.confirmPrompt()
+        advanceUntilIdle()
+
+        assertNull(vm.state.value.prompt)
+        assertEquals(SaleStrings.notFoundWithCode("9999999999999"), vm.state.value.errorMessage)
+        assertEquals(0, repo.addLineCalls)
+    }
+
+    @Test
+    fun typing_fast_but_short_is_not_a_scan() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.jamon)
+        vm.setWeightMode(WeightMode.PESOS)
+
+        clock += PAUSE_MS
+        typePrompt(vm, "123", SCANNER_MS)
+        assertEquals("123", vm.state.value.promptInput)
+        clock += SCANNER_MS
+        vm.confirmPrompt()
+        advanceUntilIdle()
+
+        assertEquals(SaleLineInput.Amount(123.0), repo.lastLineInput)
+        assertEquals(1, repo.addLineCalls)
+    }
+
+    @Test
+    fun rejected_prompt_input_is_not_added() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.jamon)
+
+        typePrompt(vm, "1234567891234", HUMAN_MS)
+        assertEquals("12", vm.state.value.promptInput)
+        assertTrue(vm.state.value.promptInputRejected)
+
+        clock += SCANNER_MS
+        vm.confirmPrompt()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(0, repo.addLineCalls)
+        assertEquals(SaleStrings.INPUT_REJECTED, state.errorMessage)
+        assertEquals("", state.promptInput)
+        assertFalse(state.promptInputRejected)
+        assertNotNull(state.prompt)
+    }
+
+    @Test
+    fun backspace_after_overflow_clears_the_rejection() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.jamon)
+
+        typePrompt(vm, "0.3456", HUMAN_MS)
+        assertTrue(vm.state.value.promptInputRejected)
+        clock += HUMAN_MS
+        vm.onPromptInputChange("0.345")
+        assertFalse(vm.state.value.promptInputRejected)
+
+        vm.confirmPrompt()
+        advanceUntilIdle()
+
+        assertEquals(SaleLineInput.Qty(0.345), repo.lastLineInput)
+        assertNull(vm.state.value.errorMessage)
+    }
+
+    @Test
+    fun scan_burst_in_the_charge_window_restores_the_paid_amount_and_warns() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.kitchenPool.first())
+        advanceUntilIdle()
+        vm.startCharge()
+
+        typePaid(vm, "50", HUMAN_MS)
+        clock += PAUSE_MS
+        typePaid(vm, "1234567891234", SCANNER_MS)
+        clock += SCANNER_MS
+        vm.confirmCharge()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals("50", state.paidInput)
+        assertFalse(state.paidInputRejected)
+        assertEquals(SaleStrings.FINISH_CHARGE_FIRST, state.notice)
+        assertEquals(SalePhase.Charging, state.phase)
+        assertEquals(0, repo.checkoutCalls)
+    }
+
+    @Test
+    fun rejected_paid_input_does_not_charge() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.kitchenPool.first())
+        advanceUntilIdle()
+        vm.startCharge()
+
+        typePaid(vm, "1234567", HUMAN_MS)
+        assertEquals("123456", vm.state.value.paidInput)
+        assertTrue(vm.state.value.paidInputRejected)
+
+        clock += SCANNER_MS
+        vm.confirmCharge()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(0, repo.checkoutCalls)
+        assertEquals(SaleStrings.INPUT_REJECTED, state.errorMessage)
+        assertEquals("", state.paidInput)
+        assertFalse(state.paidInputRejected)
+        assertEquals(SalePhase.Charging, state.phase)
+    }
+
+    @Test
+    fun pay_exact_is_never_treated_as_a_scan() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.kitchenPool.first())
+        advanceUntilIdle()
+        vm.startCharge()
+
+        clock += PAUSE_MS
+        typePaid(vm, "5000000", SCANNER_MS)
+        clock += SCANNER_MS
+        vm.payExact()
+        advanceUntilIdle()
+
+        assertEquals(1, repo.checkoutCalls)
+        assertEquals(63.0, repo.lastPaidAmount)
+        assertEquals(SalePhase.Done, vm.state.value.phase)
     }
 
     @Test
@@ -1752,6 +1949,12 @@ class CashierSaleViewModelTest {
         assertEquals(SalePaymentType.CASH, result.paymentType)
         assertEquals(40.0, result.totalCharged)
         assertEquals(60.0, result.change)
+    }
+
+    private companion object {
+        const val HUMAN_MS = 120L
+        const val SCANNER_MS = 5L
+        const val PAUSE_MS = 1_000L
     }
 }
 

@@ -51,6 +51,7 @@ internal object SaleStrings {
     const val NOT_ALLOWED = "No tienes permiso para hacer esto"
     const val TOO_MANY_REQUESTS = "Demasiados intentos. Espera unos segundos"
     const val FINISH_CHARGE_FIRST = "Termina el cobro primero"
+    const val INPUT_REJECTED = "El valor no es válido, vuelve a escribirlo"
     const val ACCOUNT_CLOSED = "Esta cuenta ya se cerró"
     const val CHECKOUT_CONFLICT = "No se pudo cobrar. La venta se volvió a cargar, revísala y cobra de nuevo"
     const val POSSIBLY_CHARGED = "Es posible que la venta ya se haya cobrado. Revisa Ventas del día"

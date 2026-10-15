@@ -40,6 +40,7 @@ class CashierSaleViewModel(
     private val cardPaymentAdapter: CardPaymentAdapter = NoOpCardPaymentAdapter,
     private val receiptPrinterAdapter: ReceiptPrinterAdapter = NoOpReceiptPrinterAdapter,
     val onNavigateToCash: () -> Unit = {},
+    private val now: () -> Long = { Clock.System.now().toEpochMilliseconds() },
     dispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : BaseViewModel(dispatcher) {
     private val _state = MutableStateFlow(CashierSaleState())
@@ -48,6 +49,8 @@ class CashierSaleViewModel(
     private val mutations = Channel<suspend () -> Unit>(Channel.UNLIMITED)
     private var loadJob: Job? = null
     private var searchJob: Job? = null
+    private val promptScans = ScanBurstDetector()
+    private val paidScans = ScanBurstDetector()
 
     init {
         scope.launch {
@@ -68,6 +71,8 @@ class CashierSaleViewModel(
         if (_state.value.isCheckoutInFlight) return
         loadJob?.cancel()
         searchJob?.cancel()
+        promptScans.reset()
+        paidScans.reset()
         loadJob = scope.launch {
             _state.update { CashierSaleState(phase = SalePhase.Loading, pendingMutations = it.pendingMutations) }
             val phaseAfterCheck = when (val session = saleUseCases.cashSession()) {
@@ -135,6 +140,8 @@ class CashierSaleViewModel(
                 is AppResult.Failure -> _state.update { it.copy(errorMessage = SaleErrorText.from(created.error)) }
                 is AppResult.Success -> {
                     upsertAccount(created.value)
+                    promptScans.reset()
+                    paidScans.reset()
                     _state.update { it.activating(created.value.id) }
                 }
             }
@@ -193,35 +200,46 @@ class CashierSaleViewModel(
     }
 
     fun onPromptInputChange(value: String) {
+        val snapshot = _state.value
+        if (snapshot.prompt != null) promptScans.onChange(snapshot.promptInput, value, now())
         _state.update { current ->
             val prompt = current.prompt ?: return@update current
             val kilos = prompt is SalePrompt.Weight && prompt.mode == WeightMode.KILOS
-            current.copy(
-                promptInput = if (kilos) sanitizeKilos(value) else sanitizeAmount(value, MAX_PROMPT_AMOUNT_DIGITS),
-            )
+            val sanitized = if (kilos) sanitizeKilos(value) else sanitizeAmount(value, MAX_PROMPT_AMOUNT_DIGITS)
+            current.copy(promptInput = sanitized, promptInputRejected = sanitized != value)
         }
     }
 
     fun setWeightMode(mode: WeightMode) {
+        promptScans.reset()
         _state.update { current ->
             val prompt = current.prompt as? SalePrompt.Weight ?: return@update current
-            current.copy(prompt = prompt.copy(mode = mode), promptInput = "")
+            current.copy(prompt = prompt.copy(mode = mode), promptInput = "", promptInputRejected = false)
         }
     }
 
     fun pickQuickAmount(amount: Int) {
-        _state.update { if (it.prompt != null) it.copy(promptInput = amount.toString()) else it }
+        promptScans.reset()
+        _state.update {
+            if (it.prompt != null) it.copy(promptInput = amount.toString(), promptInputRejected = false) else it
+        }
     }
 
     fun pickWeight(kilos: Double) {
+        promptScans.reset()
         _state.update { current ->
             val prompt = current.prompt as? SalePrompt.Weight ?: return@update current
-            current.copy(prompt = prompt.copy(mode = WeightMode.KILOS), promptInput = SaleStrings.kilosInput(kilos))
+            current.copy(
+                prompt = prompt.copy(mode = WeightMode.KILOS),
+                promptInput = SaleStrings.kilosInput(kilos),
+                promptInputRejected = false,
+            )
         }
     }
 
     fun dismissPrompt() {
-        _state.update { it.copy(prompt = null, promptInput = "") }
+        promptScans.reset()
+        _state.update { it.copy(prompt = null, promptInput = "", promptInputRejected = false) }
     }
 
     fun changeSelectedLine() {
@@ -242,6 +260,17 @@ class CashierSaleViewModel(
     }
 
     fun confirmPrompt() {
+        promptScans.scanOnConfirm(now())?.let { scan ->
+            dismissPrompt()
+            scope.launch { lookupBarcode(scan.code) }
+            return
+        }
+        if (_state.value.promptInputRejected) {
+            _state.update {
+                it.copy(promptInput = "", promptInputRejected = false, errorMessage = SaleStrings.INPUT_REJECTED)
+            }
+            return
+        }
         val snapshot = _state.value
         val prompt = snapshot.prompt ?: return
         val value = snapshot.promptValue ?: return
@@ -368,12 +397,14 @@ class CashierSaleViewModel(
     }
 
     fun startCharge() {
+        paidScans.reset()
         _state.update {
             if (it.canCharge) {
                 it.copy(
                     phase = SalePhase.Charging,
                     paymentType = SalePaymentType.CASH,
                     paidInput = "",
+                    paidInputRejected = false,
                     errorMessage = null,
                     notice = null,
                 )
@@ -384,6 +415,7 @@ class CashierSaleViewModel(
     }
 
     fun selectPaymentType(type: SalePaymentType) {
+        paidScans.reset()
         _state.update {
             if (
                 it.phase == SalePhase.Charging &&
@@ -391,7 +423,7 @@ class CashierSaleViewModel(
                 !it.isPaidLocked &&
                 it.paymentType != type
             ) {
-                it.copy(paymentType = type, paidInput = "", errorMessage = null)
+                it.copy(paymentType = type, paidInput = "", paidInputRejected = false, errorMessage = null)
             } else {
                 it
             }
@@ -416,27 +448,34 @@ class CashierSaleViewModel(
 
     fun payExact() {
         if (_state.value.isPaidLocked) return
-        _state.update { it.copy(paidInput = formatAmount(it.amountDue)) }
+        paidScans.reset()
+        _state.update { it.copy(paidInput = formatAmount(it.amountDue), paidInputRejected = false) }
         confirmCharge()
     }
 
     fun payWith(amount: Int) {
         if (_state.value.isPaidLocked) return
-        _state.update { it.copy(paidInput = amount.toString(), errorMessage = null) }
+        paidScans.reset()
+        _state.update { it.copy(paidInput = amount.toString(), paidInputRejected = false, errorMessage = null) }
     }
 
     fun onPaidInputChange(value: String) {
-        if (_state.value.isPaidLocked) return
-        _state.update { it.copy(paidInput = sanitizeAmount(value, MAX_AMOUNT_DIGITS), errorMessage = null) }
+        val snapshot = _state.value
+        if (snapshot.isPaidLocked) return
+        paidScans.onChange(snapshot.paidInput, value, now())
+        val sanitized = sanitizeAmount(value, MAX_AMOUNT_DIGITS)
+        _state.update { it.copy(paidInput = sanitized, paidInputRejected = sanitized != value, errorMessage = null) }
     }
 
     fun cancelCharge() {
+        paidScans.reset()
         _state.update {
             if (it.phase == SalePhase.Charging && !it.isCheckoutInFlight) {
                 it.copy(
                     phase = SalePhase.Selling,
                     paymentType = SalePaymentType.CASH,
                     paidInput = "",
+                    paidInputRejected = false,
                     checkoutIdempotencyKey = null,
                     errorMessage = null,
                 )
@@ -447,6 +486,22 @@ class CashierSaleViewModel(
     }
 
     fun confirmCharge() {
+        paidScans.scanOnConfirm(now())?.let { scan ->
+            _state.update {
+                it.copy(
+                    paidInput = scan.valueBeforeBurst,
+                    paidInputRejected = false,
+                    notice = SaleStrings.FINISH_CHARGE_FIRST,
+                )
+            }
+            return
+        }
+        if (_state.value.paidInputRejected) {
+            _state.update {
+                it.copy(paidInput = "", paidInputRejected = false, errorMessage = SaleStrings.INPUT_REJECTED)
+            }
+            return
+        }
         val snapshot = _state.value
         if (snapshot.phase != SalePhase.Charging || !snapshot.canConfirmCharge || snapshot.isBusy) return
         val draft = snapshot.draft ?: return
@@ -513,15 +568,19 @@ class CashierSaleViewModel(
                         checkoutIdempotencyKey = null,
                         paymentType = SalePaymentType.CASH,
                         paidInput = "",
+                        paidInputRejected = false,
                         selectedLineId = null,
                         qtyInput = "",
                         confirm = null,
                         prompt = null,
                         promptInput = "",
+                        promptInputRejected = false,
                         notice = null,
                         errorMessage = null,
                     )
                 }
+                promptScans.reset()
+                paidScans.reset()
                 runHardwareHooks(charged, chargedDraft.lines)
             }
         }
@@ -541,12 +600,14 @@ class CashierSaleViewModel(
             }
             is AppResult.Success -> {
                 val draft = refreshed.value
+                paidScans.reset()
                 _state.update {
                     it.copy(
                         phase = SalePhase.Selling,
                         isCheckoutInFlight = false,
                         checkoutIdempotencyKey = null,
                         paidInput = "",
+                        paidInputRejected = false,
                         paymentType = SalePaymentType.CASH,
                     )
                 }
@@ -618,11 +679,18 @@ class CashierSaleViewModel(
         } else {
             SalePrompt.OpenAmount(product, lineId)
         }
+        promptScans.reset()
         _state.update { current ->
             if (current.confirm != null) {
                 current
             } else {
-                current.copy(prompt = prompt, promptInput = input, errorMessage = null, notice = null)
+                current.copy(
+                    prompt = prompt,
+                    promptInput = input,
+                    promptInputRejected = false,
+                    errorMessage = null,
+                    notice = null,
+                )
             }
         }
     }
@@ -764,7 +832,10 @@ class CashierSaleViewModel(
         }
     }
 
-    private fun removeAccount(draftId: Long): Long? = _state.updateAndGet { it.withoutAccount(draftId) }.activeDraftId
+    private fun removeAccount(draftId: Long): Long? {
+        promptScans.reset()
+        return _state.updateAndGet { it.withoutAccount(draftId) }.activeDraftId
+    }
 
     private suspend fun closeAccount(draftId: Long, notice: String?) {
         val wasActive = _state.value.activeDraftId == draftId
@@ -775,20 +846,17 @@ class CashierSaleViewModel(
 
     private suspend fun ensureActiveAccount() {
         if (_state.value.draft != null) return
+        promptScans.reset()
         val fallback = _state.value.accounts.firstOrNull()
         if (fallback != null) {
-            _state.update {
-                it.copy(activeDraftId = fallback.id, selectedLineId = null, qtyInput = "", prompt = null, promptInput = "")
-            }
+            _state.update { it.switchedTo(fallback.id) }
             return
         }
         when (val created = saleUseCases.newDraft()) {
             is AppResult.Failure -> _state.update { it.copy(errorMessage = SaleErrorText.from(created.error)) }
             is AppResult.Success -> {
                 upsertAccount(created.value)
-                _state.update {
-                    it.copy(activeDraftId = created.value.id, selectedLineId = null, qtyInput = "", prompt = null, promptInput = "")
-                }
+                _state.update { it.switchedTo(created.value.id) }
             }
         }
     }
@@ -797,6 +865,8 @@ class CashierSaleViewModel(
         if (_state.value.phase != SalePhase.Done) return
         ensureActiveAccount()
         val active = _state.value.activeDraftId ?: return
+        promptScans.reset()
+        paidScans.reset()
         _state.update { it.activating(active) }
     }
 
@@ -827,8 +897,18 @@ class CashierSaleViewModel(
             qtyInput = "",
             prompt = null,
             promptInput = "",
+            promptInputRejected = false,
         )
     }
+
+    private fun CashierSaleState.switchedTo(draftId: Long): CashierSaleState = copy(
+        activeDraftId = draftId,
+        selectedLineId = null,
+        qtyInput = "",
+        prompt = null,
+        promptInput = "",
+        promptInputRejected = false,
+    )
 
     private fun CashierSaleState.activating(draftId: Long): CashierSaleState = copy(
         phase = SalePhase.Selling,
@@ -838,8 +918,10 @@ class CashierSaleViewModel(
         qtyInput = "",
         prompt = null,
         promptInput = "",
+        promptInputRejected = false,
         paymentType = SalePaymentType.CASH,
         paidInput = "",
+        paidInputRejected = false,
         checkoutIdempotencyKey = null,
         notice = null,
         errorMessage = null,
