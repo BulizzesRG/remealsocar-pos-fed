@@ -9,9 +9,16 @@ import com.posfab.shared.core.model.Permission
 import com.posfab.shared.core.model.UserRole
 import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
+import com.posfab.shared.features.cash.domain.CashCloseResult
+import com.posfab.shared.features.cash.domain.CashDrawerStatus
+import com.posfab.shared.features.cash.domain.CashPayout
 import com.posfab.shared.features.cash.domain.CashSession
 import com.posfab.shared.features.cash.domain.CashSessionStatus
+import com.posfab.shared.features.cash.domain.CashSessionSummary
+import com.posfab.shared.features.cash.domain.CashSummary
 import com.posfab.shared.features.cash.domain.DailyCashReport
+import com.posfab.shared.features.cash.domain.DrawerDifference
+import com.posfab.shared.features.cash.domain.PayoutReason
 import com.posfab.shared.features.cash.repository.CashRepository
 import com.posfab.shared.features.cash.usecase.CashUseCases
 import com.posfab.shared.features.reports.common.ReportsUseCases
@@ -42,6 +49,9 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
+import kotlin.time.Instant
+
+private const val EXPECTED_IN_DRAWER = 1060.0
 
 class StoreRolloutSmokeTest {
     @Test
@@ -56,7 +66,7 @@ class StoreRolloutSmokeTest {
         assertTrue(cashierSession.user.roles.contains(UserRole.CASHIER))
 
         val opened = cash.open(1L, 1L, 1000.0)
-        assertIs<AppResult.Success<CashSession>>(opened)
+        assertIs<AppResult.Success<Unit>>(opened)
 
         assertEquals(CashSessionCheck.Open, (sale.cashSession() as AppResult.Success).value)
 
@@ -72,7 +82,8 @@ class StoreRolloutSmokeTest {
         assertEquals(20.0, checkoutCash.value.change)
 
         val closed = cash.close(1L, 1060.0)
-        assertIs<AppResult.Success<CashSession>>(closed)
+        assertIs<AppResult.Success<CashCloseResult>>(closed)
+        assertEquals(DrawerDifference.Cuadra, closed.value.difference)
 
         val managerSession = (login("manager", "pwd", "ADMIN") as AppResult.Success).value
         assertTrue(managerSession.user.roles.contains(UserRole.MANAGER))
@@ -165,35 +176,52 @@ private class FakeStoreBackend :
         )
     )
 
+    override suspend fun summary(terminalId: Long): AppResult<CashSummary> =
+        AppResult.Success(CashSummary(CashDrawerStatus.OPEN, null, sessionSummary()))
+
     override suspend fun openSession(
         terminalId: Long,
         businessUnitId: Long,
         openingAmount: Double,
-    ): AppResult<CashSession> = AppResult.Success(
-        CashSession(
-            id = 1L,
-            status = CashSessionStatus.OPEN,
-            terminalId = terminalId,
-            openingAmount = openingAmount,
-            closingAmount = null,
-            openedAt = "2026-03-01T08:00:00",
-            closedAt = null,
+    ): AppResult<Unit> = AppResult.Success(Unit)
+
+    override suspend fun closeSession(terminalId: Long, countedAmount: Double): AppResult<CashCloseResult> =
+        AppResult.Success(
+            CashCloseResult(
+                openedAt = Instant.parse("2026-03-01T14:00:00Z"),
+                closedAt = Instant.parse("2026-03-02T00:00:00Z"),
+                summary = sessionSummary(),
+                countedAmount = countedAmount,
+                delta = countedAmount - EXPECTED_IN_DRAWER,
+            ),
         )
+
+    override suspend fun payout(
+        terminalId: Long,
+        idempotencyKey: String,
+        amount: Double,
+        reason: PayoutReason,
+        notes: String?,
+    ): AppResult<CashPayout> =
+        AppResult.Success(CashPayout(1L, amount, reason, notes, Instant.parse("2026-03-01T18:00:00Z")))
+
+    private fun sessionSummary() = CashSessionSummary(
+        sessionId = 1L,
+        openedAt = Instant.parse("2026-03-01T14:00:00Z"),
+        openingAmount = 1000.0,
+        cashSales = EXPECTED_IN_DRAWER - 1000.0,
+        creditPayments = 0.0,
+        payouts = 0.0,
+        otherOut = 0.0,
+        expectedInDrawer = EXPECTED_IN_DRAWER,
+        transferSales = 0.0,
+        cardSales = 0.0,
+        creditSales = 0.0,
+        openAccounts = 0,
+        payoutList = emptyList(),
     )
 
-    override suspend fun closeSession(terminalId: Long, closingAmount: Double): AppResult<CashSession> = AppResult.Success(
-        CashSession(
-            id = 1L,
-            status = CashSessionStatus.CLOSED,
-            terminalId = terminalId,
-            openingAmount = 1000.0,
-            closingAmount = closingAmount,
-            openedAt = "2026-03-01T08:00:00",
-            closedAt = "2026-03-01T18:00:00",
-        )
-    )
-
-    override suspend fun getDailyReport(date: String, terminalId: Long): AppResult<DailyCashReport> = AppResult.Success(
+    private fun dailyReport(date: String, terminalId: Long): AppResult<DailyCashReport> = AppResult.Success(
         DailyCashReport(
             date = date,
             terminalId = terminalId,
@@ -346,7 +374,7 @@ private class FakeStoreBackend :
 
     override suspend fun salesByDate(date: String, terminalId: String): AppResult<List<DailySaleItem>> = AppResult.Success(emptyList())
     override suspend fun cashSummary(date: String, terminalId: String): AppResult<DailyCashReport> =
-        getDailyReport(date, terminalId.toLongOrNull() ?: 1L)
+        dailyReport(date, terminalId.toLongOrNull() ?: 1L)
 
     override suspend fun dailyTotals(dateFrom: String, dateTo: String): AppResult<List<ManagerDailyTotal>> = AppResult.Success(emptyList())
     override suspend fun topDebtors(limit: Int?): AppResult<List<DebtorItem>> = AppResult.Success(emptyList())

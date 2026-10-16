@@ -79,6 +79,7 @@ fun PosTextField(
     singleLine: Boolean = true,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     visualTransformation: VisualTransformation = VisualTransformation.None,
+    textStyle: TextStyle = LocalTextStyle.current,
 ) {
     OutlinedTextField(
         value = value,
@@ -97,6 +98,7 @@ fun PosTextField(
         singleLine = singleLine,
         keyboardOptions = keyboardOptions,
         visualTransformation = visualTransformation,
+        textStyle = textStyle,
         colors = posTextFieldColors(),
     )
 }
@@ -115,6 +117,7 @@ fun PosTextField(
     singleLine: Boolean = true,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     visualTransformation: VisualTransformation = VisualTransformation.None,
+    textStyle: TextStyle = LocalTextStyle.current,
 ) {
     OutlinedTextField(
         value = value,
@@ -133,6 +136,7 @@ fun PosTextField(
         singleLine = singleLine,
         keyboardOptions = keyboardOptions,
         visualTransformation = visualTransformation,
+        textStyle = textStyle,
         colors = posTextFieldColors(),
     )
 }

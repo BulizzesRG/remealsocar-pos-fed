@@ -9,6 +9,7 @@ class PermissionTest {
     fun valid_value_maps_to_permission() {
         assertEquals(Permission.OPEN_CASH, Permission.fromRaw("OPEN_CASH"))
         assertEquals(Permission.MANAGE_USERS, Permission.fromRaw("MANAGE_USERS"))
+        assertEquals(Permission.MANAGE_CASH, Permission.fromRaw("MANAGE_CASH"))
     }
 
     @Test

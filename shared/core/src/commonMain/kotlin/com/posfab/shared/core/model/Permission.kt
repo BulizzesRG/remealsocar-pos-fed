@@ -10,6 +10,7 @@ enum class Permission {
     VIEW_SALES,
     VIEW_CREDIT,
     MANAGE_CREDIT,
+    MANAGE_CASH,
     MANAGE_USERS;
 
     companion object {

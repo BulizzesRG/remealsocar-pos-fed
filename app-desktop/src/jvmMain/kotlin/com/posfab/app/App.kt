@@ -21,8 +21,8 @@ import com.posfab.shared.core.device.DeviceStorage
 import com.posfab.shared.features.catalog.common.CatalogUseCases
 import com.posfab.shared.features.catalog.ui.CatalogScreen
 import com.posfab.shared.features.catalog.ui.CatalogViewModel
-import com.posfab.shared.features.cash.ui.CashSessionScreen
-import com.posfab.shared.features.cash.ui.CashSessionViewModel
+import com.posfab.shared.features.cash.ui.CashScreen
+import com.posfab.shared.features.cash.ui.CashViewModel
 import com.posfab.shared.features.cash.usecase.CashUseCases
 import com.posfab.shared.features.credit.ui.CreditScreen
 import com.posfab.shared.features.credit.ui.CreditViewModel
@@ -114,11 +114,11 @@ fun PosApp(controller: AppStateController) {
                         )
                     }
                     val cashViewModel = remember(screen.session) {
-                        CashSessionViewModel(
+                        CashViewModel(
+                            cashUseCases = koin.get<CashUseCases>(),
                             terminalId = device.terminalId,
                             businessUnitId = device.businessUnitId,
-                            cashUseCases = koin.get<CashUseCases>(),
-                            onNavigateToPos = { shellViewModel.select(ShellRoute.SELL) },
+                            permissions = screen.session.user.permissions,
                         )
                     }
                     val creditViewModel = remember(screen.session) {
@@ -137,7 +137,7 @@ fun PosApp(controller: AppStateController) {
                         viewModel = shellViewModel,
                         onLoggedOut = controller::onLoggedOut,
                         sellContent = { CashierSaleScreen(saleViewModel) },
-                        cashContent = { CashSessionScreen(cashViewModel) },
+                        cashContent = { CashScreen(cashViewModel) },
                         fiadoContent = { CreditScreen(creditViewModel) },
                         dailySalesContent = { DailyHistoryScreen(historyViewModel) },
                         productsContent = { CatalogScreen(catalogViewModel) },

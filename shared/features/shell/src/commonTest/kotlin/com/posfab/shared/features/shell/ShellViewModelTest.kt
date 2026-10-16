@@ -9,9 +9,12 @@ import com.posfab.shared.core.model.Permission
 import com.posfab.shared.core.model.UserRole
 import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
+import com.posfab.shared.features.cash.domain.CashCloseResult
+import com.posfab.shared.features.cash.domain.CashPayout
 import com.posfab.shared.features.cash.domain.CashSession
 import com.posfab.shared.features.cash.domain.CashSessionStatus
-import com.posfab.shared.features.cash.domain.DailyCashReport
+import com.posfab.shared.features.cash.domain.CashSummary
+import com.posfab.shared.features.cash.domain.PayoutReason
 import com.posfab.shared.features.cash.repository.CashRepository
 import com.posfab.shared.features.cash.usecase.CashUseCases
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -207,17 +210,25 @@ private class FakeCashRepository(
         return result
     }
 
+    override suspend fun summary(terminalId: Long): AppResult<CashSummary> =
+        AppResult.Failure(AppError.Unknown("not implemented"))
+
     override suspend fun openSession(
         terminalId: Long,
         businessUnitId: Long,
         openingAmount: Double,
-    ): AppResult<CashSession> = AppResult.Failure(AppError.Unknown("not implemented"))
+    ): AppResult<Unit> = AppResult.Failure(AppError.Unknown("not implemented"))
 
-    override suspend fun closeSession(terminalId: Long, closingAmount: Double): AppResult<CashSession> =
+    override suspend fun closeSession(terminalId: Long, countedAmount: Double): AppResult<CashCloseResult> =
         AppResult.Failure(AppError.Unknown("not implemented"))
 
-    override suspend fun getDailyReport(date: String, terminalId: Long): AppResult<DailyCashReport> =
-        AppResult.Failure(AppError.Unknown("not implemented"))
+    override suspend fun payout(
+        terminalId: Long,
+        idempotencyKey: String,
+        amount: Double,
+        reason: PayoutReason,
+        notes: String?,
+    ): AppResult<CashPayout> = AppResult.Failure(AppError.Unknown("not implemented"))
 }
 
 private class FakeAuthRepository : AuthRepository {
