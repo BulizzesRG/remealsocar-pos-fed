@@ -1,6 +1,7 @@
 package com.posfab.shared.features.sale.ui
 
 import com.posfab.shared.core.BaseViewModel
+import com.posfab.shared.core.input.PhoneInput
 import com.posfab.shared.core.logging.AppLogger
 import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
@@ -519,13 +520,24 @@ class CashierSaleViewModel(
         }
     }
 
+    fun onNewCustomerNickname(value: String) {
+        _state.update { current ->
+            val form = current.credit.newCustomer
+            if (form == null || form.isSaving) {
+                current
+            } else {
+                current.copy(credit = current.credit.copy(newCustomer = form.copy(nickname = value)), errorMessage = null)
+            }
+        }
+    }
+
     fun onNewCustomerPhone(value: String) {
         _state.update { current ->
             val form = current.credit.newCustomer
             if (form == null || form.isSaving) {
                 current
             } else {
-                current.copy(credit = current.credit.copy(newCustomer = form.copy(phone = value)), errorMessage = null)
+                current.copy(credit = current.credit.copy(newCustomer = form.copy(phone = PhoneInput.sanitize(value))), errorMessage = null)
             }
         }
     }
@@ -538,6 +550,11 @@ class CashierSaleViewModel(
             _state.update { it.copy(errorMessage = SaleStrings.CUSTOMER_NAME_REQUIRED) }
             return
         }
+        if (!PhoneInput.isComplete(form.phone.trim())) {
+            _state.update { it.copy(errorMessage = SaleStrings.CUSTOMER_PHONE_INVALID) }
+            return
+        }
+        val nickname = form.nickname.trim().takeIf { it.isNotEmpty() }
         val phone = form.phone.trim().takeIf { it.isNotEmpty() }
         val previous = _state.getAndUpdate { current ->
             val pending = current.credit.newCustomer
@@ -549,7 +566,7 @@ class CashierSaleViewModel(
         }
         if (previous.credit.newCustomer?.isSaving != false) return
         scope.launch {
-            val result = guarded { saleUseCases.createCustomer(name, phone) }
+            val result = guarded { saleUseCases.createCustomer(name, nickname, phone) }
             _state.update { current ->
                 val pending = current.credit.newCustomer ?: return@update current
                 when (result) {
@@ -873,7 +890,7 @@ class CashierSaleViewModel(
             is AppResult.Success -> fetched.value.balance
             is AppResult.Failure -> roundMoney(customer.balance + result.totalCharged)
         }
-        return result.copy(customerName = customer.name, customerBalanceAfter = balanceAfter)
+        return result.copy(customerName = customer.displayName, customerBalanceAfter = balanceAfter)
     }
 
     private suspend fun searchCustomers(query: String, pickSingleMatch: Boolean) {
@@ -913,7 +930,7 @@ class CashierSaleViewModel(
             val selected = credit.customer
             if (selected == null || selected.id != customer.id) {
                 val notice = (result as? AppResult.Success)?.value?.let {
-                    SaleStrings.abonoRegistered(it.amount, customer.name, it.balance)
+                    SaleStrings.abonoRegistered(it.amount, customer.displayName, it.balance)
                 }
                 return@update current.copy(
                     credit = credit.copy(isAbonoInFlight = false),
@@ -928,7 +945,7 @@ class CashierSaleViewModel(
                         abonoInputRejected = false,
                         isAbonoInFlight = false,
                         abonoKey = null,
-                        lastAbono = LastAbono(result.value.amount, selected.name, result.value.balance),
+                        lastAbono = LastAbono(result.value.amount, selected.displayName, result.value.balance),
                     ),
                     errorMessage = null,
                 )

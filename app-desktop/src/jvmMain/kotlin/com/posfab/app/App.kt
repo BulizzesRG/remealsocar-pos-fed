@@ -122,7 +122,7 @@ fun PosApp(controller: AppStateController) {
                         )
                     }
                     val creditViewModel = remember(screen.session) {
-                        CreditViewModel(koin.get<CreditUseCases>())
+                        CreditViewModel(koin.get<CreditUseCases>(), screen.session.user.permissions)
                     }
                     val historyViewModel = remember(screen.session) {
                         DailyHistoryViewModel(screen.session, koin.get<ReportsUseCases>())

@@ -101,7 +101,11 @@ fun desktopModule(config: PosConfig): Module = module {
     single<CatalogRepository> { CatalogRepositoryImpl(get(), get()) }
     single<OperationsRepository> { OperationsRepositoryImpl(get<OperationsApi>(), get<CatalogApi>(), get()) }
     single<CashRepository> { CashRepositoryImpl(get(), get()) }
-    single<CreditRepository> { CreditRepositoryImpl(get(), get()) }
+    factory<CreditRepository> {
+        val device = get<AppStateController>().deviceRegistration.value
+            ?: error("CreditRepository created before device registration")
+        CreditRepositoryImpl(get(), get(), device.businessUnitId)
+    }
     single<ReportsRepositoryImpl> { ReportsRepositoryImpl(get(), get(), get()) }
     single<DailyHistoryRepository> { get<ReportsRepositoryImpl>() }
     single<ManagerRepository> { get<ReportsRepositoryImpl>() }

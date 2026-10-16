@@ -70,8 +70,8 @@ class SaleUseCases(private val repository: SaleRepository) {
 
     suspend fun customer(customerId: Long): AppResult<SaleCustomer> = repository.customer(customerId)
 
-    suspend fun createCustomer(name: String, phone: String?): AppResult<SaleCustomer> =
-        repository.createCustomer(name, phone)
+    suspend fun createCustomer(name: String, nickname: String?, phone: String?): AppResult<SaleCustomer> =
+        repository.createCustomer(name, nickname, phone)
 
     suspend fun recordCustomerPayment(
         customerId: Long,

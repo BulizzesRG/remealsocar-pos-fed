@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
@@ -29,6 +30,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -58,12 +60,15 @@ fun CreditScreen(viewModel: CreditViewModel) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         Column(
             modifier = Modifier
-                .widthIn(max = 880.dp)
+                .widthIn(max = if (state.showsLibreta) LIBRETA_MAX_WIDTH else LIST_MAX_WIDTH)
                 .fillMaxSize()
                 .padding(PosLayout.contentPadding),
             verticalArrangement = Arrangement.spacedBy(PosSpacing.lg),
         ) {
-            if (state.showsDetail) {
+            val libreta = state.libreta
+            if (libreta != null) {
+                LibretaView(libreta = libreta, viewModel = viewModel)
+            } else if (state.showsDetail) {
                 StatementView(
                     state = state,
                     onBack = viewModel::back,
@@ -74,6 +79,7 @@ fun CreditScreen(viewModel: CreditViewModel) {
                     onFilterChange = viewModel::onFilterChange,
                     onRefresh = viewModel::refresh,
                     onSelect = viewModel::select,
+                    onOpenLibreta = viewModel::openLibreta,
                 )
             }
         }
@@ -86,6 +92,7 @@ private fun DebtorList(
     onFilterChange: (String) -> Unit,
     onRefresh: () -> Unit,
     onSelect: (Long) -> Unit,
+    onOpenLibreta: () -> Unit,
 ) {
     val hasDebtors = state.debtors.isNotEmpty()
 
@@ -96,6 +103,14 @@ private fun DebtorList(
     ) {
         Box(modifier = Modifier.weight(1f)) {
             if (hasDebtors) OwedSummary(state.totalOwed, state.debtorCount)
+        }
+        if (state.canLoadLibreta) {
+            PosSecondaryButton(
+                text = CreditStrings.LOAD_LIBRETA,
+                onClick = onOpenLibreta,
+                icon = Icons.AutoMirrored.Filled.MenuBook,
+                modifier = Modifier.focusProperties { canFocus = false },
+            )
         }
         PosSecondaryButton(
             text = CreditStrings.REFRESH,
@@ -195,7 +210,7 @@ private fun DebtorRow(
                 verticalArrangement = Arrangement.spacedBy(PosSpacing.xxs),
             ) {
                 CustomerName(
-                    name = debtor.name,
+                    name = debtor.displayName,
                     active = debtor.active,
                     style = MaterialTheme.typography.titleMedium,
                 )
@@ -296,7 +311,7 @@ private fun StatementHeader(statement: CustomerStatement) {
                 verticalArrangement = Arrangement.spacedBy(PosSpacing.xs),
             ) {
                 CustomerName(
-                    name = statement.name,
+                    name = statement.displayName,
                     active = statement.active,
                     style = MaterialTheme.typography.headlineSmall,
                 )
@@ -304,6 +319,13 @@ private fun StatementHeader(statement: CustomerStatement) {
                     Text(
                         text = it,
                         style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                statement.code?.let {
+                    Text(
+                        text = CreditStrings.customerNumber(it),
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -332,10 +354,11 @@ private fun StatementHeader(statement: CustomerStatement) {
 @Composable
 private fun EntryRow(entry: LedgerEntry) {
     val isPayment = entry.type == LedgerEntryType.PAYMENT
-    val title = if (isPayment) {
-        CreditStrings.PAYMENT
-    } else {
-        CreditStrings.entryTitle(CreditStrings.PURCHASE, entry.saleFolio)
+    val isOpening = entry.type == LedgerEntryType.OPENING_BALANCE
+    val title = when (entry.type) {
+        LedgerEntryType.PAYMENT -> CreditStrings.PAYMENT
+        LedgerEntryType.OPENING_BALANCE -> CreditStrings.OPENING_BALANCE
+        LedgerEntryType.CHARGE -> CreditStrings.entryTitle(CreditStrings.PURCHASE, entry.saleFolio)
     }
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant,
@@ -357,7 +380,7 @@ private fun EntryRow(entry: LedgerEntry) {
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                entryDateLabel(entry.createdAt)?.let {
+                entryDateLabel(entry.createdAt, withTime = !isOpening)?.let {
                     Text(
                         text = it,
                         style = MaterialTheme.typography.bodyMedium,
@@ -391,3 +414,6 @@ private fun CenteredMessage(text: String, style: TextStyle) {
         )
     }
 }
+
+private val LIST_MAX_WIDTH = 880.dp
+private val LIBRETA_MAX_WIDTH = 1280.dp

@@ -50,10 +50,19 @@ class CustomersContractTest {
     }
 
     @Test
+    fun customer_with_nickname_decodes() {
+        val body = """{"id":6,"code":"30000011","name":"Juan López","nickname":"el Wero","active":true,"balance":"350.00"}"""
+        val dto = json.decodeFromString<CustomerDto>(body)
+        assertEquals("30000011", dto.code)
+        assertEquals("el Wero", dto.nickname)
+    }
+
+    @Test
     fun customer_without_code_and_phone_decodes_with_nulls() {
         val body = """{"id":5,"name":"María","active":false,"balance":"0"}"""
         val dto = json.decodeFromString<CustomerDto>(body)
         assertNull(dto.code)
+        assertNull(dto.nickname)
         assertNull(dto.phone)
         assertNull(dto.creditLimit)
         assertFalse(dto.active)
@@ -67,7 +76,9 @@ class CustomersContractTest {
              "entries":[
               {"id":21,"entryType":"PAYMENT","amount":"100.00","createdAt":"2026-10-15T10:00:00-06:00","notes":"abono"},
               {"id":20,"entryType":"CHARGE","amount":"350.00","createdAt":"2026-10-14T09:30:00-06:00",
-               "saleId":88,"saleFolio":"S-000088"}
+               "referenceType":"SALE","saleId":88,"saleFolio":"S-000088"},
+              {"id":19,"entryType":"CHARGE","amount":"500.00","createdAt":"2026-09-01T12:00:00-06:00",
+               "referenceType":"OPENING_BALANCE"}
              ]}
         """.trimIndent()
         val dto = json.decodeFromString<CustomerLedgerDto>(body)
@@ -81,6 +92,11 @@ class CustomersContractTest {
         assertEquals("CHARGE", charge.entryType)
         assertEquals(88L, charge.saleId)
         assertEquals("S-000088", charge.saleFolio)
+        assertEquals("SALE", charge.referenceType)
+        val opening = dto.entries[2]
+        assertEquals("OPENING_BALANCE", opening.referenceType)
+        assertNull(opening.saleId)
+        assertNull(payment.referenceType)
     }
 
     @Test
@@ -157,6 +173,45 @@ class CustomersContractTest {
         assertEquals("1", sent.getValue("businessUnitId").jsonPrimitive.content)
         assertEquals("2", sent.getValue("terminalId").jsonPrimitive.content)
         assertEquals("100.00", sent.getValue("amount").jsonPrimitive.content)
+        assertFalse(sent.containsKey("notes"))
+    }
+
+    @Test
+    fun load_opening_balance_sends_idempotency_key_and_body() = runTest {
+        var method: HttpMethod? = null
+        var path = ""
+        var key: String? = null
+        var sentBody = ""
+        val engine = MockEngine { request ->
+            method = request.method
+            path = request.url.encodedPath
+            key = request.headers["Idempotency-Key"]
+            sentBody = (request.body as OutgoingContent.ByteArrayContent).bytes().decodeToString()
+            respond(
+                """{"id":12,"customerId":6,"amount":"350.00","owedSince":"2026-09-01","balance":"350.00"}""",
+                HttpStatusCode.Created,
+                jsonHeaders,
+            )
+        }
+        val api = CustomersApiClient(HttpClientFactory.create(config, engine), config)
+
+        val result = api.loadOpeningBalance(
+            accessToken = "tok",
+            customerId = 6L,
+            idempotencyKey = "LIBRETA-abc",
+            request = OpeningBalanceRequestDto(businessUnitId = 1L, amount = "350.00", owedSince = "2026-09-01"),
+        )
+
+        val success = assertIs<AppResult.Success<OpeningBalanceResponseDto>>(result)
+        assertEquals("2026-09-01", success.value.owedSince)
+        assertEquals("350.00", success.value.balance)
+        assertEquals(HttpMethod.Post, method)
+        assertEquals("/customers/6/opening-balance", path)
+        assertEquals("LIBRETA-abc", key)
+        val sent = json.parseToJsonElement(sentBody).jsonObject
+        assertEquals("1", sent.getValue("businessUnitId").jsonPrimitive.content)
+        assertEquals("350.00", sent.getValue("amount").jsonPrimitive.content)
+        assertEquals("2026-09-01", sent.getValue("owedSince").jsonPrimitive.content)
         assertFalse(sent.containsKey("notes"))
     }
 

@@ -2009,6 +2009,36 @@ class CashierSaleViewModelTest {
     }
 
     @Test
+    fun search_matches_the_nickname() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = startFiar(repo)
+
+        vm.onCustomerQueryChange("WERO")
+        advanceTimeBy(300)
+        runCurrent()
+
+        assertEquals(listOf("WERO"), repo.customerSearchQueries)
+        assertEquals(listOf(repo.juan), vm.state.value.credit.pickerResults)
+        assertEquals("Juan Pérez (el Wero)", vm.state.value.credit.pickerResults.single().displayName)
+    }
+
+    @Test
+    fun selected_customer_shows_name_and_nickname() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = startFiar(repo)
+
+        pickJuan(vm, repo)
+
+        val customer = vm.state.value.credit.customer!!
+        assertEquals("Juan Pérez (el Wero)", customer.displayName)
+        assertEquals("María López", repo.maria.displayName)
+        assertEquals(
+            "Juan Pérez (el Wero) · debe $350.00",
+            SaleStrings.owes(customer.displayName, customer.balance),
+        )
+    }
+
+    @Test
     fun digits_and_enter_with_a_single_match_select_the_customer() = runTest(dispatcher) {
         val repo = FakeSaleRepository()
         val vm = startFiar(repo)
@@ -2084,12 +2114,26 @@ class CashierSaleViewModelTest {
         assertEquals(SalePhase.Done, state.phase)
         val result = state.lastResult!!
         assertEquals(SalePaymentType.CREDIT, result.paymentType)
-        assertEquals("Juan Pérez", result.customerName)
+        assertEquals("Juan Pérez (el Wero)", result.customerName)
         assertEquals(42.0, result.totalCharged)
         assertEquals(542.0, result.customerBalanceAfter)
         assertNull(result.change)
         assertEquals(CreditState(), state.credit)
         assertEquals(SaleStrings.CREDIT_DONE, SaleStrings.paymentTypeLabel(SalePaymentType.CREDIT))
+    }
+
+    @Test
+    fun done_after_fiar_uses_the_display_name() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = startFiar(repo)
+        pickJuan(vm, repo)
+
+        vm.confirmCharge()
+        advanceUntilIdle()
+
+        val result = vm.state.value.lastResult!!
+        assertEquals(repo.juan.displayName, result.customerName)
+        assertEquals("Fiado a Juan Pérez (el Wero)", SaleStrings.creditDoneTitle(result.customerName!!))
     }
 
     @Test
@@ -2104,7 +2148,7 @@ class CashierSaleViewModelTest {
 
         val result = vm.state.value.lastResult!!
         assertEquals(SalePhase.Done, vm.state.value.phase)
-        assertEquals("Juan Pérez", result.customerName)
+        assertEquals("Juan Pérez (el Wero)", result.customerName)
         assertEquals(392.0, result.customerBalanceAfter)
     }
 
@@ -2136,6 +2180,34 @@ class CashierSaleViewModelTest {
     }
 
     @Test
+    fun new_customer_sends_the_nickname() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = startFiar(repo)
+        vm.onCustomerQueryChange("Pedro")
+        vm.startNewCustomer()
+        assertEquals("", vm.state.value.credit.newCustomer!!.nickname)
+
+        vm.onNewCustomerNickname("  el Güero  ")
+        assertEquals("  el Güero  ", vm.state.value.credit.newCustomer!!.nickname)
+        vm.saveNewCustomer()
+        advanceUntilIdle()
+
+        assertEquals("el Güero", repo.lastCreateNickname)
+        assertEquals("Pedro (el Güero)", vm.state.value.credit.customer!!.displayName)
+
+        vm.changeCustomer()
+        vm.onCustomerQueryChange("Ana")
+        vm.startNewCustomer()
+        vm.onNewCustomerNickname("   ")
+        vm.saveNewCustomer()
+        advanceUntilIdle()
+
+        assertEquals(2, repo.createCustomerCalls)
+        assertNull(repo.lastCreateNickname)
+        assertEquals("Ana", vm.state.value.credit.customer!!.displayName)
+    }
+
+    @Test
     fun new_customer_is_saved_and_selected() = runTest(dispatcher) {
         val repo = FakeSaleRepository()
         val vm = startFiar(repo)
@@ -2144,18 +2216,45 @@ class CashierSaleViewModelTest {
         assertEquals("Pedro", vm.state.value.credit.newCustomer!!.name)
         assertFalse(vm.state.value.canConfirmCharge)
 
-        vm.onNewCustomerPhone("5559876")
+        vm.onNewCustomerPhone("5551239876")
         vm.saveNewCustomer()
         advanceUntilIdle()
 
         val credit = vm.state.value.credit
         assertNull(credit.newCustomer)
         assertEquals("Pedro", credit.customer!!.name)
-        assertEquals("5559876", credit.customer!!.phone)
+        assertEquals("5551239876", credit.customer!!.phone)
         assertFalse(credit.showsAbonoRow)
         assertEquals(1, repo.createCustomerCalls)
         assertTrue(repo.customerSearchQueries.isEmpty())
         assertTrue(vm.state.value.canConfirmCharge)
+    }
+
+    @Test
+    fun new_customer_phone_keeps_only_ten_digits() = runTest(dispatcher) {
+        val vm = startFiar(FakeSaleRepository())
+        vm.onCustomerQueryChange("Pedro")
+        vm.startNewCustomer()
+
+        vm.onNewCustomerPhone("55-12a34 5678 90")
+
+        assertEquals("5512345678", vm.state.value.credit.newCustomer!!.phone)
+    }
+
+    @Test
+    fun short_new_customer_phone_is_not_sent() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = startFiar(repo)
+        vm.onCustomerQueryChange("Pedro")
+        vm.startNewCustomer()
+        vm.onNewCustomerPhone("5559876")
+
+        vm.saveNewCustomer()
+        advanceUntilIdle()
+
+        assertEquals(SaleStrings.CUSTOMER_PHONE_INVALID, vm.state.value.errorMessage)
+        assertEquals(0, repo.createCustomerCalls)
+        assertNotNull(vm.state.value.credit.newCustomer)
     }
 
     @Test
@@ -2219,7 +2318,7 @@ class CashierSaleViewModelTest {
         assertEquals(250.0, state.credit.customer!!.balance)
         assertEquals("", state.credit.abonoInput)
         assertFalse(state.credit.isAbonoLocked)
-        assertEquals(LastAbono(100.0, "Juan Pérez", 250.0), state.credit.lastAbono)
+        assertEquals(LastAbono(100.0, "Juan Pérez (el Wero)", 250.0), state.credit.lastAbono)
         assertEquals(SalePhase.Charging, state.phase)
         assertEquals(SalePaymentType.CREDIT, state.paymentType)
         assertEquals(
@@ -2325,7 +2424,7 @@ class CashierSaleViewModelTest {
         advanceUntilIdle()
 
         assertEquals(250.0, vm.state.value.credit.customer!!.balance)
-        assertEquals(LastAbono(100.0, "Juan Pérez", 250.0), vm.state.value.credit.lastAbono)
+        assertEquals(LastAbono(100.0, "Juan Pérez (el Wero)", 250.0), vm.state.value.credit.lastAbono)
         assertEquals(SalePhase.Selling, vm.state.value.phase)
 
         vm.closeAbono()
@@ -2500,7 +2599,7 @@ class CashierSaleViewModelTest {
         val state = vm.state.value
         assertEquals(SalePhase.Charging, state.phase)
         assertEquals(250.0, state.credit.customer!!.balance)
-        assertEquals(LastAbono(100.0, "Juan Pérez", 250.0), state.credit.lastAbono)
+        assertEquals(LastAbono(100.0, "Juan Pérez (el Wero)", 250.0), state.credit.lastAbono)
         assertEquals(1, repo.openDraftsCalls)
     }
 
@@ -2641,7 +2740,7 @@ class CashierSaleViewModelTest {
     }
 }
 
-private const val JUAN_CODE = "10000019"
+private const val JUAN_CODE = "30000011"
 
 private class FakeSaleRepository(
     private val checkoutDelayMs: Long = 0,
@@ -2690,12 +2789,19 @@ private class FakeSaleRepository(
 
     val torta: SaleProduct get() = kitchenPool[1]
 
-    val juan = SaleCustomer(id = 10L, name = "Juan Pérez", phone = "5551234", balance = 350.0)
-    val maria = SaleCustomer(id = 11L, name = "María López", phone = null, balance = 0.0)
+    val juan = SaleCustomer(
+        id = 10L,
+        code = JUAN_CODE,
+        name = "Juan Pérez",
+        nickname = "el Wero",
+        phone = "5551234",
+        balance = 350.0,
+    )
+    val maria = SaleCustomer(id = 11L, code = "30000028", name = "María López", nickname = null, phone = null, balance = 0.0)
     val customers: MutableMap<Long, SaleCustomer> = mutableMapOf(juan.id to juan, maria.id to maria)
-    private val customerCodes = mapOf(juan.id to JUAN_CODE, maria.id to "10000026")
-    val customerSearchQueries = mutableListOf<String>()
+        val customerSearchQueries = mutableListOf<String>()
     var createCustomerCalls = 0
+    var lastCreateNickname: String? = null
     var paymentCalls = 0
     val paymentKeys = mutableListOf<String>()
     var lastPaymentAmount: Double? = null
@@ -2990,9 +3096,12 @@ private class FakeSaleRepository(
         if (customerSearchDelayMs > 0) withContext(NonCancellable) { delay(customerSearchDelayMs) }
         val trimmed = query.trim()
         val matches = if (trimmed.all(Char::isDigit)) {
-            customers.values.filter { customerCodes[it.id] == trimmed }
+            customers.values.filter { it.code == trimmed }
         } else {
-            customers.values.filter { it.name.contains(trimmed, ignoreCase = true) }
+            customers.values.filter {
+                it.name.contains(trimmed, ignoreCase = true) ||
+                    it.nickname?.contains(trimmed, ignoreCase = true) == true
+            }
         }
         return AppResult.Success(matches.sortedBy { it.name }.take(limit))
     }
@@ -3002,13 +3111,21 @@ private class FakeSaleRepository(
         return customers[customerId]?.let { AppResult.Success(it) } ?: AppResult.Failure(notFound())
     }
 
-    override suspend fun createCustomer(name: String, phone: String?): AppResult<SaleCustomer> {
+    override suspend fun createCustomer(name: String, nickname: String?, phone: String?): AppResult<SaleCustomer> {
         createCustomerCalls += 1
+        lastCreateNickname = nickname
         if (failNextCreateWithConflict) {
             failNextCreateWithConflict = false
             return AppResult.Failure(AppError.Conflict)
         }
-        val created = SaleCustomer(id = 100L + createCustomerCalls, name = name, phone = phone, balance = 0.0)
+        val created = SaleCustomer(
+            id = 100L + createCustomerCalls,
+            code = null,
+            name = name,
+            nickname = nickname,
+            phone = phone,
+            balance = 0.0,
+        )
         customers[created.id] = created
         return AppResult.Success(created)
     }

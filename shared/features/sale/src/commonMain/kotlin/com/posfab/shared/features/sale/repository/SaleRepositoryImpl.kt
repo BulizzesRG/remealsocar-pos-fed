@@ -235,9 +235,10 @@ class SaleRepositoryImpl(
     override suspend fun customer(customerId: Long): AppResult<SaleCustomer> =
         authorized { customersApi.get(it, customerId) }.mapCustomer()
 
-    override suspend fun createCustomer(name: String, phone: String?): AppResult<SaleCustomer> {
+    override suspend fun createCustomer(name: String, nickname: String?, phone: String?): AppResult<SaleCustomer> {
         val request = CreateCustomerRequestDto(
             name = name.trim(),
+            nickname = nickname?.trim()?.takeIf { it.isNotEmpty() },
             phone = phone?.trim()?.takeIf { it.isNotEmpty() },
         )
         return authorized { customersApi.create(it, request) }.mapCustomer()
@@ -309,7 +310,9 @@ class SaleRepositoryImpl(
 
     private fun CustomerDto.toDomain(): SaleCustomer = SaleCustomer(
         id = id,
+        code = code?.takeIf { it.isNotBlank() },
         name = name,
+        nickname = nickname?.trim()?.takeIf { it.isNotEmpty() },
         phone = phone?.takeIf { it.isNotBlank() },
         balance = balance.toDoubleOrNull() ?: 0.0,
     )

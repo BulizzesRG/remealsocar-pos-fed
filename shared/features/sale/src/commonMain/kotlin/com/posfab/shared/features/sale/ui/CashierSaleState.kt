@@ -39,6 +39,7 @@ sealed interface SalePrompt {
 
 data class NewCustomerForm(
     val name: String = "",
+    val nickname: String = "",
     val phone: String = "",
     val isSaving: Boolean = false,
 )

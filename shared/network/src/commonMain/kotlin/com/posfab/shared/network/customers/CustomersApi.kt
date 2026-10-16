@@ -24,6 +24,12 @@ interface CustomersApi {
         idempotencyKey: String,
         request: CustomerPaymentRequestDto,
     ): AppResult<CustomerPaymentResponseDto>
+    suspend fun loadOpeningBalance(
+        accessToken: String,
+        customerId: Long,
+        idempotencyKey: String,
+        request: OpeningBalanceRequestDto,
+    ): AppResult<OpeningBalanceResponseDto>
     suspend fun debtors(accessToken: String): AppResult<List<DebtorDto>>
     suspend fun ledger(accessToken: String, customerId: Long, limit: Int): AppResult<CustomerLedgerDto>
 }
@@ -71,6 +77,20 @@ class CustomersApiClient(
         request: CustomerPaymentRequestDto,
     ): AppResult<CustomerPaymentResponseDto> = safeCall {
         httpClient.post("${config.apiBaseUrl}/customers/$customerId/payments") {
+            bearer(accessToken)
+            header(IDEMPOTENCY_KEY_HEADER, idempotencyKey)
+            contentType(ContentType.Application.Json)
+            setBody(request)
+        }
+    }
+
+    override suspend fun loadOpeningBalance(
+        accessToken: String,
+        customerId: Long,
+        idempotencyKey: String,
+        request: OpeningBalanceRequestDto,
+    ): AppResult<OpeningBalanceResponseDto> = safeCall {
+        httpClient.post("${config.apiBaseUrl}/customers/$customerId/opening-balance") {
             bearer(accessToken)
             header(IDEMPOTENCY_KEY_HEADER, idempotencyKey)
             contentType(ContentType.Application.Json)

@@ -134,6 +134,15 @@ private fun NewCustomerSection(
                 .onFocusChanged { onFocusChange(it.hasFocus || it.isFocused) },
         )
         PosTextField(
+            value = form.nickname,
+            onValueChange = viewModel::onNewCustomerNickname,
+            label = SaleStrings.CUSTOMER_NICKNAME_LABEL,
+            enabled = !form.isSaving,
+            modifier = Modifier
+                .fillMaxWidth()
+                .onFocusChanged { onFocusChange(it.hasFocus || it.isFocused) },
+        )
+        PosTextField(
             value = form.phone,
             onValueChange = viewModel::onNewCustomerPhone,
             label = SaleStrings.CUSTOMER_PHONE_LABEL,
@@ -245,13 +254,22 @@ private fun CustomerResultRow(customer: SaleCustomer, enabled: Boolean, onClick:
             horizontalArrangement = Arrangement.spacedBy(PosSpacing.md),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                customer.name,
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    customer.displayName,
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                customer.phone?.let { phone ->
+                    Text(
+                        phone,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
+            }
             if (customer.hasDebt) {
                 Text(
                     SaleStrings.owesAmount(customer.balance),
@@ -283,7 +301,7 @@ private fun CustomerHeader(customer: SaleCustomer, canChange: Boolean, onChange:
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                customer.name,
+                customer.displayName,
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 2,

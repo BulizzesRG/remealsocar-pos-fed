@@ -19,11 +19,53 @@ object CreditStrings {
     const val SINCE_TODAY = "desde hoy"
     const val SINCE_YESTERDAY = "desde ayer"
     const val SEPARATOR = " · "
+    const val LOAD_LIBRETA = "Cargar libreta"
+    const val LIBRETA_HELP =
+        "Anota a un cliente a la vez, como en tu cuaderno. Aparecerá como «Saldo de la libreta», no como una venta."
+    const val NAME_LABEL = "Nombre"
+    const val NICKNAME_LABEL = "Apodo (opcional)"
+    const val PHONE_LABEL = "Teléfono (opcional)"
+    const val OWED_FIELD_LABEL = "Debe"
+    const val SINCE_LABEL = "Desde cuándo (opcional)"
+    const val SINCE_EXAMPLE = "ej. 03/10/2025"
+    const val SAVE_NEXT = "Guardar y siguiente"
+    const val FINISH = "Terminar"
+    const val CHANGE_CUSTOMER = "Otro cliente"
+    const val EXISTING_CUSTOMER_HINT = "Cliente que ya existe. Escribe lo que debe."
+    const val SUGGESTIONS_HINT = "¿Ya está en la lista? Tócalo para cargarle deuda"
+    const val CORRECT = "Corregir"
+    const val OPENING_BALANCE = "Saldo de la libreta"
+    const val NO_DEBT = "Sin deuda"
+    const val PESO_SIGN = "$"
+    const val NAME_REQUIRED = "Escribe el nombre del cliente"
+    const val AMOUNT_REQUIRED = "Escribe cuánto debe"
+    const val INPUT_REJECTED = "El valor no es válido, vuelve a escribirlo"
+    const val PHONE_INVALID = "El teléfono debe tener 10 números"
+    const val DATE_INVALID = "La fecha no es válida, usa día/mes/año"
+    const val DATE_FUTURE = "La fecha no puede ser futura"
+    const val HAS_MOVEMENTS =
+        "Este cliente ya tiene compras o abonos en el sistema. Su deuda cambia desde Vender, con Fiar o Abonar."
+    const val NICKNAME_TOO_LONG = "El apodo es muy largo"
+    const val NO_PERMISSION = "Tu cuenta no puede cargar la libreta. Sal y vuelve a entrar, o pide al administrador"
+    const val INACTIVE_CUSTOMER = "Este cliente está dado de baja"
+    const val NOT_FOUND = "No se encontró el cliente"
+    const val SAVE_FAILED = "No se pudo guardar, intenta de nuevo"
+    const val NETWORK = "No hay conexión con el servidor"
 
     val MONTHS: List<String> = listOf(
         "ene", "feb", "mar", "abr", "may", "jun",
         "jul", "ago", "sep", "oct", "nov", "dic",
     )
+
+    fun customerNumber(code: String): String = "Número $code"
+
+    fun loadedToday(count: Int): String = "Cargados hoy ($count)"
+
+    fun savedNotice(name: String, amount: Double): String = "Guardado: $name$SEPARATOR${money(amount)}"
+
+    fun owes(balance: Double): String = "debe ${money(balance)}"
+
+    fun withPhone(name: String, phone: String?): String = listOfNotNull(name, phone).joinToString(SEPARATOR)
 
     fun sinceDays(days: Int): String = "desde hace $days días"
 

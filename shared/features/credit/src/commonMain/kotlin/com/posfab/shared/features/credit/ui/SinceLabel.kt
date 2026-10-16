@@ -24,9 +24,11 @@ fun sinceLabel(
 fun entryDateLabel(
     createdAt: String,
     timeZone: TimeZone = TimeZone.currentSystemDefault(),
+    withTime: Boolean = true,
 ): String? {
     val local = parseInstant(createdAt)?.toLocalDateTime(timeZone) ?: return null
     val month = CreditStrings.MONTHS[local.month.ordinal]
+    if (!withTime) return "${local.day} $month ${local.year}"
     return "${local.day} $month, ${local.hour}:${local.minute.toString().padStart(2, '0')}"
 }
 

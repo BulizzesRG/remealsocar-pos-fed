@@ -7,6 +7,7 @@ data class CustomerDto(
     val id: Long,
     val code: String? = null,
     val name: String,
+    val nickname: String? = null,
     val phone: String? = null,
     val creditLimit: String? = null,
     val active: Boolean = true,
@@ -16,6 +17,7 @@ data class CustomerDto(
 @Serializable
 data class CreateCustomerRequestDto(
     val name: String,
+    val nickname: String? = null,
     val phone: String? = null,
 )
 
@@ -40,6 +42,7 @@ data class DebtorDto(
     val id: Long,
     val code: String? = null,
     val name: String,
+    val nickname: String? = null,
     val phone: String? = null,
     val active: Boolean = true,
     val balance: String,
@@ -53,6 +56,7 @@ data class LedgerEntryDto(
     val entryType: String,
     val amount: String,
     val createdAt: String,
+    val referenceType: String? = null,
     val saleId: Long? = null,
     val saleFolio: String? = null,
     val notes: String? = null,
@@ -62,4 +66,21 @@ data class LedgerEntryDto(
 data class CustomerLedgerDto(
     val customer: CustomerDto,
     val entries: List<LedgerEntryDto> = emptyList(),
+)
+
+@Serializable
+data class OpeningBalanceRequestDto(
+    val businessUnitId: Long,
+    val amount: String,
+    val owedSince: String? = null,
+    val notes: String? = null,
+)
+
+@Serializable
+data class OpeningBalanceResponseDto(
+    val id: Long,
+    val customerId: Long,
+    val amount: String,
+    val owedSince: String? = null,
+    val balance: String,
 )

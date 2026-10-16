@@ -9,6 +9,7 @@ enum class Permission {
     COUNT_STOCK,
     VIEW_SALES,
     VIEW_CREDIT,
+    MANAGE_CREDIT,
     MANAGE_USERS;
 
     companion object {

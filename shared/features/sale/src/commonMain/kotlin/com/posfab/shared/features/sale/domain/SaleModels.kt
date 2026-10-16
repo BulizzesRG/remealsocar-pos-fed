@@ -52,10 +52,14 @@ enum class SalePaymentType {
 
 data class SaleCustomer(
     val id: Long,
+    val code: String?,
     val name: String,
+    val nickname: String?,
     val phone: String?,
     val balance: Double,
 ) {
+    val displayName: String
+        get() = nickname?.takeIf { it.isNotBlank() }?.let { "$name ($it)" } ?: name
     val hasDebt: Boolean get() = roundMoney(balance) > 0.0
 }
 

@@ -321,8 +321,10 @@ private class FakeStoreBackend :
     override suspend fun customer(customerId: Long): AppResult<SaleCustomer> =
         AppResult.Failure(AppError.Validation("Customer not found"))
 
-    override suspend fun createCustomer(name: String, phone: String?): AppResult<SaleCustomer> =
-        AppResult.Success(SaleCustomer(id = 1L, name = name, phone = phone, balance = 0.0))
+    override suspend fun createCustomer(name: String, nickname: String?, phone: String?): AppResult<SaleCustomer> =
+        AppResult.Success(
+            SaleCustomer(id = 1L, code = null, name = name, nickname = nickname, phone = phone, balance = 0.0),
+        )
 
     override suspend fun recordCustomerPayment(
         customerId: Long,

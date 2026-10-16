@@ -6,20 +6,36 @@ object CreditErrorText {
     private const val LOAD_FAILED = "No se pudo cargar el fiado, intenta de nuevo"
 
     private val knownMessages: List<Pair<String, String>> = listOf(
-        "Customer not found" to "No se encontró el cliente",
+        "Customer not found" to CreditStrings.NOT_FOUND,
+    )
+
+    private val libretaMessages: List<Pair<String, String>> = listOf(
+        "Customer already has movements" to CreditStrings.HAS_MOVEMENTS,
+        "Customer is inactive" to CreditStrings.INACTIVE_CUSTOMER,
+        "Customer not found" to CreditStrings.NOT_FOUND,
+        "owedSince cannot be in the future" to CreditStrings.DATE_FUTURE,
+        "owedSince must be" to CreditStrings.DATE_INVALID,
+        "nickname too long" to CreditStrings.NICKNAME_TOO_LONG,
     )
 
     fun from(error: AppError): String = when (error) {
         AppError.Unauthorized -> "Tu sesión terminó. Vuelve a entrar."
         AppError.Forbidden -> "No tienes permiso para ver el fiado"
         AppError.Conflict -> "Algo cambió mientras mirabas. Toca Actualizar."
-        is AppError.Validation -> translate(error.message)
+        is AppError.Validation -> translate(error.message, knownMessages) ?: LOAD_FAILED
         AppError.RateLimit -> "Demasiados intentos. Espera unos segundos."
         is AppError.Network -> "No hay conexión con el servidor. Intenta de nuevo."
         is AppError.Unknown -> LOAD_FAILED
     }
 
-    private fun translate(message: String): String =
-        knownMessages.firstOrNull { (key, _) -> message.contains(key, ignoreCase = true) }?.second
-            ?: LOAD_FAILED
+    fun libreta(error: AppError): String = when (error) {
+        is AppError.Network -> CreditStrings.NETWORK
+        AppError.Forbidden -> CreditStrings.NO_PERMISSION
+        is AppError.Validation -> translate(error.message, libretaMessages) ?: CreditStrings.SAVE_FAILED
+        is AppError.Unknown -> translate(error.message, libretaMessages) ?: CreditStrings.SAVE_FAILED
+        else -> CreditStrings.SAVE_FAILED
+    }
+
+    private fun translate(message: String, table: List<Pair<String, String>>): String? =
+        table.firstOrNull { (key, _) -> message.contains(key, ignoreCase = true) }?.second
 }

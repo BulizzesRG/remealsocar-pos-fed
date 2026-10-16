@@ -36,7 +36,7 @@ interface SaleRepository {
     ): AppResult<CheckoutResult>
     suspend fun searchCustomers(query: String, limit: Int): AppResult<List<SaleCustomer>>
     suspend fun customer(customerId: Long): AppResult<SaleCustomer>
-    suspend fun createCustomer(name: String, phone: String?): AppResult<SaleCustomer>
+    suspend fun createCustomer(name: String, nickname: String?, phone: String?): AppResult<SaleCustomer>
     suspend fun recordCustomerPayment(
         customerId: Long,
         amount: Double,

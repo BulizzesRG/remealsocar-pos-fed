@@ -40,6 +40,8 @@ import com.posfab.shared.network.customers.CustomerPaymentRequestDto
 import com.posfab.shared.network.customers.CustomerPaymentResponseDto
 import com.posfab.shared.network.customers.CustomersApi
 import com.posfab.shared.network.customers.DebtorDto
+import com.posfab.shared.network.customers.OpeningBalanceRequestDto
+import com.posfab.shared.network.customers.OpeningBalanceResponseDto
 import com.posfab.shared.network.pos.AddLineRequestDto
 import com.posfab.shared.network.pos.BarcodeLookupProductDto
 import com.posfab.shared.network.pos.BarcodeLookupResponseDto
@@ -339,7 +341,10 @@ class SaleRepositoryImplTest {
         assertEquals(listOf<String?>("Juan", null), customersApi.searchQueries)
         assertEquals(listOf(6, 6), customersApi.searchLimits)
         val customers = assertIs<AppResult.Success<List<SaleCustomer>>>(result).value
-        assertEquals(listOf(SaleCustomer(10L, "Juan Pérez", "5551234", 350.0)), customers)
+        assertEquals(
+            listOf(SaleCustomer(10L, "30000011", "Juan Pérez", "el Wero", "5551234", 350.0)),
+            customers,
+        )
     }
 
     @Test
@@ -347,17 +352,51 @@ class SaleRepositoryImplTest {
         val customersApi = FakeCustomersApi()
         val repository = repository(FakePosApi(), customersApi = customersApi)
 
-        val created = repository.createCustomer("  Pedro  ", "   ")
-        repository.createCustomer("Ana", " 555 1234 ")
+        val created = repository.createCustomer("  Pedro  ", null, "   ")
+        repository.createCustomer("Ana", null, " 555 1234 ")
 
         assertEquals(
-            listOf(CreateCustomerRequestDto("Pedro", null), CreateCustomerRequestDto("Ana", "555 1234")),
+            listOf(
+                CreateCustomerRequestDto(name = "Pedro", phone = null),
+                CreateCustomerRequestDto(name = "Ana", phone = "555 1234"),
+            ),
             customersApi.createRequests,
         )
         val customer = assertIs<AppResult.Success<SaleCustomer>>(created).value
         assertEquals("Pedro", customer.name)
         assertNull(customer.phone)
         assertEquals(0.0, customer.balance)
+    }
+
+    @Test
+    fun create_customer_sends_trimmed_nickname_or_null() = runTest {
+        val customersApi = FakeCustomersApi()
+        val repository = repository(FakePosApi(), customersApi = customersApi)
+
+        val created = repository.createCustomer("Juan López", "  el Wero  ", null)
+        repository.createCustomer("Ana", "   ", null)
+        repository.createCustomer("Luis", null, null)
+
+        assertEquals(listOf("el Wero", null, null), customersApi.createRequests.map { it.nickname })
+        val customer = assertIs<AppResult.Success<SaleCustomer>>(created).value
+        assertEquals("el Wero", customer.nickname)
+        assertEquals("Juan López (el Wero)", customer.displayName)
+    }
+
+    @Test
+    fun customers_map_code_and_nickname() = runTest {
+        val customersApi = FakeCustomersApi()
+        val repository = repository(FakePosApi(), customersApi = customersApi)
+
+        val juan = assertIs<AppResult.Success<SaleCustomer>>(repository.customer(10L)).value
+        val pedro = assertIs<AppResult.Success<SaleCustomer>>(repository.createCustomer("Pedro", " ", null)).value
+
+        assertEquals("30000011", juan.code)
+        assertEquals("el Wero", juan.nickname)
+        assertEquals("Juan Pérez (el Wero)", juan.displayName)
+        assertNull(pedro.code)
+        assertNull(pedro.nickname)
+        assertEquals("Pedro", pedro.displayName)
     }
 
     @Test
@@ -901,7 +940,14 @@ private class FakeCustomersApi : CustomersApi {
     val createRequests = mutableListOf<CreateCustomerRequestDto>()
     val paymentCalls = mutableListOf<PaymentCall>()
 
-    private val juan = CustomerDto(id = 10L, code = "10000019", name = "Juan Pérez", phone = "5551234", balance = "350.00")
+    private val juan = CustomerDto(
+        id = 10L,
+        code = "30000011",
+        name = "Juan Pérez",
+        nickname = "el Wero",
+        phone = "5551234",
+        balance = "350.00",
+    )
     private val inactive = CustomerDto(id = 12L, name = "Juana Baja", active = false, balance = "20.00")
 
     override suspend fun search(accessToken: String, query: String?, limit: Int): AppResult<List<CustomerDto>> {
@@ -915,7 +961,15 @@ private class FakeCustomersApi : CustomersApi {
 
     override suspend fun create(accessToken: String, request: CreateCustomerRequestDto): AppResult<CustomerDto> {
         createRequests += request
-        return AppResult.Success(CustomerDto(id = 20L + createRequests.size, name = request.name, phone = request.phone, balance = "0"))
+        return AppResult.Success(
+            CustomerDto(
+                id = 20L + createRequests.size,
+                name = request.name,
+                nickname = request.nickname,
+                phone = request.phone,
+                balance = "0",
+            ),
+        )
     }
 
     override suspend fun recordPayment(
@@ -929,6 +983,13 @@ private class FakeCustomersApi : CustomersApi {
             CustomerPaymentResponseDto(id = 1L, customerId = customerId, amount = request.amount, balance = "249.50"),
         )
     }
+
+    override suspend fun loadOpeningBalance(
+        accessToken: String,
+        customerId: Long,
+        idempotencyKey: String,
+        request: OpeningBalanceRequestDto,
+    ): AppResult<OpeningBalanceResponseDto> = AppResult.Failure(AppError.Unknown("unused"))
 
     override suspend fun debtors(accessToken: String): AppResult<List<DebtorDto>> = AppResult.Success(emptyList())
 

@@ -8,9 +8,13 @@ data class Debtor(
     val balance: Double,
     val owesSince: String?,
     val lastMovementAt: String?,
-)
+    val code: String? = null,
+    val nickname: String? = null,
+) {
+    val displayName: String get() = customerDisplayName(name, nickname)
+}
 
-enum class LedgerEntryType { CHARGE, PAYMENT }
+enum class LedgerEntryType { CHARGE, PAYMENT, OPENING_BALANCE }
 
 data class LedgerEntry(
     val id: Long,
@@ -29,4 +33,28 @@ data class CustomerStatement(
     val active: Boolean,
     val balance: Double,
     val entries: List<LedgerEntry>,
+    val code: String? = null,
+    val nickname: String? = null,
+) {
+    val displayName: String get() = customerDisplayName(name, nickname)
+}
+
+data class CustomerMatch(
+    val id: Long,
+    val displayName: String,
+    val phone: String?,
+    val balance: Double,
 )
+
+data class LoadedCustomer(
+    val customerId: Long,
+    val displayName: String,
+    val amount: Double,
+    val phone: String? = null,
+    val owedSince: String? = null,
+)
+
+fun customerDisplayName(name: String, nickname: String?): String {
+    val alias = nickname?.trim().orEmpty()
+    return if (alias.isEmpty()) name else "$name ($alias)"
+}
