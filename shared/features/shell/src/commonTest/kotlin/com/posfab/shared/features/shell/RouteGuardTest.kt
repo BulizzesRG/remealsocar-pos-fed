@@ -27,7 +27,7 @@ class RouteGuardTest {
     @Test
     fun manager_modules_follow_permissions() {
         assertEquals(
-            listOf(ShellRoute.SELL, ShellRoute.CASH, ShellRoute.DAILY_SALES, ShellRoute.PRODUCTS),
+            listOf(ShellRoute.SELL, ShellRoute.CASH, ShellRoute.FIADO, ShellRoute.DAILY_SALES, ShellRoute.PRODUCTS),
             RouteGuard.modules(manager),
         )
     }
@@ -54,6 +54,12 @@ class RouteGuardTest {
     fun cashier_is_denied_daily_sales_and_products() {
         assertFalse(RouteGuard.canAccess(cashier, ShellRoute.DAILY_SALES))
         assertFalse(RouteGuard.canAccess(cashier, ShellRoute.PRODUCTS))
+    }
+
+    @Test
+    fun cashier_is_denied_fiado() {
+        assertFalse(RouteGuard.canAccess(cashier, ShellRoute.FIADO))
+        assertTrue(RouteGuard.canAccess(manager, ShellRoute.FIADO))
     }
 
     @Test

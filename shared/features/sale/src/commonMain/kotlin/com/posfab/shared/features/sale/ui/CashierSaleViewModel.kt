@@ -7,6 +7,7 @@ import com.posfab.shared.core.result.AppResult
 import com.posfab.shared.features.sale.domain.CashSessionCheck
 import com.posfab.shared.features.sale.domain.CheckoutResult
 import com.posfab.shared.features.sale.domain.SaleChannel
+import com.posfab.shared.features.sale.domain.SaleCustomer
 import com.posfab.shared.features.sale.domain.SaleDraft
 import com.posfab.shared.features.sale.domain.SaleLine
 import com.posfab.shared.features.sale.domain.SaleLineInput
@@ -49,6 +50,7 @@ class CashierSaleViewModel(
     private val mutations = Channel<suspend () -> Unit>(Channel.UNLIMITED)
     private var loadJob: Job? = null
     private var searchJob: Job? = null
+    private var customerSearchJob: Job? = null
     private val promptScans = ScanBurstDetector()
     private val paidScans = ScanBurstDetector()
 
@@ -68,9 +70,10 @@ class CashierSaleViewModel(
     }
 
     fun load() {
-        if (_state.value.isCheckoutInFlight) return
+        if (_state.value.isCheckoutInFlight || _state.value.credit.isAbonoInFlight) return
         loadJob?.cancel()
         searchJob?.cancel()
+        customerSearchJob?.cancel()
         promptScans.reset()
         paidScans.reset()
         loadJob = scope.launch {
@@ -119,6 +122,7 @@ class CashierSaleViewModel(
                 current.phase != SalePhase.Selling && current.phase != SalePhase.Done -> current
                 current.confirm != null -> current
                 current.prompt != null -> current
+                current.abonoOverlayOpen -> current
                 else -> current.copy(
                     phase = SalePhase.Selling,
                     activeDraftId = draftId,
@@ -175,6 +179,7 @@ class CashierSaleViewModel(
     }
 
     fun addProduct(product: SaleProduct) {
+        if (_state.value.abonoOverlayOpen) return
         if (!product.isSellable) {
             _state.update { it.copy(errorMessage = SaleStrings.NO_PRICE) }
             return
@@ -362,7 +367,7 @@ class CashierSaleViewModel(
 
     fun requestClear() {
         val snapshot = _state.value
-        if (snapshot.prompt != null) return
+        if (snapshot.prompt != null || snapshot.abonoOverlayOpen) return
         if (snapshot.canCloseEmptyAccount) {
             confirmClear()
             return
@@ -405,6 +410,7 @@ class CashierSaleViewModel(
                     paymentType = SalePaymentType.CASH,
                     paidInput = "",
                     paidInputRejected = false,
+                    credit = CreditState(),
                     errorMessage = null,
                     notice = null,
                 )
@@ -416,17 +422,269 @@ class CashierSaleViewModel(
 
     fun selectPaymentType(type: SalePaymentType) {
         paidScans.reset()
-        _state.update {
+        val previous = _state.getAndUpdate {
             if (
                 it.phase == SalePhase.Charging &&
                 !it.isCheckoutInFlight &&
                 !it.isPaidLocked &&
+                !it.credit.isAbonoBusy &&
                 it.paymentType != type
             ) {
-                it.copy(paymentType = type, paidInput = "", paidInputRejected = false, errorMessage = null)
+                it.copy(
+                    paymentType = type,
+                    paidInput = "",
+                    paidInputRejected = false,
+                    credit = CreditState(),
+                    errorMessage = null,
+                )
             } else {
                 it
             }
+        }
+        if (previous.paymentType != _state.value.paymentType) customerSearchJob?.cancel()
+    }
+
+    fun onCustomerQueryChange(value: String) {
+        if (!_state.value.isPickerActive()) return
+        customerSearchJob?.cancel()
+        _state.update {
+            it.copy(credit = it.credit.copy(pickerQuery = value, isSearching = false), errorMessage = null)
+        }
+        val query = value.trim()
+        if (query.length < MIN_PICKER_QUERY_LENGTH) {
+            _state.update { it.copy(credit = it.credit.copy(pickerResults = emptyList(), searchedQuery = null)) }
+            return
+        }
+        customerSearchJob = scope.launch {
+            delay(CUSTOMER_SEARCH_DEBOUNCE_MS)
+            searchCustomers(query, pickSingleMatch = false)
+        }
+    }
+
+    fun submitCustomerQuery() {
+        val snapshot = _state.value
+        if (!snapshot.isPickerActive()) return
+        val query = snapshot.credit.pickerQuery.trim()
+        if (query.isEmpty()) return
+        customerSearchJob?.cancel()
+        customerSearchJob = scope.launch { searchCustomers(query, pickSingleMatch = true) }
+    }
+
+    fun selectCustomer(customer: SaleCustomer) {
+        if (!_state.value.isPickerActive()) return
+        customerSearchJob?.cancel()
+        _state.update {
+            if (it.isPickerActive()) it.copy(credit = it.credit.selecting(customer), errorMessage = null) else it
+        }
+    }
+
+    fun changeCustomer() {
+        _state.update { current ->
+            val credit = current.credit
+            val blocked = credit.customer == null ||
+                credit.isAbonoBusy ||
+                current.isPaidLocked ||
+                current.isCheckoutInFlight
+            if (blocked) current else current.copy(credit = CreditState(), errorMessage = null)
+        }
+    }
+
+    fun startNewCustomer() {
+        if (!_state.value.isPickerActive()) return
+        customerSearchJob?.cancel()
+        _state.update { current ->
+            if (!current.isPickerActive()) return@update current
+            val typed = current.credit.pickerQuery.trim()
+            val name = if (typed.all(Char::isDigit)) "" else typed
+            current.copy(
+                credit = current.credit.copy(
+                    newCustomer = NewCustomerForm(name = name),
+                    pickerResults = emptyList(),
+                    isSearching = false,
+                    searchedQuery = null,
+                ),
+                errorMessage = null,
+            )
+        }
+    }
+
+    fun onNewCustomerName(value: String) {
+        _state.update { current ->
+            val form = current.credit.newCustomer
+            if (form == null || form.isSaving) {
+                current
+            } else {
+                current.copy(credit = current.credit.copy(newCustomer = form.copy(name = value)), errorMessage = null)
+            }
+        }
+    }
+
+    fun onNewCustomerPhone(value: String) {
+        _state.update { current ->
+            val form = current.credit.newCustomer
+            if (form == null || form.isSaving) {
+                current
+            } else {
+                current.copy(credit = current.credit.copy(newCustomer = form.copy(phone = value)), errorMessage = null)
+            }
+        }
+    }
+
+    fun saveNewCustomer() {
+        val form = _state.value.credit.newCustomer ?: return
+        if (form.isSaving) return
+        val name = form.name.trim()
+        if (name.isEmpty() || name.all { it.isDigit() || it.isWhitespace() }) {
+            _state.update { it.copy(errorMessage = SaleStrings.CUSTOMER_NAME_REQUIRED) }
+            return
+        }
+        val phone = form.phone.trim().takeIf { it.isNotEmpty() }
+        val previous = _state.getAndUpdate { current ->
+            val pending = current.credit.newCustomer
+            if (pending == null || pending.isSaving) {
+                current
+            } else {
+                current.copy(credit = current.credit.copy(newCustomer = pending.copy(isSaving = true)), errorMessage = null)
+            }
+        }
+        if (previous.credit.newCustomer?.isSaving != false) return
+        scope.launch {
+            val result = guarded { saleUseCases.createCustomer(name, phone) }
+            _state.update { current ->
+                val pending = current.credit.newCustomer ?: return@update current
+                when (result) {
+                    is AppResult.Success -> current.copy(
+                        credit = current.credit.copy(newCustomer = null).selecting(result.value),
+                        errorMessage = null,
+                    )
+                    is AppResult.Failure -> current.copy(
+                        credit = current.credit.copy(newCustomer = pending.copy(isSaving = false)),
+                        errorMessage = if (result.error is AppError.Conflict) {
+                            SaleStrings.CUSTOMER_SAVE_FAILED
+                        } else {
+                            SaleErrorText.from(result.error)
+                        },
+                    )
+                }
+            }
+        }
+    }
+
+    fun cancelNewCustomer() {
+        _state.update { current ->
+            val form = current.credit.newCustomer
+            if (form == null || form.isSaving) {
+                current
+            } else {
+                current.copy(credit = current.credit.copy(newCustomer = null), errorMessage = null)
+            }
+        }
+    }
+
+    fun onAbonoInputChange(value: String) {
+        val credit = _state.value.credit
+        if (credit.isAbonoLocked || credit.isAbonoInFlight) return
+        val sanitized = sanitizeAmount(value, MAX_AMOUNT_DIGITS)
+        _state.update {
+            it.copy(
+                credit = it.credit.copy(abonoInput = sanitized, abonoInputRejected = sanitized != value),
+                errorMessage = null,
+            )
+        }
+    }
+
+    fun payAllDebt() {
+        _state.update { current ->
+            val credit = current.credit
+            val customer = credit.customer
+            if (customer == null || !credit.showsAbonoRow || credit.isAbonoLocked || credit.isAbonoInFlight) {
+                current
+            } else {
+                current.copy(
+                    credit = credit.copy(abonoInput = formatAmount(customer.balance), abonoInputRejected = false),
+                    errorMessage = null,
+                )
+            }
+        }
+    }
+
+    fun confirmAbono() {
+        val snapshot = _state.value
+        if (!snapshot.isCustomerStepActive) return
+        val credit = snapshot.credit
+        if (credit.abonoInputRejected) {
+            _state.update {
+                it.copy(
+                    credit = it.credit.copy(abonoInput = "", abonoInputRejected = false),
+                    errorMessage = SaleStrings.INPUT_REJECTED,
+                )
+            }
+            return
+        }
+        val customer = credit.customer ?: return
+        if (!credit.showsAbonoRow || snapshot.isCheckoutInFlight) return
+        val amount = credit.abonoAmount ?: return
+        if (roundMoney(amount) > roundMoney(customer.balance)) {
+            _state.update { it.copy(errorMessage = SaleStrings.ABONO_EXCEEDS_DEBT) }
+            return
+        }
+        val key = credit.abonoKey ?: buildAbonoKey(customer.id)
+        val previous = _state.getAndUpdate {
+            if (it.credit.isAbonoInFlight) {
+                it
+            } else {
+                it.copy(credit = it.credit.copy(isAbonoInFlight = true, abonoKey = key), errorMessage = null)
+            }
+        }
+        if (previous.credit.isAbonoInFlight) return
+        scope.launch { runAbono(customer, roundMoney(amount), key) }
+    }
+
+    fun openAbono() {
+        customerSearchJob?.cancel()
+        _state.update {
+            if (it.canOpenAbono) {
+                it.copy(abonoOverlayOpen = true, credit = CreditState(), errorMessage = null, notice = null)
+            } else {
+                it
+            }
+        }
+    }
+
+    fun closeAbono() {
+        if (_state.value.credit.isAbonoBusy) return
+        customerSearchJob?.cancel()
+        _state.update {
+            if (it.abonoOverlayOpen && !it.credit.isAbonoBusy) {
+                it.copy(abonoOverlayOpen = false, credit = CreditState(), errorMessage = null)
+            } else {
+                it
+            }
+        }
+    }
+
+    fun dismissCreditStep(): Boolean {
+        val snapshot = _state.value
+        val credit = snapshot.credit
+        return when {
+            !snapshot.isCustomerStepActive -> false
+            credit.newCustomer != null -> {
+                cancelNewCustomer()
+                true
+            }
+            credit.showsPicker && credit.pickerQuery.isNotEmpty() -> {
+                onCustomerQueryChange("")
+                true
+            }
+            snapshot.isCreditCharge && credit.customer == null -> {
+                selectPaymentType(SalePaymentType.CASH)
+                true
+            }
+            snapshot.abonoOverlayOpen -> {
+                closeAbono()
+                true
+            }
+            else -> false
         }
     }
 
@@ -469,20 +727,28 @@ class CashierSaleViewModel(
 
     fun cancelCharge() {
         paidScans.reset()
+        if (_state.value.credit.isAbonoBusy) return
+        customerSearchJob?.cancel()
         _state.update {
-            if (it.phase == SalePhase.Charging && !it.isCheckoutInFlight) {
+            if (it.phase == SalePhase.Charging && !it.isCheckoutInFlight && !it.credit.isAbonoBusy) {
                 it.copy(
                     phase = SalePhase.Selling,
                     paymentType = SalePaymentType.CASH,
                     paidInput = "",
                     paidInputRejected = false,
                     checkoutIdempotencyKey = null,
+                    credit = CreditState(),
                     errorMessage = null,
                 )
             } else {
                 it
             }
         }
+    }
+
+    fun confirmChargeFromKeyboard() {
+        if (_state.value.paymentType == SalePaymentType.CREDIT) return
+        confirmCharge()
     }
 
     fun confirmCharge() {
@@ -507,6 +773,7 @@ class CashierSaleViewModel(
         val draft = snapshot.draft ?: return
         val paymentType = snapshot.paymentType
         val paid = snapshot.paidAmount ?: return
+        val customer = if (paymentType == SalePaymentType.CREDIT) snapshot.credit.customer ?: return else null
         val key = snapshot.checkoutIdempotencyKey ?: buildCheckoutKey(draft.id)
         val previous = _state.getAndUpdate {
             if (it.isCheckoutInFlight) {
@@ -516,16 +783,22 @@ class CashierSaleViewModel(
             }
         }
         if (previous.isCheckoutInFlight) return
-        scope.launch { runCheckout(draft, paymentType, paid, key) }
+        scope.launch { runCheckout(draft, paymentType, paid, key, customer) }
     }
 
     fun startNextSale() {
         enqueue { resumeSelling() }
     }
 
-    private suspend fun runCheckout(draft: SaleDraft, paymentType: SalePaymentType, paid: Double, key: String) {
+    private suspend fun runCheckout(
+        draft: SaleDraft,
+        paymentType: SalePaymentType,
+        paid: Double,
+        key: String,
+        customer: SaleCustomer?,
+    ) {
         try {
-            checkout(draft, paymentType, paid, key)
+            checkout(draft, paymentType, paid, key, customer)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
@@ -533,7 +806,13 @@ class CashierSaleViewModel(
         }
     }
 
-    private suspend fun checkout(draft: SaleDraft, paymentType: SalePaymentType, paid: Double, key: String) {
+    private suspend fun checkout(
+        draft: SaleDraft,
+        paymentType: SalePaymentType,
+        paid: Double,
+        key: String,
+        customer: SaleCustomer?,
+    ) {
         var chargedDraft = draft
         if (draft.lines.any { it.lotTracked }) {
             when (val resolved = saleUseCases.resolveLots(draft.id)) {
@@ -547,7 +826,7 @@ class CashierSaleViewModel(
                 }
             }
         }
-        when (val result = saleUseCases.checkout(chargedDraft.id, paymentType, paid, key)) {
+        when (val result = saleUseCases.checkout(chargedDraft.id, paymentType, paid, key, customer?.id)) {
             is AppResult.Failure ->
                 if (result.error is AppError.Conflict) {
                     recoverFromCheckoutConflict(chargedDraft.id)
@@ -555,11 +834,12 @@ class CashierSaleViewModel(
                     failCheckout(result.error, key)
                 }
             is AppResult.Success -> {
-                val charged = if (result.value.totalCharged <= 0.0) {
+                val totalled = if (result.value.totalCharged <= 0.0) {
                     result.value.copy(totalCharged = chargedDraft.totals.amountFor(paymentType))
                 } else {
                     result.value
                 }
+                val charged = if (customer != null) withCustomerBalance(totalled, customer) else totalled
                 _state.update {
                     it.withoutAccount(chargedDraft.id).copy(
                         phase = SalePhase.Done,
@@ -575,6 +855,8 @@ class CashierSaleViewModel(
                         prompt = null,
                         promptInput = "",
                         promptInputRejected = false,
+                        credit = CreditState(),
+                        abonoOverlayOpen = false,
                         notice = null,
                         errorMessage = null,
                     )
@@ -585,6 +867,117 @@ class CashierSaleViewModel(
             }
         }
     }
+
+    private suspend fun withCustomerBalance(result: CheckoutResult, customer: SaleCustomer): CheckoutResult {
+        val balanceAfter = when (val fetched = saleUseCases.customer(customer.id)) {
+            is AppResult.Success -> fetched.value.balance
+            is AppResult.Failure -> roundMoney(customer.balance + result.totalCharged)
+        }
+        return result.copy(customerName = customer.name, customerBalanceAfter = balanceAfter)
+    }
+
+    private suspend fun searchCustomers(query: String, pickSingleMatch: Boolean) {
+        _state.update { it.copy(credit = it.credit.copy(isSearching = true)) }
+        val result = guarded { saleUseCases.searchCustomers(query, CUSTOMER_SEARCH_LIMIT) }
+        _state.update { current ->
+            val credit = current.credit
+            if (!current.isPickerActive() || credit.pickerQuery.trim() != query) return@update current
+            when (result) {
+                is AppResult.Failure -> current.copy(
+                    credit = credit.copy(isSearching = false),
+                    errorMessage = SaleErrorText.from(result.error),
+                )
+                is AppResult.Success -> {
+                    val found = if (current.abonoOverlayOpen) result.value.filter { it.hasDebt } else result.value
+                    val single = found.singleOrNull()
+                    if (pickSingleMatch && single != null) {
+                        current.copy(credit = credit.selecting(single), errorMessage = null)
+                    } else {
+                        current.copy(
+                            credit = credit.copy(
+                                isSearching = false,
+                                pickerResults = found,
+                                searchedQuery = query,
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun runAbono(customer: SaleCustomer, amount: Double, key: String) {
+        val result = guarded { saleUseCases.recordCustomerPayment(customer.id, amount, key) }
+        _state.update { current ->
+            val credit = current.credit
+            val selected = credit.customer
+            if (selected == null || selected.id != customer.id) {
+                val notice = (result as? AppResult.Success)?.value?.let {
+                    SaleStrings.abonoRegistered(it.amount, customer.name, it.balance)
+                }
+                return@update current.copy(
+                    credit = credit.copy(isAbonoInFlight = false),
+                    notice = notice ?: current.notice,
+                )
+            }
+            when (result) {
+                is AppResult.Success -> current.copy(
+                    credit = credit.copy(
+                        customer = selected.copy(balance = result.value.balance),
+                        abonoInput = "",
+                        abonoInputRejected = false,
+                        isAbonoInFlight = false,
+                        abonoKey = null,
+                        lastAbono = LastAbono(result.value.amount, selected.name, result.value.balance),
+                    ),
+                    errorMessage = null,
+                )
+                is AppResult.Failure -> current.copy(
+                    credit = credit.copy(
+                        isAbonoInFlight = false,
+                        abonoKey = if (result.error is AppError.Network) key else null,
+                    ),
+                    errorMessage = abonoErrorText(result.error),
+                )
+            }
+        }
+    }
+
+    private suspend fun <T> guarded(block: suspend () -> AppResult<T>): AppResult<T> = try {
+        block()
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (failure: Exception) {
+        AppResult.Failure(AppError.Unknown(failure.message ?: failure::class.simpleName.orEmpty()))
+    }
+
+    private fun abonoErrorText(error: AppError): String {
+        val message = when (error) {
+            is AppError.Validation -> error.message
+            is AppError.Unknown -> error.message
+            else -> null
+        }
+        return if (message?.contains(OPEN_CASH_REQUIRED, ignoreCase = true) == true) {
+            SaleStrings.ABONO_CASH_CLOSED
+        } else {
+            SaleErrorText.from(error)
+        }
+    }
+
+    private fun CashierSaleState.isPickerActive(): Boolean =
+        isCustomerStepActive && credit.showsPicker && !isCheckoutInFlight
+
+    private fun CreditState.selecting(customer: SaleCustomer): CreditState = copy(
+        customer = customer,
+        pickerQuery = "",
+        pickerResults = emptyList(),
+        isSearching = false,
+        searchedQuery = null,
+        abonoInput = "",
+        abonoInputRejected = false,
+        abonoKey = null,
+        lastAbono = null,
+    )
 
     private suspend fun recoverFromCheckoutConflict(draftId: Long) {
         when (val refreshed = saleUseCases.draft(draftId)) {
@@ -923,12 +1316,16 @@ class CashierSaleViewModel(
         paidInput = "",
         paidInputRejected = false,
         checkoutIdempotencyKey = null,
+        credit = CreditState(),
+        abonoOverlayOpen = false,
         notice = null,
         errorMessage = null,
     )
 
-    private fun SaleTotals.amountFor(paymentType: SalePaymentType): Double =
-        if (paymentType == SalePaymentType.CARD) listTotal else cashTotal
+    private fun SaleTotals.amountFor(paymentType: SalePaymentType): Double = when (paymentType) {
+        SalePaymentType.CARD, SalePaymentType.CREDIT -> listTotal
+        SalePaymentType.CASH, SalePaymentType.TRANSFER -> cashTotal
+    }
 
     private fun lineIn(draftId: Long, lineId: Long): SaleLine? =
         _state.value.accountById(draftId)?.lines?.firstOrNull { it.id == lineId }
@@ -967,6 +1364,9 @@ class CashierSaleViewModel(
         }
     }
 
+    private fun buildAbonoKey(customerId: Long): String =
+        "abono-$customerId-${Clock.System.now().toEpochMilliseconds()}-${Random.nextInt(1_000, 9_999)}"
+
     private fun buildCheckoutKey(draftId: Long): String =
         "sale-$draftId-${Clock.System.now().toEpochMilliseconds()}-${Random.nextInt(1_000, 9_999)}"
 
@@ -1003,6 +1403,9 @@ class CashierSaleViewModel(
         const val GRAMS_PER_KILO = 1000.0
         const val GRAMS_TOLERANCE = 1e-6
         const val CHECKED_OUT = "CHECKED_OUT"
+        const val CUSTOMER_SEARCH_DEBOUNCE_MS = 250L
+        const val CUSTOMER_SEARCH_LIMIT = 5
+        const val OPEN_CASH_REQUIRED = "Open cash session is required"
         val BARCODE_LENGTH = 6..80
     }
 }

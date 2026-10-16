@@ -27,6 +27,7 @@ include(
     ":shared:features:shell",
     ":shared:features:sale",
     ":shared:features:cash",
+    ":shared:features:credit",
     ":shared:features:catalog",
     ":shared:features:operations",
     ":shared:features:reports",

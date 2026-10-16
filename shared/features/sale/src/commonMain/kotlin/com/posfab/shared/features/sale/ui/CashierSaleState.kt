@@ -2,6 +2,7 @@ package com.posfab.shared.features.sale.ui
 
 import com.posfab.shared.features.sale.domain.CheckoutResult
 import com.posfab.shared.features.sale.domain.SaleChannel
+import com.posfab.shared.features.sale.domain.SaleCustomer
 import com.posfab.shared.features.sale.domain.SaleDraft
 import com.posfab.shared.features.sale.domain.SaleLine
 import com.posfab.shared.features.sale.domain.SalePaymentType
@@ -36,6 +37,43 @@ sealed interface SalePrompt {
     ) : SalePrompt
 }
 
+data class NewCustomerForm(
+    val name: String = "",
+    val phone: String = "",
+    val isSaving: Boolean = false,
+)
+
+data class LastAbono(
+    val amount: Double,
+    val customerName: String,
+    val balanceAfter: Double,
+)
+
+data class CreditState(
+    val customer: SaleCustomer? = null,
+    val pickerQuery: String = "",
+    val pickerResults: List<SaleCustomer> = emptyList(),
+    val isSearching: Boolean = false,
+    val searchedQuery: String? = null,
+    val newCustomer: NewCustomerForm? = null,
+    val abonoInput: String = "",
+    val abonoInputRejected: Boolean = false,
+    val isAbonoInFlight: Boolean = false,
+    val abonoKey: String? = null,
+    val lastAbono: LastAbono? = null,
+) {
+    val showsPicker: Boolean get() = customer == null && newCustomer == null
+    val showsNoMatches: Boolean
+        get() = showsPicker && !isSearching && pickerResults.isEmpty() &&
+            searchedQuery != null && searchedQuery == pickerQuery.trim()
+    val isAbonoLocked: Boolean get() = abonoKey != null
+    val isAbonoBusy: Boolean get() = isAbonoLocked || isAbonoInFlight
+    val showsPickerHint: Boolean get() = showsPicker && pickerQuery.trim().length < MIN_PICKER_QUERY_LENGTH
+    val abonoAmount: Double? get() = abonoInput.toDoubleOrNull()?.takeIf { it > 0.0 }
+    val showsAbonoRow: Boolean get() = newCustomer == null && customer?.hasDebt == true
+    val canConfirmAbono: Boolean get() = showsAbonoRow && abonoAmount != null && !isAbonoInFlight
+}
+
 data class CashierSaleState(
     val phase: SalePhase = SalePhase.Loading,
     val accounts: List<SaleDraft> = emptyList(),
@@ -59,6 +97,8 @@ data class CashierSaleState(
     val promptInputRejected: Boolean = false,
     val paidInputRejected: Boolean = false,
     val variosProduct: SaleProduct? = null,
+    val credit: CreditState = CreditState(),
+    val abonoOverlayOpen: Boolean = false,
 ) {
     val draft: SaleDraft? get() = activeDraftId?.let(::accountById)
     val isBusy: Boolean get() = pendingMutations > 0
@@ -67,26 +107,42 @@ data class CashierSaleState(
     val listTotal: Double get() = draft?.totals?.listTotal ?: 0.0
     val cashTotal: Double get() = draft?.totals?.cashTotal ?: 0.0
     val cashDiscount: Double get() = draft?.totals?.cashDiscount ?: 0.0
-    val amountDue: Double get() = if (paymentType == SalePaymentType.CARD) listTotal else cashTotal
+    val amountDue: Double
+        get() = when (paymentType) {
+            SalePaymentType.CARD, SalePaymentType.CREDIT -> listTotal
+            SalePaymentType.CASH, SalePaymentType.TRANSFER -> cashTotal
+        }
     val paidAmount: Double?
         get() = if (paymentType == SalePaymentType.CASH) paidInput.toDoubleOrNull() else amountDue
     val change: Double?
         get() = if (paymentType == SalePaymentType.CASH) paidAmount?.let { roundMoney(it - amountDue) } else null
     val canConfirmCharge: Boolean
-        get() = !isCheckoutInFlight && (paymentType != SalePaymentType.CASH || paidCoversAmountDue)
+        get() = !isCheckoutInFlight && when (paymentType) {
+            SalePaymentType.CASH -> paidCoversAmountDue
+            SalePaymentType.CREDIT -> credit.customer != null && credit.newCustomer == null && !credit.isAbonoBusy
+            SalePaymentType.TRANSFER, SalePaymentType.CARD -> true
+        }
+    val isCreditCharge: Boolean get() = phase == SalePhase.Charging && paymentType == SalePaymentType.CREDIT
+    val isCustomerStepActive: Boolean get() = isCreditCharge || abonoOverlayOpen
     private val paidCoversAmountDue: Boolean
         get() = paidAmount?.let { roundMoney(it) >= roundMoney(amountDue) } == true
     val canCharge: Boolean
-        get() = phase == SalePhase.Selling && draft?.lines?.isNotEmpty() == true && listTotal > 0 && !isBusy && prompt == null
+        get() = phase == SalePhase.Selling && draft?.lines?.isNotEmpty() == true && listTotal > 0 && !isBusy && prompt == null &&
+            !abonoOverlayOpen
     val canSetChannel: Boolean
-        get() = phase == SalePhase.Selling && !isBusy && !isCheckoutInFlight && confirm == null && prompt == null
+        get() = phase == SalePhase.Selling && !isBusy && !isCheckoutInFlight && confirm == null && prompt == null &&
+            !abonoOverlayOpen
+    val canOpenAbono: Boolean
+        get() = phase == SalePhase.Selling && !isBusy && prompt == null && confirm == null && !isCheckoutInFlight &&
+            !abonoOverlayOpen
     val selectedLine: SaleLine? get() = selectedLineId?.let { id -> draft?.lines?.firstOrNull { it.id == id } }
     val canOpenAccount: Boolean
         get() = (phase == SalePhase.Selling || phase == SalePhase.Done) &&
             accounts.size < MAX_ACCOUNTS &&
             draft?.lines?.isNotEmpty() != false &&
             !isCheckoutInFlight &&
-            prompt == null
+            prompt == null &&
+            !abonoOverlayOpen
     val canCloseEmptyAccount: Boolean
         get() = phase == SalePhase.Selling && draft?.lines?.isEmpty() == true && accounts.size > 1
 
@@ -107,3 +163,4 @@ data class CashierSaleState(
 }
 
 internal const val MAX_ACCOUNTS = 10
+internal const val MIN_PICKER_QUERY_LENGTH = 2

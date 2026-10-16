@@ -5,7 +5,9 @@ import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
 import com.posfab.shared.features.sale.domain.CashSessionCheck
 import com.posfab.shared.features.sale.domain.CheckoutResult
+import com.posfab.shared.features.sale.domain.CustomerPaymentResult
 import com.posfab.shared.features.sale.domain.SaleChannel
+import com.posfab.shared.features.sale.domain.SaleCustomer
 import com.posfab.shared.features.sale.domain.SaleDraft
 import com.posfab.shared.features.sale.domain.SaleKitchenKind
 import com.posfab.shared.features.sale.domain.SaleLine
@@ -18,6 +20,10 @@ import com.posfab.shared.features.sale.domain.SaleTotals
 import com.posfab.shared.features.sale.domain.roundMoney
 import com.posfab.shared.network.catalog.CatalogApi
 import com.posfab.shared.network.catalog.ProductListItemDto
+import com.posfab.shared.network.customers.CreateCustomerRequestDto
+import com.posfab.shared.network.customers.CustomerDto
+import com.posfab.shared.network.customers.CustomerPaymentRequestDto
+import com.posfab.shared.network.customers.CustomersApi
 import com.posfab.shared.network.pos.AddLineRequestDto
 import com.posfab.shared.network.pos.CancelDraftRequestDto
 import com.posfab.shared.network.pos.CheckoutRequestDto
@@ -35,7 +41,9 @@ import kotlin.math.round
 class SaleRepositoryImpl(
     private val posApi: PosApi,
     private val catalogApi: CatalogApi,
+    private val customersApi: CustomersApi,
     private val terminalId: Long,
+    private val businessUnitId: Long,
     private val executor: AuthorizedApiExecutor,
 ) : SaleRepository {
     private val checkoutMutex = Mutex()
@@ -186,15 +194,18 @@ class SaleRepositoryImpl(
         paymentType: SalePaymentType,
         paidAmount: Double,
         idempotencyKey: String,
+        customerId: Long?,
     ): AppResult<CheckoutResult> = checkoutMutex.withLock {
+        val onCredit = paymentType == SalePaymentType.CREDIT
         val result = authorized {
             posApi.checkoutDraft(
                 accessToken = it,
                 draftId = draftId,
                 request = CheckoutRequestDto(
-                    paymentStatus = PAYMENT_STATUS_PAID,
+                    paymentStatus = if (onCredit) PAYMENT_STATUS_ON_CREDIT else PAYMENT_STATUS_PAID,
                     paymentType = paymentType.name,
                     paidAmount = formatMoney(paidAmount),
+                    customerId = customerId.takeIf { onCredit },
                     idempotencyKey = idempotencyKey,
                 ),
             )
@@ -207,6 +218,47 @@ class SaleRepositoryImpl(
                     paymentType = paymentType,
                     totalCharged = result.value.totalAmount?.toDoubleOrNull() ?: 0.0,
                     paidAmount = paidAmount,
+                ),
+            )
+            is AppResult.Failure -> result
+        }
+    }
+
+    override suspend fun searchCustomers(query: String, limit: Int): AppResult<List<SaleCustomer>> {
+        val trimmed = query.trim().takeIf { it.isNotEmpty() }
+        return when (val result = authorized { customersApi.search(it, trimmed, limit) }) {
+            is AppResult.Success -> AppResult.Success(result.value.filter { it.active }.map { it.toDomain() })
+            is AppResult.Failure -> result
+        }
+    }
+
+    override suspend fun customer(customerId: Long): AppResult<SaleCustomer> =
+        authorized { customersApi.get(it, customerId) }.mapCustomer()
+
+    override suspend fun createCustomer(name: String, phone: String?): AppResult<SaleCustomer> {
+        val request = CreateCustomerRequestDto(
+            name = name.trim(),
+            phone = phone?.trim()?.takeIf { it.isNotEmpty() },
+        )
+        return authorized { customersApi.create(it, request) }.mapCustomer()
+    }
+
+    override suspend fun recordCustomerPayment(
+        customerId: Long,
+        amount: Double,
+        idempotencyKey: String,
+    ): AppResult<CustomerPaymentResult> {
+        val request = CustomerPaymentRequestDto(
+            businessUnitId = businessUnitId,
+            terminalId = terminalId,
+            amount = formatMoney(amount),
+        )
+        return when (val result = authorized { customersApi.recordPayment(it, customerId, idempotencyKey, request) }) {
+            is AppResult.Success -> AppResult.Success(
+                CustomerPaymentResult(
+                    customerId = result.value.customerId,
+                    amount = result.value.amount.toDoubleOrNull() ?: amount,
+                    balance = result.value.balance.toDoubleOrNull() ?: 0.0,
                 ),
             )
             is AppResult.Failure -> result
@@ -249,6 +301,18 @@ class SaleRepositoryImpl(
                 }
             is AppResult.Failure -> SaleMutationResult.Failure(conflict)
         }
+
+    private fun AppResult<CustomerDto>.mapCustomer(): AppResult<SaleCustomer> = when (this) {
+        is AppResult.Success -> AppResult.Success(value.toDomain())
+        is AppResult.Failure -> this
+    }
+
+    private fun CustomerDto.toDomain(): SaleCustomer = SaleCustomer(
+        id = id,
+        name = name,
+        phone = phone?.takeIf { it.isNotBlank() },
+        balance = balance.toDoubleOrNull() ?: 0.0,
+    )
 
     private fun AppResult<DraftDto>.mapDraft(): AppResult<SaleDraft> = when (this) {
         is AppResult.Success -> AppResult.Success(value.toDomain())
@@ -337,6 +401,7 @@ class SaleRepositoryImpl(
     private companion object {
         const val DRAFT_TYPE_SALE = "SALE"
         const val PAYMENT_STATUS_PAID = "PAID"
+        const val PAYMENT_STATUS_ON_CREDIT = "ON_CREDIT"
         const val BARCODE_NOT_FOUND = "Barcode not found"
         const val INSUFFICIENT_STOCK = "Insufficient stock"
         const val KITCHEN_LIMIT = 200

@@ -24,6 +24,9 @@ import com.posfab.shared.features.catalog.ui.CatalogViewModel
 import com.posfab.shared.features.cash.ui.CashSessionScreen
 import com.posfab.shared.features.cash.ui.CashSessionViewModel
 import com.posfab.shared.features.cash.usecase.CashUseCases
+import com.posfab.shared.features.credit.ui.CreditScreen
+import com.posfab.shared.features.credit.ui.CreditViewModel
+import com.posfab.shared.features.credit.usecase.CreditUseCases
 import com.posfab.shared.features.devicesetup.DeviceSetupScreen
 import com.posfab.shared.features.devicesetup.DeviceSetupViewModel
 import com.posfab.shared.features.login.LoginScreen
@@ -118,6 +121,9 @@ fun PosApp(controller: AppStateController) {
                             onNavigateToPos = { shellViewModel.select(ShellRoute.SELL) },
                         )
                     }
+                    val creditViewModel = remember(screen.session) {
+                        CreditViewModel(koin.get<CreditUseCases>())
+                    }
                     val historyViewModel = remember(screen.session) {
                         DailyHistoryViewModel(screen.session, koin.get<ReportsUseCases>())
                     }
@@ -132,6 +138,7 @@ fun PosApp(controller: AppStateController) {
                         onLoggedOut = controller::onLoggedOut,
                         sellContent = { CashierSaleScreen(saleViewModel) },
                         cashContent = { CashSessionScreen(cashViewModel) },
+                        fiadoContent = { CreditScreen(creditViewModel) },
                         dailySalesContent = { DailyHistoryScreen(historyViewModel) },
                         productsContent = { CatalogScreen(catalogViewModel) },
                         helpContent = { DiagnosticsScreen(diagnosticsViewModel) },

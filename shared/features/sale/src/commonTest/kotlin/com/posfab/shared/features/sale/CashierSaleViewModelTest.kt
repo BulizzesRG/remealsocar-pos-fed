@@ -4,7 +4,9 @@ import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
 import com.posfab.shared.features.sale.domain.CashSessionCheck
 import com.posfab.shared.features.sale.domain.CheckoutResult
+import com.posfab.shared.features.sale.domain.CustomerPaymentResult
 import com.posfab.shared.features.sale.domain.SaleChannel
+import com.posfab.shared.features.sale.domain.SaleCustomer
 import com.posfab.shared.features.sale.domain.SaleDraft
 import com.posfab.shared.features.sale.domain.SaleKitchenKind
 import com.posfab.shared.features.sale.domain.SaleLine
@@ -16,6 +18,8 @@ import com.posfab.shared.features.sale.domain.SaleProduct
 import com.posfab.shared.features.sale.domain.SaleTotals
 import com.posfab.shared.features.sale.repository.SaleRepository
 import com.posfab.shared.features.sale.ui.CashierSaleViewModel
+import com.posfab.shared.features.sale.ui.CreditState
+import com.posfab.shared.features.sale.ui.LastAbono
 import com.posfab.shared.features.sale.ui.MAX_ACCOUNTS
 import com.posfab.shared.features.sale.ui.SaleConfirm
 import com.posfab.shared.features.sale.ui.SalePhase
@@ -23,7 +27,9 @@ import com.posfab.shared.features.sale.ui.SalePrompt
 import com.posfab.shared.features.sale.ui.SaleStrings
 import com.posfab.shared.features.sale.ui.WeightMode
 import com.posfab.shared.features.sale.usecase.SaleUseCases
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
@@ -1951,12 +1957,691 @@ class CashierSaleViewModelTest {
         assertEquals(60.0, result.change)
     }
 
+    private fun TestScope.startFiar(repo: FakeSaleRepository): CashierSaleViewModel {
+        val vm = start(repo)
+        vm.addProduct(repo.torta)
+        advanceUntilIdle()
+        vm.startCharge()
+        vm.selectPaymentType(SalePaymentType.CREDIT)
+        return vm
+    }
+
+    private fun TestScope.pickJuan(vm: CashierSaleViewModel, repo: FakeSaleRepository) {
+        vm.onCustomerQueryChange("ju")
+        advanceUntilIdle()
+        vm.selectCustomer(vm.state.value.credit.pickerResults.single { it.id == repo.juan.id })
+    }
+
+    @Test
+    fun selecting_fiar_opens_the_customer_picker() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = startFiar(repo)
+
+        val state = vm.state.value
+        assertEquals(SalePhase.Charging, state.phase)
+        assertEquals(SalePaymentType.CREDIT, state.paymentType)
+        assertTrue(state.credit.showsPicker)
+        assertNull(state.credit.customer)
+        assertFalse(state.canConfirmCharge)
+        assertEquals(42.0, state.amountDue)
+    }
+
+    @Test
+    fun typing_a_customer_name_searches_after_the_debounce() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = startFiar(repo)
+
+        vm.onCustomerQueryChange("j")
+        advanceTimeBy(300)
+        runCurrent()
+        assertTrue(repo.customerSearchQueries.isEmpty())
+
+        vm.onCustomerQueryChange("ju")
+        advanceTimeBy(200)
+        runCurrent()
+        assertTrue(repo.customerSearchQueries.isEmpty())
+
+        advanceTimeBy(100)
+        runCurrent()
+        assertEquals(listOf("ju"), repo.customerSearchQueries)
+        assertEquals(listOf(repo.juan), vm.state.value.credit.pickerResults)
+        assertNull(vm.state.value.credit.customer)
+    }
+
+    @Test
+    fun digits_and_enter_with_a_single_match_select_the_customer() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = startFiar(repo)
+
+        vm.onCustomerQueryChange(JUAN_CODE)
+        vm.submitCustomerQuery()
+        advanceUntilIdle()
+
+        assertEquals(repo.juan, vm.state.value.credit.customer)
+        assertEquals(listOf(JUAN_CODE), repo.customerSearchQueries)
+        assertTrue(vm.state.value.canConfirmCharge)
+    }
+
+    @Test
+    fun digits_and_enter_with_no_match_shows_not_found() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = startFiar(repo)
+
+        vm.onCustomerQueryChange("99999999")
+        vm.submitCustomerQuery()
+        advanceUntilIdle()
+
+        val credit = vm.state.value.credit
+        assertNull(credit.customer)
+        assertTrue(credit.pickerResults.isEmpty())
+        assertTrue(credit.showsNoMatches)
+        assertFalse(vm.state.value.canConfirmCharge)
+    }
+
+    @Test
+    fun selecting_a_customer_shows_the_balance_and_enables_fiar() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = startFiar(repo)
+
+        pickJuan(vm, repo)
+
+        val state = vm.state.value
+        assertEquals(repo.juan, state.credit.customer)
+        assertEquals(350.0, state.credit.customer!!.balance)
+        assertFalse(state.credit.showsPicker)
+        assertTrue(state.credit.showsAbonoRow)
+        assertTrue(state.canConfirmCharge)
+        assertEquals("Juan Pérez · debe $350.00", SaleStrings.owes(repo.juan.name, repo.juan.balance))
+        assertEquals("Fiar $42.00", SaleStrings.confirmLabel(state.paymentType, state.amountDue))
+    }
+
+    @Test
+    fun fiar_sends_credit_with_customer_id_and_list_total() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = startFiar(repo)
+        pickJuan(vm, repo)
+
+        vm.confirmCharge()
+        advanceUntilIdle()
+
+        assertEquals(SalePaymentType.CREDIT, repo.lastPaymentType)
+        assertEquals(repo.juan.id, repo.lastCheckoutCustomerId)
+        assertEquals(42.0, repo.lastPaidAmount)
+        assertEquals(1, repo.checkoutCalls)
+    }
+
+    @Test
+    fun done_after_fiar_shows_fiado_with_the_fetched_balance() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = startFiar(repo)
+        pickJuan(vm, repo)
+        repo.customers[repo.juan.id] = repo.juan.copy(balance = 500.0)
+
+        vm.confirmCharge()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SalePhase.Done, state.phase)
+        val result = state.lastResult!!
+        assertEquals(SalePaymentType.CREDIT, result.paymentType)
+        assertEquals("Juan Pérez", result.customerName)
+        assertEquals(42.0, result.totalCharged)
+        assertEquals(542.0, result.customerBalanceAfter)
+        assertNull(result.change)
+        assertEquals(CreditState(), state.credit)
+        assertEquals(SaleStrings.CREDIT_DONE, SaleStrings.paymentTypeLabel(SalePaymentType.CREDIT))
+    }
+
+    @Test
+    fun done_after_fiar_falls_back_to_old_balance_plus_total_when_the_fetch_fails() = runTest(dispatcher) {
+        val repo = FakeSaleRepository().apply { failCustomerFetchWithNetwork = true }
+        val vm = startFiar(repo)
+        pickJuan(vm, repo)
+        repo.customers[repo.juan.id] = repo.juan.copy(balance = 500.0)
+
+        vm.confirmCharge()
+        advanceUntilIdle()
+
+        val result = vm.state.value.lastResult!!
+        assertEquals(SalePhase.Done, vm.state.value.phase)
+        assertEquals("Juan Pérez", result.customerName)
+        assertEquals(392.0, result.customerBalanceAfter)
+    }
+
+    @Test
+    fun escape_in_the_picker_returns_to_cash() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = startFiar(repo)
+
+        assertTrue(vm.dismissCreditStep())
+
+        assertEquals(SalePhase.Charging, vm.state.value.phase)
+        assertEquals(SalePaymentType.CASH, vm.state.value.paymentType)
+        assertFalse(vm.dismissCreditStep())
+    }
+
+    @Test
+    fun escape_closes_the_new_customer_form_first() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = startFiar(repo)
+        vm.startNewCustomer()
+        assertNotNull(vm.state.value.credit.newCustomer)
+
+        assertTrue(vm.dismissCreditStep())
+        assertNull(vm.state.value.credit.newCustomer)
+        assertEquals(SalePaymentType.CREDIT, vm.state.value.paymentType)
+
+        assertTrue(vm.dismissCreditStep())
+        assertEquals(SalePaymentType.CASH, vm.state.value.paymentType)
+    }
+
+    @Test
+    fun new_customer_is_saved_and_selected() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = startFiar(repo)
+        vm.onCustomerQueryChange("Pedro")
+        vm.startNewCustomer()
+        assertEquals("Pedro", vm.state.value.credit.newCustomer!!.name)
+        assertFalse(vm.state.value.canConfirmCharge)
+
+        vm.onNewCustomerPhone("5559876")
+        vm.saveNewCustomer()
+        advanceUntilIdle()
+
+        val credit = vm.state.value.credit
+        assertNull(credit.newCustomer)
+        assertEquals("Pedro", credit.customer!!.name)
+        assertEquals("5559876", credit.customer!!.phone)
+        assertFalse(credit.showsAbonoRow)
+        assertEquals(1, repo.createCustomerCalls)
+        assertTrue(repo.customerSearchQueries.isEmpty())
+        assertTrue(vm.state.value.canConfirmCharge)
+    }
+
+    @Test
+    fun blank_new_customer_name_is_not_sent() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = startFiar(repo)
+        vm.onCustomerQueryChange(JUAN_CODE)
+        vm.startNewCustomer()
+        assertEquals("", vm.state.value.credit.newCustomer!!.name)
+
+        vm.saveNewCustomer()
+        advanceUntilIdle()
+
+        assertEquals(SaleStrings.CUSTOMER_NAME_REQUIRED, vm.state.value.errorMessage)
+        assertEquals(0, repo.createCustomerCalls)
+    }
+
+    @Test
+    fun conflict_on_create_shows_the_save_failed_message() = runTest(dispatcher) {
+        val repo = FakeSaleRepository().apply { failNextCreateWithConflict = true }
+        val vm = startFiar(repo)
+        vm.startNewCustomer()
+        vm.onNewCustomerName("Juan Pérez")
+
+        vm.saveNewCustomer()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SaleStrings.CUSTOMER_SAVE_FAILED, state.errorMessage)
+        assertNotNull(state.credit.newCustomer)
+        assertFalse(state.credit.newCustomer!!.isSaving)
+        assertNull(state.credit.customer)
+    }
+
+    @Test
+    fun abono_todo_fills_the_balance() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = startFiar(repo)
+        pickJuan(vm, repo)
+
+        vm.payAllDebt()
+
+        assertEquals("350.00", vm.state.value.credit.abonoInput)
+        assertEquals(350.0, vm.state.value.credit.abonoAmount)
+        assertEquals(0, repo.paymentCalls)
+    }
+
+    @Test
+    fun abono_success_updates_the_balance_and_clears_the_field() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = startFiar(repo)
+        pickJuan(vm, repo)
+
+        vm.onAbonoInputChange("100")
+        vm.confirmAbono()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(1, repo.paymentCalls)
+        assertEquals(100.0, repo.lastPaymentAmount)
+        assertEquals(250.0, state.credit.customer!!.balance)
+        assertEquals("", state.credit.abonoInput)
+        assertFalse(state.credit.isAbonoLocked)
+        assertEquals(LastAbono(100.0, "Juan Pérez", 250.0), state.credit.lastAbono)
+        assertEquals(SalePhase.Charging, state.phase)
+        assertEquals(SalePaymentType.CREDIT, state.paymentType)
+        assertEquals(
+            "Abono de $100.00 registrado · Juan Pérez debe ahora $250.00",
+            SaleStrings.abonoRegistered(100.0, "Juan Pérez", 250.0),
+        )
+        assertEquals(
+            "Abono de $250.00 registrado · Juan Pérez ya no debe nada",
+            SaleStrings.abonoRegistered(250.0, "Juan Pérez", 0.0),
+        )
+    }
+
+    @Test
+    fun abono_above_the_balance_shows_the_message() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = startFiar(repo)
+        pickJuan(vm, repo)
+
+        vm.onAbonoInputChange("400")
+        vm.confirmAbono()
+        advanceUntilIdle()
+
+        assertEquals(SaleStrings.ABONO_EXCEEDS_DEBT, vm.state.value.errorMessage)
+        assertEquals(0, repo.paymentCalls)
+        assertEquals(350.0, vm.state.value.credit.customer!!.balance)
+    }
+
+    @Test
+    fun abono_network_failure_keeps_the_key_and_retry_sends_the_same_key() = runTest(dispatcher) {
+        val repo = FakeSaleRepository().apply { failFirstPaymentWithNetwork = true }
+        val vm = startFiar(repo)
+        pickJuan(vm, repo)
+        vm.onAbonoInputChange("100")
+
+        vm.confirmAbono()
+        advanceUntilIdle()
+
+        assertEquals(SaleStrings.NO_CONNECTION, vm.state.value.errorMessage)
+        assertTrue(vm.state.value.credit.isAbonoLocked)
+        vm.onAbonoInputChange("50")
+        vm.payAllDebt()
+        vm.changeCustomer()
+        assertEquals("100", vm.state.value.credit.abonoInput)
+        assertEquals(repo.juan.id, vm.state.value.credit.customer!!.id)
+
+        vm.confirmAbono()
+        advanceUntilIdle()
+
+        assertEquals(2, repo.paymentCalls)
+        assertEquals(1, repo.paymentKeys.distinct().size)
+        assertEquals(250.0, vm.state.value.credit.customer!!.balance)
+        assertFalse(vm.state.value.credit.isAbonoLocked)
+    }
+
+    @Test
+    fun abono_with_the_cash_closed_points_to_caja() = runTest(dispatcher) {
+        val repo = FakeSaleRepository().apply {
+            failPaymentWithValidation = "Open cash session is required for terminalId=3"
+        }
+        val vm = startFiar(repo)
+        pickJuan(vm, repo)
+        vm.onAbonoInputChange("100")
+
+        vm.confirmAbono()
+        advanceUntilIdle()
+
+        assertEquals(SaleStrings.ABONO_CASH_CLOSED, vm.state.value.errorMessage)
+        assertFalse(vm.state.value.credit.isAbonoLocked)
+        assertEquals(350.0, vm.state.value.credit.customer!!.balance)
+    }
+
+    @Test
+    fun rejected_abono_input_is_not_sent() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = startFiar(repo)
+        pickJuan(vm, repo)
+
+        vm.onAbonoInputChange(repo.cigarro.barcode!!)
+        assertTrue(vm.state.value.credit.abonoInputRejected)
+        vm.confirmAbono()
+        advanceUntilIdle()
+
+        assertEquals(SaleStrings.INPUT_REJECTED, vm.state.value.errorMessage)
+        assertEquals("", vm.state.value.credit.abonoInput)
+        assertFalse(vm.state.value.credit.abonoInputRejected)
+        assertEquals(0, repo.paymentCalls)
+    }
+
+    @Test
+    fun abonar_overlay_opens_from_the_cart_with_an_empty_cart() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        assertTrue(vm.state.value.draft!!.lines.isEmpty())
+        assertTrue(vm.state.value.canOpenAbono)
+
+        vm.openAbono()
+        assertTrue(vm.state.value.abonoOverlayOpen)
+        assertTrue(vm.state.value.credit.showsPicker)
+
+        pickJuan(vm, repo)
+        vm.onAbonoInputChange("100")
+        vm.confirmAbono()
+        advanceUntilIdle()
+
+        assertEquals(250.0, vm.state.value.credit.customer!!.balance)
+        assertEquals(LastAbono(100.0, "Juan Pérez", 250.0), vm.state.value.credit.lastAbono)
+        assertEquals(SalePhase.Selling, vm.state.value.phase)
+
+        vm.closeAbono()
+        assertFalse(vm.state.value.abonoOverlayOpen)
+        assertEquals(CreditState(), vm.state.value.credit)
+    }
+
+    @Test
+    fun abonar_overlay_blocks_charging_and_channel_changes() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.torta)
+        advanceUntilIdle()
+
+        vm.openAbono()
+        val state = vm.state.value
+        assertFalse(state.canCharge)
+        assertFalse(state.canSetChannel)
+        assertFalse(state.canOpenAccount)
+        assertFalse(state.canOpenAbono)
+
+        vm.startCharge()
+        vm.setChannel(SaleChannel.ONSITE)
+        vm.openAccount()
+        vm.addProduct(repo.torta)
+        advanceUntilIdle()
+
+        assertEquals(SalePhase.Selling, vm.state.value.phase)
+        assertEquals(0, repo.setChannelCalls)
+        assertEquals(1, repo.addLineCalls + repo.updateLineCalls)
+        assertEquals(1, vm.state.value.accounts.size)
+
+        assertTrue(vm.dismissCreditStep())
+        assertFalse(vm.state.value.abonoOverlayOpen)
+        assertTrue(vm.state.value.canCharge)
+    }
+
+    @Test
+    fun changing_the_payment_type_resets_the_customer() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = startFiar(repo)
+        pickJuan(vm, repo)
+        vm.onAbonoInputChange("20")
+
+        vm.selectPaymentType(SalePaymentType.CARD)
+        assertEquals(CreditState(), vm.state.value.credit)
+
+        vm.selectPaymentType(SalePaymentType.CREDIT)
+        assertTrue(vm.state.value.credit.showsPicker)
+        assertNull(vm.state.value.credit.customer)
+        assertFalse(vm.state.value.canConfirmCharge)
+    }
+
+    @Test
+    fun concurrent_confirm_abono_sends_one_payment() = runTest(dispatcher) {
+        val repo = FakeSaleRepository().apply { paymentDelayMs = 50 }
+        val vm = startFiar(repo)
+        pickJuan(vm, repo)
+        vm.onAbonoInputChange("100")
+
+        vm.confirmAbono()
+        vm.confirmAbono()
+        runCurrent()
+        assertTrue(vm.state.value.credit.isAbonoInFlight)
+        assertFalse(vm.state.value.canConfirmCharge)
+        vm.confirmAbono()
+        advanceUntilIdle()
+
+        assertEquals(1, repo.paymentCalls)
+        assertEquals(250.0, vm.state.value.credit.customer!!.balance)
+    }
+
+    @Test
+    fun scanned_digits_are_not_saved_as_a_customer_name() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = startFiar(repo)
+        vm.startNewCustomer()
+        vm.onNewCustomerName(repo.cigarro.barcode!!)
+
+        vm.saveNewCustomer()
+        advanceUntilIdle()
+
+        assertEquals(SaleStrings.CUSTOMER_NAME_REQUIRED, vm.state.value.errorMessage)
+        assertEquals(0, repo.createCustomerCalls)
+        assertNotNull(vm.state.value.credit.newCustomer)
+    }
+
+    @Test
+    fun enter_with_a_single_name_match_selects_the_customer() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = startFiar(repo)
+
+        vm.onCustomerQueryChange("pérez")
+        vm.submitCustomerQuery()
+        advanceUntilIdle()
+
+        assertEquals(repo.juan, vm.state.value.credit.customer)
+    }
+
+    @Test
+    fun picker_hint_shows_until_two_letters() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = startFiar(repo)
+        assertTrue(vm.state.value.credit.showsPickerHint)
+
+        vm.onCustomerQueryChange("j")
+        assertTrue(vm.state.value.credit.showsPickerHint)
+
+        vm.onCustomerQueryChange("ju")
+        assertFalse(vm.state.value.credit.showsPickerHint)
+    }
+
+    @Test
+    fun abono_lock_blocks_payment_type_back_and_fiar() = runTest(dispatcher) {
+        val repo = FakeSaleRepository().apply { failFirstPaymentWithNetwork = true }
+        val vm = startFiar(repo)
+        pickJuan(vm, repo)
+        vm.onAbonoInputChange("100")
+        vm.confirmAbono()
+        advanceUntilIdle()
+        assertTrue(vm.state.value.credit.isAbonoLocked)
+        assertFalse(vm.state.value.canConfirmCharge)
+
+        vm.selectPaymentType(SalePaymentType.CASH)
+        vm.cancelCharge()
+        vm.confirmCharge()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SalePhase.Charging, state.phase)
+        assertEquals(SalePaymentType.CREDIT, state.paymentType)
+        assertEquals(repo.juan.id, state.credit.customer!!.id)
+        assertTrue(state.credit.isAbonoLocked)
+        assertEquals(0, repo.checkoutCalls)
+    }
+
+    @Test
+    fun abono_lock_keeps_the_abonar_window_open() = runTest(dispatcher) {
+        val repo = FakeSaleRepository().apply { failFirstPaymentWithNetwork = true }
+        val vm = start(repo)
+        vm.openAbono()
+        pickJuan(vm, repo)
+        vm.onAbonoInputChange("100")
+        vm.confirmAbono()
+        advanceUntilIdle()
+
+        vm.closeAbono()
+        assertTrue(vm.dismissCreditStep())
+
+        assertTrue(vm.state.value.abonoOverlayOpen)
+        assertTrue(vm.state.value.credit.isAbonoLocked)
+
+        vm.confirmAbono()
+        advanceUntilIdle()
+        vm.closeAbono()
+        assertFalse(vm.state.value.abonoOverlayOpen)
+        assertEquals(1, repo.paymentKeys.distinct().size)
+    }
+
+    @Test
+    fun load_during_an_abono_in_flight_does_not_reset_it() = runTest(dispatcher) {
+        val repo = FakeSaleRepository().apply { paymentDelayMs = 50 }
+        val vm = startFiar(repo)
+        pickJuan(vm, repo)
+        vm.onAbonoInputChange("100")
+        vm.confirmAbono()
+        runCurrent()
+
+        vm.load()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SalePhase.Charging, state.phase)
+        assertEquals(250.0, state.credit.customer!!.balance)
+        assertEquals(LastAbono(100.0, "Juan Pérez", 250.0), state.credit.lastAbono)
+        assertEquals(1, repo.openDraftsCalls)
+    }
+
+    @Test
+    fun abono_key_is_cleared_after_a_non_network_failure() = runTest(dispatcher) {
+        val repo = FakeSaleRepository().apply { failPaymentWithValidation = "Customer is inactive" }
+        val vm = startFiar(repo)
+        pickJuan(vm, repo)
+        vm.onAbonoInputChange("100")
+        vm.confirmAbono()
+        advanceUntilIdle()
+
+        assertEquals(SaleStrings.CUSTOMER_INACTIVE, vm.state.value.errorMessage)
+        assertNull(vm.state.value.credit.abonoKey)
+        assertEquals("100", vm.state.value.credit.abonoInput)
+
+        repo.failPaymentWithValidation = null
+        vm.confirmAbono()
+        advanceUntilIdle()
+
+        assertEquals(2, repo.paymentKeys.distinct().size)
+    }
+
+    @Test
+    fun escape_clears_the_customer_query_before_leaving_fiar() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = startFiar(repo)
+        vm.onCustomerQueryChange("ju")
+        advanceUntilIdle()
+
+        assertTrue(vm.dismissCreditStep())
+        assertEquals("", vm.state.value.credit.pickerQuery)
+        assertTrue(vm.state.value.credit.pickerResults.isEmpty())
+        assertEquals(SalePaymentType.CREDIT, vm.state.value.paymentType)
+
+        assertTrue(vm.dismissCreditStep())
+        assertEquals(SalePaymentType.CASH, vm.state.value.paymentType)
+    }
+
+    @Test
+    fun keyboard_enter_never_fiar() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = startFiar(repo)
+        pickJuan(vm, repo)
+        assertTrue(vm.state.value.canConfirmCharge)
+
+        vm.confirmChargeFromKeyboard()
+        advanceUntilIdle()
+        assertEquals(0, repo.checkoutCalls)
+        assertEquals(SalePhase.Charging, vm.state.value.phase)
+
+        vm.selectPaymentType(SalePaymentType.CARD)
+        vm.confirmChargeFromKeyboard()
+        advanceUntilIdle()
+        assertEquals(1, repo.checkoutCalls)
+        assertEquals(SalePaymentType.CARD, repo.lastPaymentType)
+    }
+
+    @Test
+    fun abono_window_lists_only_debtors() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.openAbono()
+
+        vm.onCustomerQueryChange("mar")
+        advanceUntilIdle()
+        assertTrue(vm.state.value.credit.pickerResults.isEmpty())
+        assertTrue(vm.state.value.credit.showsNoMatches)
+
+        vm.onCustomerQueryChange("ju")
+        advanceUntilIdle()
+        assertEquals(listOf(repo.juan), vm.state.value.credit.pickerResults)
+    }
+
+    @Test
+    fun late_search_result_for_an_old_query_is_dropped() = runTest(dispatcher) {
+        val repo = FakeSaleRepository().apply { customerSearchDelayMs = 100 }
+        val vm = startFiar(repo)
+
+        vm.onCustomerQueryChange("ju")
+        advanceTimeBy(260)
+        runCurrent()
+        assertEquals(listOf("ju"), repo.customerSearchQueries)
+
+        vm.onCustomerQueryChange("mar")
+        advanceTimeBy(100)
+        runCurrent()
+        assertTrue(vm.state.value.credit.pickerResults.isEmpty())
+
+        advanceUntilIdle()
+        assertEquals(listOf(repo.maria), vm.state.value.credit.pickerResults)
+        assertEquals(listOf("ju", "mar"), repo.customerSearchQueries)
+    }
+
+    @Test
+    fun credit_checkout_network_failure_keeps_the_key_and_the_customer() = runTest(dispatcher) {
+        val repo = FakeSaleRepository().apply { failFirstCheckoutWithNetwork = true }
+        val vm = startFiar(repo)
+        pickJuan(vm, repo)
+
+        vm.confirmCharge()
+        advanceUntilIdle()
+        assertTrue(vm.state.value.isPaidLocked)
+
+        vm.changeCustomer()
+        assertEquals(repo.juan.id, vm.state.value.credit.customer!!.id)
+
+        vm.confirmCharge()
+        advanceUntilIdle()
+        assertEquals(1, repo.checkoutKeys.distinct().size)
+        assertEquals(repo.juan.id, repo.lastCheckoutCustomerId)
+        assertEquals(SalePhase.Done, vm.state.value.phase)
+    }
+
+    @Test
+    fun inactive_customer_on_checkout_allows_choosing_another() = runTest(dispatcher) {
+        val repo = FakeSaleRepository().apply {
+            failCheckoutWithValidation = true
+            checkoutValidationMessage = "Customer is inactive"
+        }
+        val vm = startFiar(repo)
+        pickJuan(vm, repo)
+
+        vm.confirmCharge()
+        advanceUntilIdle()
+
+        assertEquals(SaleStrings.CUSTOMER_INACTIVE, vm.state.value.errorMessage)
+        assertNull(vm.state.value.checkoutIdempotencyKey)
+        vm.changeCustomer()
+        assertNull(vm.state.value.credit.customer)
+        assertTrue(vm.state.value.credit.showsPicker)
+    }
+
     private companion object {
         const val HUMAN_MS = 120L
         const val SCANNER_MS = 5L
         const val PAUSE_MS = 1_000L
     }
 }
+
+private const val JUAN_CODE = "10000019"
 
 private class FakeSaleRepository(
     private val checkoutDelayMs: Long = 0,
@@ -2005,11 +2690,29 @@ private class FakeSaleRepository(
 
     val torta: SaleProduct get() = kitchenPool[1]
 
+    val juan = SaleCustomer(id = 10L, name = "Juan Pérez", phone = "5551234", balance = 350.0)
+    val maria = SaleCustomer(id = 11L, name = "María López", phone = null, balance = 0.0)
+    val customers: MutableMap<Long, SaleCustomer> = mutableMapOf(juan.id to juan, maria.id to maria)
+    private val customerCodes = mapOf(juan.id to JUAN_CODE, maria.id to "10000026")
+    val customerSearchQueries = mutableListOf<String>()
+    var createCustomerCalls = 0
+    var paymentCalls = 0
+    val paymentKeys = mutableListOf<String>()
+    var lastPaymentAmount: Double? = null
+    var lastCheckoutCustomerId: Long? = null
+    var failNextCreateWithConflict = false
+    var failFirstPaymentWithNetwork = false
+    var failPaymentWithValidation: String? = null
+    var failCustomerFetchWithNetwork = false
+    var paymentDelayMs = 0L
+    var customerSearchDelayMs = 0L
+
     val drafts: MutableMap<Long, SaleDraft> = openDraftsSeed.associateWith { emptyDraft(it) }.toMutableMap()
 
     var cashSession: CashSessionCheck = CashSessionCheck.Open
     var failFirstCheckoutWithNetwork = false
     var failCheckoutWithValidation = false
+    var checkoutValidationMessage = "Draft has no lines"
     var forceConflictOnNextUpdate = false
     var failCheckoutWithConflict = false
     var conflictAfterServerCharged = false
@@ -2242,12 +2945,14 @@ private class FakeSaleRepository(
         paymentType: SalePaymentType,
         paidAmount: Double,
         idempotencyKey: String,
+        customerId: Long?,
     ): AppResult<CheckoutResult> {
         checkoutCalls += 1
         callLog += "checkout"
         checkoutKeys += idempotencyKey
         lastPaidAmount = paidAmount
         lastPaymentType = paymentType
+        lastCheckoutCustomerId = customerId
         if (checkoutDelayMs > 0) delay(checkoutDelayMs)
         if (failFirstCheckoutWithNetwork && checkoutCalls == 1) {
             return AppResult.Failure(AppError.Network("network down"))
@@ -2258,18 +2963,72 @@ private class FakeSaleRepository(
             return AppResult.Failure(AppError.Conflict)
         }
         if (failCheckoutWithValidation) {
-            return AppResult.Failure(AppError.Validation("Draft has no lines"))
+            return AppResult.Failure(AppError.Validation(checkoutValidationMessage))
         }
         val draft = drafts[draftId] ?: return AppResult.Failure(notFound())
         drafts[draftId] = draft.copy(status = "CHECKED_OUT", version = draft.version + 1)
+        val total = when (paymentType) {
+            SalePaymentType.CARD, SalePaymentType.CREDIT -> draft.totals.listTotal
+            SalePaymentType.CASH, SalePaymentType.TRANSFER -> draft.totals.cashTotal
+        }
+        if (paymentType == SalePaymentType.CREDIT && customerId != null) {
+            customers[customerId]?.let { customers[customerId] = it.copy(balance = round2(it.balance + total)) }
+        }
         return AppResult.Success(
             CheckoutResult(
                 saleId = 1L,
                 folio = "FOL-0001",
                 paymentType = paymentType,
-                totalCharged = if (paymentType == SalePaymentType.CARD) draft.totals.listTotal else draft.totals.cashTotal,
+                totalCharged = total,
                 paidAmount = paidAmount,
             ),
         )
+    }
+
+    override suspend fun searchCustomers(query: String, limit: Int): AppResult<List<SaleCustomer>> {
+        customerSearchQueries += query
+        if (customerSearchDelayMs > 0) withContext(NonCancellable) { delay(customerSearchDelayMs) }
+        val trimmed = query.trim()
+        val matches = if (trimmed.all(Char::isDigit)) {
+            customers.values.filter { customerCodes[it.id] == trimmed }
+        } else {
+            customers.values.filter { it.name.contains(trimmed, ignoreCase = true) }
+        }
+        return AppResult.Success(matches.sortedBy { it.name }.take(limit))
+    }
+
+    override suspend fun customer(customerId: Long): AppResult<SaleCustomer> {
+        if (failCustomerFetchWithNetwork) return AppResult.Failure(AppError.Network("network down"))
+        return customers[customerId]?.let { AppResult.Success(it) } ?: AppResult.Failure(notFound())
+    }
+
+    override suspend fun createCustomer(name: String, phone: String?): AppResult<SaleCustomer> {
+        createCustomerCalls += 1
+        if (failNextCreateWithConflict) {
+            failNextCreateWithConflict = false
+            return AppResult.Failure(AppError.Conflict)
+        }
+        val created = SaleCustomer(id = 100L + createCustomerCalls, name = name, phone = phone, balance = 0.0)
+        customers[created.id] = created
+        return AppResult.Success(created)
+    }
+
+    override suspend fun recordCustomerPayment(
+        customerId: Long,
+        amount: Double,
+        idempotencyKey: String,
+    ): AppResult<CustomerPaymentResult> {
+        paymentCalls += 1
+        paymentKeys += idempotencyKey
+        lastPaymentAmount = amount
+        if (paymentDelayMs > 0) delay(paymentDelayMs)
+        if (failFirstPaymentWithNetwork && paymentCalls == 1) {
+            return AppResult.Failure(AppError.Network("network down"))
+        }
+        failPaymentWithValidation?.let { return AppResult.Failure(AppError.Validation(it)) }
+        val customer = customers[customerId] ?: return AppResult.Failure(notFound())
+        val updated = customer.copy(balance = round2(customer.balance - amount))
+        customers[customerId] = updated
+        return AppResult.Success(CustomerPaymentResult(customerId, amount, updated.balance))
     }
 }

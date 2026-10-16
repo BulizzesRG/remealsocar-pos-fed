@@ -11,7 +11,9 @@ import com.posfab.shared.core.model.UserRole
 import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
 import com.posfab.shared.features.sale.domain.CheckoutResult
+import com.posfab.shared.features.sale.domain.CustomerPaymentResult
 import com.posfab.shared.features.sale.domain.SaleChannel
+import com.posfab.shared.features.sale.domain.SaleCustomer
 import com.posfab.shared.features.sale.domain.SaleDraft
 import com.posfab.shared.features.sale.domain.SaleKitchenKind
 import com.posfab.shared.features.sale.domain.SaleLineInput
@@ -31,6 +33,13 @@ import com.posfab.shared.network.catalog.ProductPricesDto
 import com.posfab.shared.network.catalog.SetProductPricesRequestDto
 import com.posfab.shared.network.catalog.UnitDto
 import com.posfab.shared.network.catalog.UpdateProductRequestDto
+import com.posfab.shared.network.customers.CreateCustomerRequestDto
+import com.posfab.shared.network.customers.CustomerDto
+import com.posfab.shared.network.customers.CustomerLedgerDto
+import com.posfab.shared.network.customers.CustomerPaymentRequestDto
+import com.posfab.shared.network.customers.CustomerPaymentResponseDto
+import com.posfab.shared.network.customers.CustomersApi
+import com.posfab.shared.network.customers.DebtorDto
 import com.posfab.shared.network.pos.AddLineRequestDto
 import com.posfab.shared.network.pos.BarcodeLookupProductDto
 import com.posfab.shared.network.pos.BarcodeLookupResponseDto
@@ -58,7 +67,11 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class SaleRepositoryImplTest {
-    private suspend fun repository(posApi: FakePosApi, catalogApi: FakeCatalogApi = FakeCatalogApi()): SaleRepositoryImpl {
+    private suspend fun repository(
+        posApi: FakePosApi,
+        catalogApi: FakeCatalogApi = FakeCatalogApi(),
+        customersApi: FakeCustomersApi = FakeCustomersApi(),
+    ): SaleRepositoryImpl {
         val manager = SessionManager(InMemorySessionStorage())
         manager.set(
             UserSession(
@@ -68,7 +81,7 @@ class SaleRepositoryImplTest {
             ),
         )
         val executor = AuthorizedApiExecutor(NoRefreshAuthRepository(manager), manager)
-        return SaleRepositoryImpl(posApi, catalogApi, TERMINAL_ID, executor)
+        return SaleRepositoryImpl(posApi, catalogApi, customersApi, TERMINAL_ID, BUSINESS_UNIT_ID, executor)
     }
 
     @Test
@@ -251,7 +264,8 @@ class SaleRepositoryImplTest {
             )
 
             val request = posApi.checkoutRequests.single()
-            assertEquals("PAID", request.paymentStatus)
+            assertEquals(if (type == SalePaymentType.CREDIT) "ON_CREDIT" else "PAID", request.paymentStatus)
+            assertNull(request.customerId)
             assertEquals(type.name, request.paymentType)
             assertEquals("100.00", request.paidAmount)
             assertEquals("key-${type.name}", request.idempotencyKey)
@@ -266,6 +280,84 @@ class SaleRepositoryImplTest {
                 assertNull(charged.change)
             }
         }
+    }
+
+    @Test
+    fun checkout_on_credit_sends_on_credit_status_and_customer_id() = runTest {
+        val posApi = FakePosApi()
+        val result = repository(posApi).checkout(
+            draftId = 7L,
+            paymentType = SalePaymentType.CREDIT,
+            paidAmount = 66.15,
+            idempotencyKey = "key-credit",
+            customerId = 10L,
+        )
+
+        val request = posApi.checkoutRequests.single()
+        assertEquals("ON_CREDIT", request.paymentStatus)
+        assertEquals("CREDIT", request.paymentType)
+        assertEquals(10L, request.customerId)
+        assertEquals("66.15", request.paidAmount)
+        assertEquals("key-credit", request.idempotencyKey)
+        val charged = assertIs<AppResult.Success<CheckoutResult>>(result).value
+        assertEquals(SalePaymentType.CREDIT, charged.paymentType)
+        assertNull(charged.change)
+    }
+
+    @Test
+    fun checkout_ignores_the_customer_outside_credit() = runTest {
+        val posApi = FakePosApi()
+        repository(posApi).checkout(7L, SalePaymentType.CASH, 100.0, "key-cash", customerId = 10L)
+
+        val request = posApi.checkoutRequests.single()
+        assertEquals("PAID", request.paymentStatus)
+        assertNull(request.customerId)
+    }
+
+    @Test
+    fun record_payment_sends_idempotency_key_business_unit_and_terminal() = runTest {
+        val customersApi = FakeCustomersApi()
+        val result = repository(FakePosApi(), customersApi = customersApi)
+            .recordCustomerPayment(customerId = 10L, amount = 100.5, idempotencyKey = "abono-10")
+
+        val call = customersApi.paymentCalls.single()
+        assertEquals(10L, call.customerId)
+        assertEquals("abono-10", call.idempotencyKey)
+        assertEquals(CustomerPaymentRequestDto(BUSINESS_UNIT_ID, TERMINAL_ID, "100.50"), call.request)
+        val paid = assertIs<AppResult.Success<CustomerPaymentResult>>(result).value
+        assertEquals(CustomerPaymentResult(customerId = 10L, amount = 100.5, balance = 249.5), paid)
+    }
+
+    @Test
+    fun search_customers_trims_the_query_and_passes_the_limit() = runTest {
+        val customersApi = FakeCustomersApi()
+        val repository = repository(FakePosApi(), customersApi = customersApi)
+
+        val result = repository.searchCustomers("  Juan  ", 6)
+        repository.searchCustomers("   ", 6)
+
+        assertEquals(listOf<String?>("Juan", null), customersApi.searchQueries)
+        assertEquals(listOf(6, 6), customersApi.searchLimits)
+        val customers = assertIs<AppResult.Success<List<SaleCustomer>>>(result).value
+        assertEquals(listOf(SaleCustomer(10L, "Juan Pérez", "5551234", 350.0)), customers)
+    }
+
+    @Test
+    fun create_customer_maps_blank_phone_to_null() = runTest {
+        val customersApi = FakeCustomersApi()
+        val repository = repository(FakePosApi(), customersApi = customersApi)
+
+        val created = repository.createCustomer("  Pedro  ", "   ")
+        repository.createCustomer("Ana", " 555 1234 ")
+
+        assertEquals(
+            listOf(CreateCustomerRequestDto("Pedro", null), CreateCustomerRequestDto("Ana", "555 1234")),
+            customersApi.createRequests,
+        )
+        val customer = assertIs<AppResult.Success<SaleCustomer>>(created).value
+        assertEquals("Pedro", customer.name)
+        assertNull(customer.phone)
+        assertEquals(0.0, customer.balance)
     }
 
     @Test
@@ -617,6 +709,7 @@ class SaleRepositoryImplTest {
 
     private companion object {
         const val TERMINAL_ID = 3L
+        const val BUSINESS_UNIT_ID = 1L
     }
 }
 
@@ -794,4 +887,51 @@ private class FakeCatalogApi(
 
     override suspend fun findByBarcode(accessToken: String, barcode: String): AppResult<BarcodeLookupResponseDto> =
         error("unused")
+}
+
+private data class PaymentCall(
+    val customerId: Long,
+    val idempotencyKey: String,
+    val request: CustomerPaymentRequestDto,
+)
+
+private class FakeCustomersApi : CustomersApi {
+    val searchQueries = mutableListOf<String?>()
+    val searchLimits = mutableListOf<Int>()
+    val createRequests = mutableListOf<CreateCustomerRequestDto>()
+    val paymentCalls = mutableListOf<PaymentCall>()
+
+    private val juan = CustomerDto(id = 10L, code = "10000019", name = "Juan Pérez", phone = "5551234", balance = "350.00")
+    private val inactive = CustomerDto(id = 12L, name = "Juana Baja", active = false, balance = "20.00")
+
+    override suspend fun search(accessToken: String, query: String?, limit: Int): AppResult<List<CustomerDto>> {
+        searchQueries += query
+        searchLimits += limit
+        return AppResult.Success(listOf(juan, inactive))
+    }
+
+    override suspend fun get(accessToken: String, customerId: Long): AppResult<CustomerDto> =
+        AppResult.Success(juan)
+
+    override suspend fun create(accessToken: String, request: CreateCustomerRequestDto): AppResult<CustomerDto> {
+        createRequests += request
+        return AppResult.Success(CustomerDto(id = 20L + createRequests.size, name = request.name, phone = request.phone, balance = "0"))
+    }
+
+    override suspend fun recordPayment(
+        accessToken: String,
+        customerId: Long,
+        idempotencyKey: String,
+        request: CustomerPaymentRequestDto,
+    ): AppResult<CustomerPaymentResponseDto> {
+        paymentCalls += PaymentCall(customerId, idempotencyKey, request)
+        return AppResult.Success(
+            CustomerPaymentResponseDto(id = 1L, customerId = customerId, amount = request.amount, balance = "249.50"),
+        )
+    }
+
+    override suspend fun debtors(accessToken: String): AppResult<List<DebtorDto>> = AppResult.Success(emptyList())
+
+    override suspend fun ledger(accessToken: String, customerId: Long, limit: Int): AppResult<CustomerLedgerDto> =
+        AppResult.Success(CustomerLedgerDto(customer = juan))
 }

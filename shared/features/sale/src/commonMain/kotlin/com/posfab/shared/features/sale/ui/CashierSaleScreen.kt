@@ -7,6 +7,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -26,6 +27,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachMoney
 import androidx.compose.material.icons.filled.Check
@@ -84,6 +86,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.posfab.shared.features.sale.domain.CheckoutResult
 import com.posfab.shared.features.sale.domain.SaleChannel
@@ -194,18 +197,29 @@ private fun SellingView(state: CashierSaleState, viewModel: CashierSaleViewModel
     val searchFocus = remember { FocusRequester() }
     var searchFocused by remember { mutableStateOf(false) }
     var paidFocused by remember { mutableStateOf(false) }
+    var customerFocused by remember { mutableStateOf(false) }
+    var abonoFocused by remember { mutableStateOf(false) }
     val focusSearch: () -> Unit = { runCatching { searchFocus.requestFocus() } }
 
     val promptOpen = state.prompt != null
     var wasPromptOpen by remember { mutableStateOf(promptOpen) }
+    val sellingOrDone = state.phase == SalePhase.Selling || state.phase == SalePhase.Done
 
-    LaunchedEffect(state.phase, state.paymentType) {
+    LaunchedEffect(state.phase, state.paymentType, state.abonoOverlayOpen) {
         if (state.phase != SalePhase.Charging || state.paymentType != SalePaymentType.CASH) paidFocused = false
-        if (state.prompt == null && (state.phase == SalePhase.Selling || state.phase == SalePhase.Done)) focusSearch()
+        if (!state.isCustomerStepActive) {
+            customerFocused = false
+            abonoFocused = false
+        }
+        if (state.prompt == null && !state.abonoOverlayOpen && sellingOrDone) focusSearch()
+    }
+
+    LaunchedEffect(state.credit.customer?.id) {
+        if (state.isCreditCharge && state.credit.customer != null) focusSearch()
     }
 
     LaunchedEffect(promptOpen) {
-        if (wasPromptOpen && !promptOpen && (state.phase == SalePhase.Selling || state.phase == SalePhase.Done)) {
+        if (wasPromptOpen && !promptOpen && !state.abonoOverlayOpen && sellingOrDone) {
             focusSearch()
         }
         wasPromptOpen = promptOpen
@@ -215,9 +229,12 @@ private fun SellingView(state: CashierSaleState, viewModel: CashierSaleViewModel
         modifier = Modifier
             .fillMaxSize()
             .onPreviewKeyEvent { event ->
-                if (state.prompt != null && event.isEscapeUp()) {
-                    viewModel.dismissPrompt()
-                    return@onPreviewKeyEvent true
+                if (event.isEscapeUp()) {
+                    if (state.prompt != null) {
+                        viewModel.dismissPrompt()
+                        return@onPreviewKeyEvent true
+                    }
+                    return@onPreviewKeyEvent viewModel.dismissCreditStep()
                 }
                 if (!event.isEnterUp()) return@onPreviewKeyEvent false
                 if (state.prompt != null) {
@@ -226,9 +243,22 @@ private fun SellingView(state: CashierSaleState, viewModel: CashierSaleViewModel
                 }
                 if (state.confirm != null) return@onPreviewKeyEvent false
                 when {
+                    customerFocused && state.credit.newCustomer != null -> {
+                        viewModel.saveNewCustomer()
+                        true
+                    }
+                    customerFocused -> {
+                        viewModel.submitCustomerQuery()
+                        true
+                    }
+                    abonoFocused -> {
+                        viewModel.confirmAbono()
+                        true
+                    }
+                    state.abonoOverlayOpen -> true
                     state.phase == SalePhase.Charging &&
                         (paidFocused || state.paymentType != SalePaymentType.CASH) -> {
-                        viewModel.confirmCharge()
+                        viewModel.confirmChargeFromKeyboard()
                         true
                     }
                     searchFocused && (state.phase == SalePhase.Selling || state.phase == SalePhase.Done) -> {
@@ -255,7 +285,10 @@ private fun SellingView(state: CashierSaleState, viewModel: CashierSaleViewModel
                         accounts = state.accounts,
                         activeDraftId = state.activeDraftId,
                         canOpen = state.canOpenAccount,
-                        enabled = state.phase != SalePhase.Charging && state.confirm == null && state.prompt == null,
+                        enabled = state.phase != SalePhase.Charging &&
+                            state.confirm == null &&
+                            state.prompt == null &&
+                            !state.abonoOverlayOpen,
                         onSelect = { id ->
                             viewModel.selectAccount(id)
                             focusSearch()
@@ -279,7 +312,7 @@ private fun SellingView(state: CashierSaleState, viewModel: CashierSaleViewModel
                     )
                 }
                 PosNoticeRow(notice = state.notice, errorMessage = null)
-                if (state.phase != SalePhase.Charging && state.prompt == null) {
+                if (state.phase != SalePhase.Charging && state.prompt == null && !state.abonoOverlayOpen) {
                     state.errorMessage?.let { PosErrorBanner(error = it) }
                 }
                 val result = state.lastResult
@@ -317,6 +350,17 @@ private fun SellingView(state: CashierSaleState, viewModel: CashierSaleViewModel
                 state = state,
                 viewModel = viewModel,
                 onPaidFocusChange = { paidFocused = it },
+                onCustomerFocusChange = { customerFocused = it },
+                onAbonoFocusChange = { abonoFocused = it },
+            )
+        }
+
+        if (state.abonoOverlayOpen) {
+            AbonoOverlay(
+                state = state,
+                viewModel = viewModel,
+                onCustomerFocusChange = { customerFocused = it },
+                onAbonoFocusChange = { abonoFocused = it },
             )
         }
 
@@ -515,16 +559,27 @@ private fun CartPanel(state: CashierSaleState, viewModel: CashierSaleViewModel, 
                 else -> null
             }
             if (footerLabel != null) {
-                TextButton(onClick = viewModel::requestClear, enabled = !state.isBusy) {
+                TextButton(
+                    onClick = viewModel::requestClear,
+                    enabled = !state.isBusy && !state.abonoOverlayOpen,
+                    modifier = Modifier.focusProperties { canFocus = false },
+                ) {
                     Text(footerLabel)
                 }
             }
+            PosSecondaryButton(
+                text = SaleStrings.ABONO,
+                onClick = viewModel::openAbono,
+                enabled = state.canOpenAbono,
+                icon = Icons.Filled.AccountBalanceWallet,
+                modifier = Modifier.height(64.dp).focusProperties { canFocus = false },
+            )
             PosPrimaryButton(
                 text = SaleStrings.chargeLabel(state.listTotal),
                 onClick = viewModel::startCharge,
                 enabled = state.canCharge,
                 icon = Icons.Filled.Payments,
-                modifier = Modifier.weight(1f).height(64.dp),
+                modifier = Modifier.weight(1f).height(64.dp).focusProperties { canFocus = false },
             )
         }
     }
@@ -648,9 +703,30 @@ private fun DonePanel(result: CheckoutResult, onNext: () -> Unit, modifier: Modi
                     modifier = Modifier.size(48.dp),
                     tint = MaterialTheme.colorScheme.primary,
                 )
-                Text(SaleStrings.CHARGED, style = MaterialTheme.typography.headlineMedium)
-                Text(SaleStrings.paymentTypeLabel(result.paymentType), style = MaterialTheme.typography.titleLarge)
+                val onCredit = result.paymentType == SalePaymentType.CREDIT
+                if (onCredit) {
+                    Text(
+                        result.customerName?.let(SaleStrings::creditDoneTitle) ?: SaleStrings.CREDIT_DONE,
+                        style = MaterialTheme.typography.headlineMedium,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                } else {
+                    Text(SaleStrings.CHARGED, style = MaterialTheme.typography.headlineMedium)
+                    Text(SaleStrings.paymentTypeLabel(result.paymentType), style = MaterialTheme.typography.titleLarge)
+                }
                 PosMoneyText(amount = result.totalCharged, style = MaterialTheme.typography.headlineMedium)
+                if (onCredit) {
+                    result.customerBalanceAfter?.let { balance ->
+                        Text(
+                            SaleStrings.OWES_NOW,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        PosMoneyText(amount = balance, style = MaterialTheme.typography.displayMedium)
+                    }
+                }
                 result.change?.let { change ->
                     if (change <= 0.0) {
                         Text(SaleStrings.EXACT_PAYMENT, style = MaterialTheme.typography.titleLarge)
@@ -673,7 +749,7 @@ private fun DonePanel(result: CheckoutResult, onNext: () -> Unit, modifier: Modi
                 PosPrimaryButton(
                     text = SaleStrings.NEXT,
                     onClick = onNext,
-                    modifier = Modifier.fillMaxWidth().height(56.dp),
+                    modifier = Modifier.fillMaxWidth().height(56.dp).focusProperties { canFocus = false },
                 )
             }
         }
@@ -812,8 +888,8 @@ private fun ProductPriceLabel(product: SaleProduct, channel: SaleChannel, style:
 }
 
 @Composable
-private fun ModalScrim(content: @Composable () -> Unit) {
-    Box(
+private fun ModalScrim(width: Dp = 520.dp, content: @Composable () -> Unit) {
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black.copy(alpha = 0.5f))
@@ -824,10 +900,10 @@ private fun ModalScrim(content: @Composable () -> Unit) {
             shape = MaterialTheme.shapes.large,
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 6.dp,
-            modifier = Modifier.width(520.dp),
+            modifier = Modifier.width(width).heightIn(max = maxHeight - MODAL_VERTICAL_MARGIN),
         ) {
             Column(
-                modifier = Modifier.padding(PosSpacing.xl),
+                modifier = Modifier.verticalScroll(rememberScrollState()).padding(PosSpacing.xl),
                 verticalArrangement = Arrangement.spacedBy(PosSpacing.lg),
             ) {
                 content()
@@ -980,38 +1056,57 @@ private fun promptPreview(state: CashierSaleState, mode: WeightMode?, price: Dou
 }
 
 private const val PLACEHOLDER_ALPHA = 0.6f
+private val MODAL_VERTICAL_MARGIN = 32.dp
 
 @Composable
 private fun ChargeOverlay(
     state: CashierSaleState,
     viewModel: CashierSaleViewModel,
     onPaidFocusChange: (Boolean) -> Unit,
+    onCustomerFocusChange: (Boolean) -> Unit,
+    onAbonoFocusChange: (Boolean) -> Unit,
 ) {
     val amountEnabled = !state.isCheckoutInFlight && !state.isPaidLocked
+    val onCredit = state.paymentType == SalePaymentType.CREDIT
+    val newCustomerOpen = onCredit && state.credit.newCustomer != null
     val paidFocus = remember { FocusRequester() }
     LaunchedEffect(state.paymentType) {
         if (state.paymentType == SalePaymentType.CASH && amountEnabled) {
             runCatching { paidFocus.requestFocus() }
         }
     }
-    ModalScrim {
+    ModalScrim(width = CHARGE_OVERLAY_WIDTH) {
         PosChoiceRow(
             options = listOf(
                 SalePaymentType.CASH to SaleStrings.PAYMENT_CASH,
                 SalePaymentType.TRANSFER to SaleStrings.PAYMENT_TRANSFER,
                 SalePaymentType.CARD to SaleStrings.PAYMENT_CARD,
+                SalePaymentType.CREDIT to SaleStrings.PAYMENT_CREDIT,
             ),
             selected = state.paymentType,
             onSelect = viewModel::selectPaymentType,
-            enabled = amountEnabled,
+            enabled = amountEnabled && !state.credit.isAbonoInFlight,
             height = 56.dp,
-            textStyle = MaterialTheme.typography.titleMedium,
+            textStyle = MaterialTheme.typography.titleSmall,
             modifier = Modifier.fillMaxWidth().focusProperties { canFocus = false },
         )
         if (state.isPaidLocked) {
             PaidLockedHint()
         }
-        ChargeAmounts(state = state)
+        if (onCredit) {
+            CustomerCreditPanel(
+                credit = state.credit,
+                enabled = amountEnabled,
+                viewModel = viewModel,
+                onCustomerFocusChange = onCustomerFocusChange,
+                onAbonoFocusChange = onAbonoFocusChange,
+                focusAbonoOnSelect = false,
+                abonoProminent = false,
+                amounts = { ChargeAmounts(state = state) },
+            )
+        } else {
+            ChargeAmounts(state = state)
+        }
         if (state.paymentType == SalePaymentType.CASH) {
             CashPaymentInput(
                 state = state,
@@ -1024,33 +1119,69 @@ private fun ChargeOverlay(
             )
         }
         state.errorMessage?.let { PosErrorBanner(error = it) }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(PosSpacing.md),
-        ) {
-            PosSecondaryButton(
-                text = SaleStrings.BACK,
-                onClick = viewModel::cancelCharge,
-                enabled = !state.isCheckoutInFlight,
-                modifier = Modifier.weight(1f),
-            )
-            PosPrimaryButton(
-                text = SaleStrings.confirmLabel(state.paymentType, state.amountDue),
-                onClick = viewModel::confirmCharge,
-                enabled = state.canConfirmCharge,
-                isLoading = state.isCheckoutInFlight,
-                modifier = Modifier.weight(1f).height(56.dp),
-            )
+        if (!newCustomerOpen) {
+            ChargeFooter(state = state, viewModel = viewModel)
         }
+    }
+}
+
+@Composable
+private fun ChargeFooter(state: CashierSaleState, viewModel: CashierSaleViewModel) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(PosSpacing.md),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        PosSecondaryButton(
+            text = SaleStrings.BACK,
+            onClick = viewModel::cancelCharge,
+            enabled = !state.isCheckoutInFlight && !state.credit.isAbonoBusy,
+            modifier = Modifier.weight(1f).focusProperties { canFocus = false },
+        )
+        PosPrimaryButton(
+            text = SaleStrings.confirmLabel(state.paymentType, state.amountDue),
+            onClick = viewModel::confirmCharge,
+            enabled = state.canConfirmCharge,
+            isLoading = state.isCheckoutInFlight,
+            modifier = Modifier.weight(1f).height(56.dp).focusProperties { canFocus = false },
+        )
+    }
+}
+
+@Composable
+private fun AbonoOverlay(
+    state: CashierSaleState,
+    viewModel: CashierSaleViewModel,
+    onCustomerFocusChange: (Boolean) -> Unit,
+    onAbonoFocusChange: (Boolean) -> Unit,
+) {
+    ModalScrim {
+        Text(SaleStrings.ABONO, style = MaterialTheme.typography.headlineSmall)
+        CustomerCreditPanel(
+            credit = state.credit,
+            enabled = true,
+            viewModel = viewModel,
+            onCustomerFocusChange = onCustomerFocusChange,
+            onAbonoFocusChange = onAbonoFocusChange,
+            focusAbonoOnSelect = true,
+            debtorsOnly = true,
+        )
+        state.errorMessage?.let { PosErrorBanner(error = it) }
+        PosSecondaryButton(
+            text = SaleStrings.BACK,
+            onClick = viewModel::closeAbono,
+            enabled = !state.credit.isAbonoBusy,
+            modifier = Modifier.fillMaxWidth().height(56.dp).focusProperties { canFocus = false },
+        )
     }
 }
 
 @Composable
 private fun ChargeAmounts(state: CashierSaleState) {
     Column(verticalArrangement = Arrangement.spacedBy(PosSpacing.xs)) {
-        if (state.paymentType == SalePaymentType.CARD) {
+        if (state.paymentType == SalePaymentType.CARD || state.paymentType == SalePaymentType.CREDIT) {
             AmountRow(
-                label = SaleStrings.AMOUNT_DUE,
+                label = if (state.paymentType == SalePaymentType.CREDIT) SaleStrings.AMOUNT_ON_TAB else SaleStrings.AMOUNT_DUE,
                 modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
             ) {
                 PosMoneyText(amount = state.listTotal, style = MaterialTheme.typography.displayMedium)
@@ -1121,12 +1252,14 @@ private fun CashPaymentInput(
                 text = SaleStrings.EXACT,
                 onClick = viewModel::payExact,
                 enabled = amountEnabled,
+                modifier = Modifier.focusProperties { canFocus = false },
             )
             SaleStrings.QUICK_BILLS.forEach { bill ->
                 PosSecondaryButton(
                     text = SaleStrings.quickBill(bill),
                     onClick = { viewModel.payWith(bill) },
                     enabled = amountEnabled,
+                    modifier = Modifier.focusProperties { canFocus = false },
                 )
             }
         }
@@ -1187,3 +1320,4 @@ private fun KeyEvent.isEnterUp(): Boolean =
 private fun KeyEvent.isEscapeUp(): Boolean = type == KeyEventType.KeyUp && key == Key.Escape
 
 private const val DISABLED_ALPHA = 0.5f
+private val CHARGE_OVERLAY_WIDTH = 600.dp

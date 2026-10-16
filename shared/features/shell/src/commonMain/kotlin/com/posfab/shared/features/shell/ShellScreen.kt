@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Inventory2
@@ -45,6 +46,7 @@ fun ShellScreen(
     onLoggedOut: () -> Unit,
     sellContent: @Composable () -> Unit,
     cashContent: @Composable () -> Unit,
+    fiadoContent: @Composable () -> Unit,
     dailySalesContent: @Composable () -> Unit,
     productsContent: @Composable () -> Unit,
     helpContent: @Composable () -> Unit,
@@ -84,6 +86,7 @@ fun ShellScreen(
                 )
                 ShellRoute.SELL -> sellContent()
                 ShellRoute.CASH -> cashContent()
+                ShellRoute.FIADO -> fiadoContent()
                 ShellRoute.DAILY_SALES -> dailySalesContent()
                 ShellRoute.PRODUCTS -> productsContent()
                 ShellRoute.HELP -> helpContent()
@@ -165,6 +168,7 @@ internal fun routeIcon(route: ShellRoute): ImageVector = when (route) {
     ShellRoute.HOME -> Icons.Filled.Home
     ShellRoute.SELL -> Icons.Filled.ShoppingCart
     ShellRoute.CASH -> Icons.Filled.Payments
+    ShellRoute.FIADO -> Icons.Filled.AccountBalanceWallet
     ShellRoute.DAILY_SALES -> Icons.Filled.BarChart
     ShellRoute.PRODUCTS -> Icons.Filled.Inventory2
     ShellRoute.HELP -> Icons.AutoMirrored.Filled.HelpOutline

@@ -11,6 +11,11 @@ object SaleErrorText {
         "Draft has no lines" to SaleStrings.NOTHING_TO_CHARGE,
         "Draft version mismatch" to SaleStrings.SALE_CHANGED,
         "Insufficient stock" to SaleStrings.INSUFFICIENT_STOCK,
+        "amount exceeds balance" to SaleStrings.ABONO_EXCEEDS_DEBT,
+        "Customer is inactive" to SaleStrings.CUSTOMER_INACTIVE,
+        "Customer not found" to SaleStrings.CUSTOMER_NOT_FOUND,
+        "Customer code already exists" to SaleStrings.CUSTOMER_CODE_EXISTS,
+        "name is required" to SaleStrings.CUSTOMER_NAME_REQUIRED,
     )
 
     fun from(error: AppError): String = when (error) {

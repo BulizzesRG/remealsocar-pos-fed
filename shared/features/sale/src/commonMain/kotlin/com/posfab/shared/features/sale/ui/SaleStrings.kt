@@ -59,6 +59,31 @@ internal object SaleStrings {
     const val PAYMENT_CASH = "Efectivo"
     const val PAYMENT_TRANSFER = "Transferencia"
     const val PAYMENT_CARD = "Tarjeta"
+    const val PAYMENT_CREDIT = "Fiar"
+    const val CREDIT_DONE = "Fiado"
+    const val CUSTOMER_SEARCH_LABEL = "Nombre del cliente"
+    const val NEW_CUSTOMER = "Nuevo cliente"
+    const val CUSTOMER_NAME_LABEL = "Nombre del cliente"
+    const val CUSTOMER_PHONE_LABEL = "Teléfono (opcional)"
+    const val SAVE = "Guardar"
+    const val CHANGE_CUSTOMER = "Otro cliente"
+    const val NO_DEBT = "Sin deuda"
+    const val ABONO = "Abonar"
+    const val ABONO_ALL = "Todo"
+    const val OWES_NOW = "Debe ahora"
+    const val NO_CUSTOMERS_FOUND = "No hay nadie con ese nombre"
+    const val NO_DEBTORS_FOUND = "Nadie con ese nombre te debe"
+    const val PICKER_HINT = "Escribe al menos 2 letras"
+    const val ABONO_FIELD_LABEL = "¿Cuánto abona?"
+    const val AMOUNT_ON_TAB = "Se anota"
+    const val CUSTOMER_SAVE_FAILED = "No se pudo guardar el cliente, intenta de nuevo"
+    const val CUSTOMER_NAME_REQUIRED = "Escribe el nombre del cliente"
+    const val CUSTOMER_CODE_EXISTS = "Ya existe un cliente con ese código"
+    const val ABONO_EXCEEDS_DEBT = "El abono no puede ser mayor que lo que debe"
+    const val CUSTOMER_INACTIVE = "Este cliente está dado de baja"
+    const val CUSTOMER_NOT_FOUND = "No se encontró el cliente"
+    const val ABONO_CASH_CLOSED = "La caja está cerrada. Abre el día en Caja para registrar el abono"
+    const val ABONO_LOCKED = "Abono en curso: vuelve a tocar Abonar para reintentar"
     const val CHANNEL_TAKEAWAY = "Para llevar"
     const val CHANNEL_ONSITE = "Aquí"
     const val CASH_DISCOUNT = "Descuento por pago en efectivo"
@@ -96,6 +121,7 @@ internal object SaleStrings {
         SalePaymentType.CASH -> PAYMENT_CASH
         SalePaymentType.TRANSFER -> PAYMENT_TRANSFER
         SalePaymentType.CARD -> PAYMENT_CARD
+        SalePaymentType.CREDIT -> CREDIT_DONE
     }
 
     fun discount(amount: Double): String = "\u2212${money(amount)}"
@@ -111,6 +137,22 @@ internal object SaleStrings {
         SalePaymentType.CASH -> "Cobrar ${money(amount)} en efectivo"
         SalePaymentType.TRANSFER -> "Cobrar ${money(amount)} con transferencia"
         SalePaymentType.CARD -> "Cobrar ${money(amount)} con tarjeta"
+        SalePaymentType.CREDIT -> "Fiar ${money(amount)}"
+    }
+
+    fun creditDoneTitle(name: String): String = "Fiado a $name"
+
+    fun owes(name: String, balance: Double): String = "$name · ${owesAmount(balance)}"
+
+    fun noDebt(name: String): String = "$name · $NO_DEBT"
+
+    fun owesAmount(balance: Double): String = "debe ${money(balance)}"
+
+    fun abonoLabel(amount: Double?): String = if (amount == null) ABONO else "$ABONO ${money(amount)}"
+
+    fun abonoRegistered(amount: Double, name: String, balanceAfter: Double): String {
+        val after = if (roundCents(balanceAfter) <= 0L) "$name ya no debe nada" else "$name debe ahora ${money(balanceAfter)}"
+        return "Abono de ${money(amount)} registrado · $after"
     }
 
     fun chargeLabel(total: Double): String = "Cobrar ${money(total)}"
@@ -150,6 +192,8 @@ internal object SaleStrings {
     fun folio(folio: String): String = "Folio $folio"
 
     fun couldNotComplete(message: String): String = "No se pudo completar: $message"
+
+    private fun roundCents(amount: Double): Long = round(amount * 100.0).toLong()
 
     fun money(amount: Double): String {
         val cents = round(amount * 100.0).toLong()

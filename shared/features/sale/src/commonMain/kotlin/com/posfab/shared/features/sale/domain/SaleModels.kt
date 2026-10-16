@@ -47,7 +47,23 @@ enum class SalePaymentType {
     CASH,
     TRANSFER,
     CARD,
+    CREDIT,
 }
+
+data class SaleCustomer(
+    val id: Long,
+    val name: String,
+    val phone: String?,
+    val balance: Double,
+) {
+    val hasDebt: Boolean get() = roundMoney(balance) > 0.0
+}
+
+data class CustomerPaymentResult(
+    val customerId: Long,
+    val amount: Double,
+    val balance: Double,
+)
 
 data class SaleProduct(
     val id: Long,
@@ -118,6 +134,8 @@ data class CheckoutResult(
     val paymentType: SalePaymentType,
     val totalCharged: Double,
     val paidAmount: Double,
+    val customerName: String? = null,
+    val customerBalanceAfter: Double? = null,
 ) {
     val change: Double?
         get() = if (paymentType == SalePaymentType.CASH) roundMoney(paidAmount - totalCharged) else null

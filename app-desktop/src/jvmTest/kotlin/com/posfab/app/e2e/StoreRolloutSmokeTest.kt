@@ -25,7 +25,9 @@ import com.posfab.shared.features.reports.manager.ManagerRepository
 import com.posfab.shared.features.reports.manager.WasteItem
 import com.posfab.shared.features.sale.domain.CashSessionCheck
 import com.posfab.shared.features.sale.domain.CheckoutResult
+import com.posfab.shared.features.sale.domain.CustomerPaymentResult
 import com.posfab.shared.features.sale.domain.SaleChannel
+import com.posfab.shared.features.sale.domain.SaleCustomer
 import com.posfab.shared.features.sale.domain.SaleDraft
 import com.posfab.shared.features.sale.domain.SaleLine
 import com.posfab.shared.features.sale.domain.SaleLineInput
@@ -291,6 +293,7 @@ private class FakeStoreBackend :
         paymentType: SalePaymentType,
         paidAmount: Double,
         idempotencyKey: String,
+        customerId: Long?,
     ): AppResult<CheckoutResult> {
         checkoutCalls += 1
         if (failFirstCheckout && checkoutCalls == 1) {
@@ -311,6 +314,21 @@ private class FakeStoreBackend :
             )
         )
     }
+
+    override suspend fun searchCustomers(query: String, limit: Int): AppResult<List<SaleCustomer>> =
+        AppResult.Success(emptyList())
+
+    override suspend fun customer(customerId: Long): AppResult<SaleCustomer> =
+        AppResult.Failure(AppError.Validation("Customer not found"))
+
+    override suspend fun createCustomer(name: String, phone: String?): AppResult<SaleCustomer> =
+        AppResult.Success(SaleCustomer(id = 1L, name = name, phone = phone, balance = 0.0))
+
+    override suspend fun recordCustomerPayment(
+        customerId: Long,
+        amount: Double,
+        idempotencyKey: String,
+    ): AppResult<CustomerPaymentResult> = AppResult.Failure(AppError.Validation("amount exceeds balance"))
 
     override suspend fun newDraft(): AppResult<SaleDraft> {
         draftCounter += 1

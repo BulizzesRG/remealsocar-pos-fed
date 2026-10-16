@@ -3,7 +3,9 @@ package com.posfab.shared.features.sale.repository
 import com.posfab.shared.core.result.AppResult
 import com.posfab.shared.features.sale.domain.CashSessionCheck
 import com.posfab.shared.features.sale.domain.CheckoutResult
+import com.posfab.shared.features.sale.domain.CustomerPaymentResult
 import com.posfab.shared.features.sale.domain.SaleChannel
+import com.posfab.shared.features.sale.domain.SaleCustomer
 import com.posfab.shared.features.sale.domain.SaleDraft
 import com.posfab.shared.features.sale.domain.SaleLineInput
 import com.posfab.shared.features.sale.domain.SaleMutationResult
@@ -30,5 +32,14 @@ interface SaleRepository {
         paymentType: SalePaymentType,
         paidAmount: Double,
         idempotencyKey: String,
+        customerId: Long? = null,
     ): AppResult<CheckoutResult>
+    suspend fun searchCustomers(query: String, limit: Int): AppResult<List<SaleCustomer>>
+    suspend fun customer(customerId: Long): AppResult<SaleCustomer>
+    suspend fun createCustomer(name: String, phone: String?): AppResult<SaleCustomer>
+    suspend fun recordCustomerPayment(
+        customerId: Long,
+        amount: Double,
+        idempotencyKey: String,
+    ): AppResult<CustomerPaymentResult>
 }

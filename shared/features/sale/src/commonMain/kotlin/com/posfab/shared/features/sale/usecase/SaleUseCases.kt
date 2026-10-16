@@ -3,7 +3,9 @@ package com.posfab.shared.features.sale.usecase
 import com.posfab.shared.core.result.AppResult
 import com.posfab.shared.features.sale.domain.CashSessionCheck
 import com.posfab.shared.features.sale.domain.CheckoutResult
+import com.posfab.shared.features.sale.domain.CustomerPaymentResult
 import com.posfab.shared.features.sale.domain.SaleChannel
+import com.posfab.shared.features.sale.domain.SaleCustomer
 import com.posfab.shared.features.sale.domain.SaleDraft
 import com.posfab.shared.features.sale.domain.SaleLineInput
 import com.posfab.shared.features.sale.domain.SaleMutationResult
@@ -60,5 +62,20 @@ class SaleUseCases(private val repository: SaleRepository) {
         paymentType: SalePaymentType,
         paidAmount: Double,
         idempotencyKey: String,
-    ): AppResult<CheckoutResult> = repository.checkout(draftId, paymentType, paidAmount, idempotencyKey)
+        customerId: Long? = null,
+    ): AppResult<CheckoutResult> = repository.checkout(draftId, paymentType, paidAmount, idempotencyKey, customerId)
+
+    suspend fun searchCustomers(query: String, limit: Int): AppResult<List<SaleCustomer>> =
+        repository.searchCustomers(query, limit)
+
+    suspend fun customer(customerId: Long): AppResult<SaleCustomer> = repository.customer(customerId)
+
+    suspend fun createCustomer(name: String, phone: String?): AppResult<SaleCustomer> =
+        repository.createCustomer(name, phone)
+
+    suspend fun recordCustomerPayment(
+        customerId: Long,
+        amount: Double,
+        idempotencyKey: String,
+    ): AppResult<CustomerPaymentResult> = repository.recordCustomerPayment(customerId, amount, idempotencyKey)
 }
