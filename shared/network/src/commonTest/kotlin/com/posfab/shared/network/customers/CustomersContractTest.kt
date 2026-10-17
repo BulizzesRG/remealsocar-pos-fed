@@ -230,4 +230,53 @@ class CustomersContractTest {
         assertEquals(emptyList(), success.value.entries)
         assertEquals("/customers/4/ledger?limit=100", path)
     }
+
+    @Test
+    fun customer_with_address_decodes() {
+        val body = """{"id":7,"name":"Rosa","address":"Calle 5 #12","balance":"0.00"}"""
+        val dto = json.decodeFromString<CustomerDto>(body)
+        assertEquals("Calle 5 #12", dto.address)
+        assertNull(json.decodeFromString<CustomerDto>("""{"id":8,"name":"Lupe","balance":"0.00"}""").address)
+    }
+
+    @Test
+    fun create_sends_address_when_present_and_omits_it_otherwise() = runTest {
+        val bodies = mutableListOf<String>()
+        val engine = MockEngine { request ->
+            bodies += (request.body as OutgoingContent.ByteArrayContent).bytes().decodeToString()
+            respond("""{"id":7,"name":"Rosa","address":"Calle 5 #12","balance":"0.00"}""", HttpStatusCode.Created, jsonHeaders)
+        }
+        val api = CustomersApiClient(HttpClientFactory.create(config, engine), config)
+
+        val result = api.create("tok", CreateCustomerRequestDto(name = "Rosa", address = "Calle 5 #12"))
+        api.create("tok", CreateCustomerRequestDto(name = "Lupe"))
+
+        assertEquals("Calle 5 #12", assertIs<AppResult.Success<CustomerDto>>(result).value.address)
+        assertEquals("""{"name":"Rosa","address":"Calle 5 #12"}""", bodies[0])
+        assertEquals("""{"name":"Lupe"}""", bodies[1])
+    }
+
+    @Test
+    fun update_address_puts_address_body() = runTest {
+        var method: HttpMethod? = null
+        var path = ""
+        var auth: String? = null
+        var sentBody = ""
+        val engine = MockEngine { request ->
+            method = request.method
+            path = request.url.encodedPath
+            auth = request.headers["Authorization"]
+            sentBody = (request.body as OutgoingContent.ByteArrayContent).bytes().decodeToString()
+            respond("""{"id":7,"name":"Rosa","address":"Calle 9","balance":"0.00"}""", HttpStatusCode.OK, jsonHeaders)
+        }
+        val api = CustomersApiClient(HttpClientFactory.create(config, engine), config)
+
+        val result = api.updateAddress("tok", 7L, "Calle 9")
+
+        assertEquals("Calle 9", assertIs<AppResult.Success<CustomerDto>>(result).value.address)
+        assertEquals(HttpMethod.Put, method)
+        assertEquals("/customers/7/address", path)
+        assertEquals("Bearer tok", auth)
+        assertEquals("""{"address":"Calle 9"}""", sentBody)
+    }
 }

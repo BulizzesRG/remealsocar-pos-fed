@@ -23,11 +23,22 @@ class RouteGuardTest {
         UserRole.STOCKER,
         setOf(Permission.VIEW_PRODUCTS, Permission.COUNT_STOCK),
     )
+    private val orders = session(
+        UserRole.ORDERS,
+        setOf(Permission.VIEW_PRODUCTS, Permission.MANAGE_ORDERS),
+    )
 
     @Test
     fun manager_modules_follow_permissions() {
         assertEquals(
-            listOf(ShellRoute.SELL, ShellRoute.CASH, ShellRoute.FIADO, ShellRoute.DAILY_SALES, ShellRoute.PRODUCTS),
+            listOf(
+                ShellRoute.SELL,
+                ShellRoute.CASH,
+                ShellRoute.FIADO,
+                ShellRoute.DAILY_SALES,
+                ShellRoute.PEDIDOS,
+                ShellRoute.PRODUCTS,
+            ),
             RouteGuard.modules(manager),
         )
     }
@@ -44,7 +55,7 @@ class RouteGuardTest {
 
     @Test
     fun home_and_help_are_allowed_for_everyone() {
-        listOf(manager, cashier, stocker).forEach {
+        listOf(manager, cashier, stocker, orders).forEach {
             assertTrue(RouteGuard.canAccess(it, ShellRoute.HOME))
             assertTrue(RouteGuard.canAccess(it, ShellRoute.HELP))
         }
@@ -60,6 +71,27 @@ class RouteGuardTest {
     fun cashier_is_denied_fiado() {
         assertFalse(RouteGuard.canAccess(cashier, ShellRoute.FIADO))
         assertTrue(RouteGuard.canAccess(manager, ShellRoute.FIADO))
+    }
+
+    @Test
+    fun orders_role_sees_only_pedidos() {
+        assertEquals(listOf(ShellRoute.PEDIDOS), RouteGuard.modules(orders))
+        assertEquals(listOf(ShellRoute.HOME, ShellRoute.PEDIDOS, ShellRoute.HELP), RouteGuard.allowedRoutes(orders))
+    }
+
+    @Test
+    fun cashier_and_stocker_are_denied_pedidos() {
+        assertFalse(RouteGuard.canAccess(cashier, ShellRoute.PEDIDOS))
+        assertFalse(RouteGuard.canAccess(stocker, ShellRoute.PEDIDOS))
+        assertTrue(RouteGuard.canAccess(manager, ShellRoute.PEDIDOS))
+    }
+
+    @Test
+    fun pedidos_comes_right_after_daily_sales() {
+        val routes = ShellRoute.entries
+        assertEquals(routes.indexOf(ShellRoute.DAILY_SALES) + 1, routes.indexOf(ShellRoute.PEDIDOS))
+        assertEquals("Pedidos", ShellRoute.PEDIDOS.title)
+        assertEquals(Permission.MANAGE_ORDERS, ShellRoute.PEDIDOS.permission)
     }
 
     @Test

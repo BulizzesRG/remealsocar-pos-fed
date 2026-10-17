@@ -11,6 +11,7 @@ enum class Permission {
     VIEW_CREDIT,
     MANAGE_CREDIT,
     MANAGE_CASH,
+    MANAGE_ORDERS,
     MANAGE_USERS;
 
     companion object {

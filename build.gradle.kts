@@ -18,6 +18,7 @@ val includedModules = listOf(
     ":shared:features:catalog",
     ":shared:features:operations",
     ":shared:features:reports",
+    ":shared:features:orders",
     ":shared:features:device-setup",
     ":shared:ui",
     ":shared:config",

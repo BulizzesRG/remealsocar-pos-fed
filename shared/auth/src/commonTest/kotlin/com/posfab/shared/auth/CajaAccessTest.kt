@@ -20,6 +20,11 @@ class CajaAccessTest {
     }
 
     @Test
+    fun orders_role_permissions_allow_caja() {
+        assertTrue(CajaAccess.allows(user(Permission.VIEW_PRODUCTS, Permission.MANAGE_ORDERS)))
+    }
+
+    @Test
     fun empty_permissions_do_not_allow_caja() {
         assertFalse(CajaAccess.allows(user()))
     }

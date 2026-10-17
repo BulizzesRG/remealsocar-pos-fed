@@ -4,7 +4,8 @@ enum class UserRole {
     CASHIER,
     ADMIN,
     MANAGER,
-    STOCKER;
+    STOCKER,
+    ORDERS;
 
     companion object {
         fun fromRaw(value: String): UserRole? = entries.firstOrNull { it.name.equals(value, ignoreCase = true) }

@@ -21,6 +21,9 @@ import com.posfab.shared.features.credit.repository.CreditRepository
 import com.posfab.shared.features.credit.repository.CreditRepositoryImpl
 import com.posfab.shared.features.credit.usecase.CreditUseCases
 import com.posfab.shared.features.operations.common.OperationsUseCases
+import com.posfab.shared.features.orders.repository.OrdersRepository
+import com.posfab.shared.features.orders.repository.OrdersRepositoryImpl
+import com.posfab.shared.features.orders.usecase.OrdersUseCases
 import com.posfab.shared.features.operations.repository.OperationsRepository
 import com.posfab.shared.features.operations.repository.OperationsRepositoryImpl
 import com.posfab.shared.features.reports.common.ReportsRepositoryImpl
@@ -47,6 +50,8 @@ import com.posfab.shared.network.device.DeviceApiClient
 import com.posfab.shared.network.http.HttpClientFactory
 import com.posfab.shared.network.operations.OperationsApi
 import com.posfab.shared.network.operations.OperationsApiClient
+import com.posfab.shared.network.orders.OrdersApi
+import com.posfab.shared.network.orders.OrdersApiClient
 import com.posfab.shared.network.pos.PosApi
 import com.posfab.shared.network.pos.PosApiClient
 import com.posfab.shared.network.reports.ReportsApi
@@ -82,6 +87,7 @@ fun desktopModule(config: PosConfig): Module = module {
     single<OperationsApi> { OperationsApiClient(get(), get()) }
     single<CashApi> { CashApiClient(get(), get()) }
     single<CustomersApi> { CustomersApiClient(get(), get()) }
+    single<OrdersApi> { OrdersApiClient(get(), get()) }
     single<ReportsApi> { ReportsApiClient(get(), get()) }
     single<DeviceApi> { DeviceApiClient(get(), get()) }
     single<AuthRepository> { AuthRepositoryImpl(get(), get()) }
@@ -106,6 +112,9 @@ fun desktopModule(config: PosConfig): Module = module {
             ?: error("CreditRepository created before device registration")
         CreditRepositoryImpl(get(), get(), device.businessUnitId)
     }
+    factory<OrdersRepository> {
+        OrdersRepositoryImpl(get<OrdersApi>(), get<PosApi>(), get<CatalogApi>(), get<CustomersApi>(), get())
+    }
     single<ReportsRepositoryImpl> { ReportsRepositoryImpl(get(), get()) }
     single<SalesRepository> { get<ReportsRepositoryImpl>() }
     single<ManagerRepository> { get<ReportsRepositoryImpl>() }
@@ -117,6 +126,7 @@ fun desktopModule(config: PosConfig): Module = module {
     single { OperationsUseCases(get()) }
     single { CashUseCases(get()) }
     single { CreditUseCases(get()) }
+    single { OrdersUseCases(get()) }
     single { ReportsUseCases(get(), get()) }
     single { AuthorizedApiExecutor(get(), get()) }
     single { AppStateController(get(), get(), get(), get()) }

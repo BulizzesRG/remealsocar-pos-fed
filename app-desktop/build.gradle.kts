@@ -23,6 +23,7 @@ kotlin {
             implementation(project(":shared:features:catalog"))
             implementation(project(":shared:features:operations"))
             implementation(project(":shared:features:reports"))
+            implementation(project(":shared:features:orders"))
             implementation(project(":shared:ui"))
             implementation(compose.desktop.currentOs)
             implementation(compose.runtime)

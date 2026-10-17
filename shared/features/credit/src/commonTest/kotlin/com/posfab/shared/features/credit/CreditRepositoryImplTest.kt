@@ -230,6 +230,9 @@ private class FakeCustomersApi(
         request: CustomerPaymentRequestDto,
     ): AppResult<CustomerPaymentResponseDto> = AppResult.Failure(AppError.Unknown("unused"))
 
+    override suspend fun updateAddress(accessToken: String, customerId: Long, address: String): AppResult<CustomerDto> =
+        AppResult.Failure(AppError.Unknown("unused"))
+
     override suspend fun debtors(accessToken: String): AppResult<List<DebtorDto>> = debtors
 
     override suspend fun ledger(accessToken: String, customerId: Long, limit: Int): AppResult<CustomerLedgerDto> {

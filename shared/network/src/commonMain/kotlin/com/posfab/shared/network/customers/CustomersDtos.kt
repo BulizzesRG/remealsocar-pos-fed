@@ -9,6 +9,7 @@ data class CustomerDto(
     val name: String,
     val nickname: String? = null,
     val phone: String? = null,
+    val address: String? = null,
     val creditLimit: String? = null,
     val active: Boolean = true,
     val balance: String,
@@ -19,6 +20,12 @@ data class CreateCustomerRequestDto(
     val name: String,
     val nickname: String? = null,
     val phone: String? = null,
+    val address: String? = null,
+)
+
+@Serializable
+data class UpdateCustomerAddressRequestDto(
+    val address: String,
 )
 
 @Serializable

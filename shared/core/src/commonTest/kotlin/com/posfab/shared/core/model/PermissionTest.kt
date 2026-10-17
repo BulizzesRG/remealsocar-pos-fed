@@ -10,6 +10,7 @@ class PermissionTest {
         assertEquals(Permission.OPEN_CASH, Permission.fromRaw("OPEN_CASH"))
         assertEquals(Permission.MANAGE_USERS, Permission.fromRaw("MANAGE_USERS"))
         assertEquals(Permission.MANAGE_CASH, Permission.fromRaw("MANAGE_CASH"))
+        assertEquals(Permission.MANAGE_ORDERS, Permission.fromRaw("MANAGE_ORDERS"))
     }
 
     @Test

@@ -9,6 +9,7 @@ import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.parameter
 import io.ktor.client.request.post
+import io.ktor.client.request.put
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -18,6 +19,7 @@ interface CustomersApi {
     suspend fun search(accessToken: String, query: String?, limit: Int): AppResult<List<CustomerDto>>
     suspend fun get(accessToken: String, customerId: Long): AppResult<CustomerDto>
     suspend fun create(accessToken: String, request: CreateCustomerRequestDto): AppResult<CustomerDto>
+    suspend fun updateAddress(accessToken: String, customerId: Long, address: String): AppResult<CustomerDto>
     suspend fun recordPayment(
         accessToken: String,
         customerId: Long,
@@ -67,6 +69,18 @@ class CustomersApiClient(
             bearer(accessToken)
             contentType(ContentType.Application.Json)
             setBody(request)
+        }
+    }
+
+    override suspend fun updateAddress(
+        accessToken: String,
+        customerId: Long,
+        address: String,
+    ): AppResult<CustomerDto> = safeCall {
+        httpClient.put("${config.apiBaseUrl}/customers/$customerId/address") {
+            bearer(accessToken)
+            contentType(ContentType.Application.Json)
+            setBody(UpdateCustomerAddressRequestDto(address))
         }
     }
 

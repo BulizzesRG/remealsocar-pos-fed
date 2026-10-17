@@ -27,6 +27,9 @@ import com.posfab.shared.features.cash.usecase.CashUseCases
 import com.posfab.shared.features.credit.ui.CreditScreen
 import com.posfab.shared.features.credit.ui.CreditViewModel
 import com.posfab.shared.features.credit.usecase.CreditUseCases
+import com.posfab.shared.features.orders.ui.OrdersScreen
+import com.posfab.shared.features.orders.ui.OrdersViewModel
+import com.posfab.shared.features.orders.usecase.OrdersUseCases
 import com.posfab.shared.features.devicesetup.DeviceSetupScreen
 import com.posfab.shared.features.devicesetup.DeviceSetupViewModel
 import com.posfab.shared.features.login.LoginScreen
@@ -127,6 +130,9 @@ fun PosApp(controller: AppStateController) {
                     val salesViewModel = remember(screen.session) {
                         SalesViewModel(koin.get<ReportsUseCases>())
                     }
+                    val ordersViewModel = remember(screen.session) {
+                        OrdersViewModel(koin.get<OrdersUseCases>())
+                    }
                     val diagnosticsViewModel = remember(screen.session) {
                         DiagnosticsViewModel(screen.session, koin.get(), koin.get())
                     }
@@ -140,6 +146,7 @@ fun PosApp(controller: AppStateController) {
                         cashContent = { CashScreen(cashViewModel) },
                         fiadoContent = { CreditScreen(creditViewModel) },
                         dailySalesContent = { SalesScreen(salesViewModel) },
+                        pedidosContent = { OrdersScreen(ordersViewModel) },
                         productsContent = { CatalogScreen(catalogViewModel) },
                         helpContent = { DiagnosticsScreen(diagnosticsViewModel) },
                     )
