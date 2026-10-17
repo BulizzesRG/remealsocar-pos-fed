@@ -14,11 +14,20 @@ import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 interface CustomersApi {
-    suspend fun search(accessToken: String, query: String?, limit: Int): AppResult<List<CustomerDto>>
+    suspend fun search(
+        accessToken: String,
+        query: String?,
+        limit: Int,
+        includeInactive: Boolean = false,
+    ): AppResult<List<CustomerDto>>
     suspend fun get(accessToken: String, customerId: Long): AppResult<CustomerDto>
     suspend fun create(accessToken: String, request: CreateCustomerRequestDto): AppResult<CustomerDto>
+    suspend fun update(accessToken: String, customerId: Long, request: UpdateCustomerRequestDto): AppResult<CustomerDto>
     suspend fun updateAddress(accessToken: String, customerId: Long, address: String): AppResult<CustomerDto>
     suspend fun recordPayment(
         accessToken: String,
@@ -44,11 +53,13 @@ class CustomersApiClient(
         accessToken: String,
         query: String?,
         limit: Int,
+        includeInactive: Boolean,
     ): AppResult<List<CustomerDto>> = safeCall {
         httpClient.get("${config.apiBaseUrl}/customers") {
             bearer(accessToken)
             query?.takeIf { it.isNotBlank() }?.let { parameter("q", it) }
             parameter("limit", limit)
+            if (includeInactive) parameter(INCLUDE_INACTIVE_PARAM, true)
         }
     }
 
@@ -69,6 +80,18 @@ class CustomersApiClient(
             bearer(accessToken)
             contentType(ContentType.Application.Json)
             setBody(request)
+        }
+    }
+
+    override suspend fun update(
+        accessToken: String,
+        customerId: Long,
+        request: UpdateCustomerRequestDto,
+    ): AppResult<CustomerDto> = safeCall {
+        httpClient.put("${config.apiBaseUrl}/customers/$customerId") {
+            bearer(accessToken)
+            contentType(ContentType.Application.Json)
+            setBody(request.toJsonWithExplicitNulls())
         }
     }
 
@@ -129,11 +152,20 @@ class CustomersApiClient(
         }
     }
 
+    private fun UpdateCustomerRequestDto.toJsonWithExplicitNulls(): JsonObject = buildJsonObject {
+        put("name", name)
+        put("nickname", nickname)
+        put("phone", phone)
+        put("address", address)
+        put("active", active)
+    }
+
     private fun HttpRequestBuilder.bearer(accessToken: String) {
         header(HttpHeaders.Authorization, "Bearer $accessToken")
     }
 
     private companion object {
         const val IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"
+        const val INCLUDE_INACTIVE_PARAM = "include_inactive"
     }
 }

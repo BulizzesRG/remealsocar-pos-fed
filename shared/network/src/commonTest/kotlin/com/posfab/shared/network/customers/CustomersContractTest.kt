@@ -3,6 +3,7 @@ package com.posfab.shared.network.customers
 import com.posfab.shared.config.PosConfig
 import com.posfab.shared.config.PosEnv
 import com.posfab.shared.core.logging.LogLevel
+import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
 import com.posfab.shared.network.http.HttpClientFactory
 import io.ktor.client.engine.mock.MockEngine
@@ -10,6 +11,7 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.http.ContentType
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.Url
 import io.ktor.http.content.OutgoingContent
 import io.ktor.http.headersOf
 import kotlinx.coroutines.test.runTest
@@ -278,5 +280,85 @@ class CustomersContractTest {
         assertEquals("/customers/7/address", path)
         assertEquals("Bearer tok", auth)
         assertEquals("""{"address":"Calle 9"}""", sentBody)
+    }
+
+    @Test
+    fun update_puts_the_full_customer_with_explicit_nulls() = runTest {
+        var method: HttpMethod? = null
+        var path = ""
+        var auth: String? = null
+        val bodies = mutableListOf<String>()
+        val engine = MockEngine { request ->
+            method = request.method
+            path = request.url.encodedPath
+            auth = request.headers["Authorization"]
+            bodies += (request.body as OutgoingContent.ByteArrayContent).bytes().decodeToString()
+            respond(
+                """{"id":13,"code":"30000117","name":"Lupe","nickname":"Doña Lupe","active":false,"balance":"379.00"}""",
+                HttpStatusCode.OK,
+                jsonHeaders,
+            )
+        }
+        val api = CustomersApiClient(HttpClientFactory.create(config, engine), config)
+
+        val result = api.update(
+            "tok",
+            13L,
+            UpdateCustomerRequestDto(name = "Lupe", nickname = "Doña Lupe", phone = null, address = null, active = false),
+        )
+        api.update(
+            "tok",
+            13L,
+            UpdateCustomerRequestDto(name = "Lupe", nickname = null, phone = "5551122896", address = "Av juarez 5", active = true),
+        )
+
+        val dto = assertIs<AppResult.Success<CustomerDto>>(result).value
+        assertFalse(dto.active)
+        assertEquals("30000117", dto.code)
+        assertEquals(HttpMethod.Put, method)
+        assertEquals("/customers/13", path)
+        assertEquals("Bearer tok", auth)
+        assertEquals(
+            """{"name":"Lupe","nickname":"Doña Lupe","phone":null,"address":null,"active":false}""",
+            bodies[0],
+        )
+        assertEquals(
+            """{"name":"Lupe","nickname":null,"phone":"5551122896","address":"Av juarez 5","active":true}""",
+            bodies[1],
+        )
+    }
+
+    @Test
+    fun update_maps_a_validation_error() = runTest {
+        val engine = MockEngine {
+            respond("""{"error":"phone must have 10 digits"}""", HttpStatusCode.BadRequest, jsonHeaders)
+        }
+        val api = CustomersApiClient(HttpClientFactory.create(config, engine), config)
+
+        val result = api.update("tok", 13L, UpdateCustomerRequestDto("Lupe", null, "555", null, true))
+
+        val error = assertIs<AppResult.Failure>(result).error
+        assertIs<AppError.Validation>(error)
+        assertEquals(true, error.message.contains("phone must have 10 digits"))
+    }
+
+    @Test
+    fun search_sends_include_inactive_only_when_asked() = runTest {
+        val urls = mutableListOf<Url>()
+        val engine = MockEngine { request ->
+            urls += request.url
+            respond("""[{"id":2,"code":"30000025","name":"María","active":false,"balance":"0.00"}]""", HttpStatusCode.OK, jsonHeaders)
+        }
+        val api = CustomersApiClient(HttpClientFactory.create(config, engine), config)
+
+        api.search("tok", "mar", 10)
+        val result = api.search("tok", "mar", 10, includeInactive = true)
+
+        assertNull(urls[0].parameters["include_inactive"])
+        assertEquals("mar", urls[0].parameters["q"])
+        assertEquals("10", urls[0].parameters["limit"])
+        assertEquals("true", urls[1].parameters["include_inactive"])
+        assertEquals("/customers", urls[1].encodedPath)
+        assertFalse(assertIs<AppResult.Success<List<CustomerDto>>>(result).value.single().active)
     }
 }

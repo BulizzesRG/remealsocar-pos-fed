@@ -18,6 +18,15 @@ object CreditErrorText {
         "nickname too long" to CreditStrings.NICKNAME_TOO_LONG,
     )
 
+    private val editMessages: List<Pair<String, String>> = listOf(
+        "Customer not found" to CreditStrings.NOT_FOUND,
+        "phone must have 10 digits" to CreditStrings.PHONE_INVALID,
+        "nickname too long" to CreditStrings.NICKNAME_TOO_LONG,
+        "address too long" to CreditStrings.ADDRESS_TOO_LONG,
+        "name too long" to CreditStrings.NAME_TOO_LONG,
+        "name is required" to CreditStrings.NAME_REQUIRED,
+    )
+
     fun from(error: AppError): String = when (error) {
         AppError.Unauthorized -> "Tu sesión terminó. Vuelve a entrar."
         AppError.Forbidden -> "No tienes permiso para ver el fiado"
@@ -33,6 +42,14 @@ object CreditErrorText {
         AppError.Forbidden -> CreditStrings.NO_PERMISSION
         is AppError.Validation -> translate(error.message, libretaMessages) ?: CreditStrings.SAVE_FAILED
         is AppError.Unknown -> translate(error.message, libretaMessages) ?: CreditStrings.SAVE_FAILED
+        else -> CreditStrings.SAVE_FAILED
+    }
+
+    fun edit(error: AppError): String = when (error) {
+        is AppError.Network -> CreditStrings.NETWORK
+        AppError.Forbidden -> CreditStrings.NO_EDIT_PERMISSION
+        is AppError.Validation -> translate(error.message, editMessages) ?: CreditStrings.SAVE_FAILED
+        is AppError.Unknown -> translate(error.message, editMessages) ?: CreditStrings.SAVE_FAILED
         else -> CreditStrings.SAVE_FAILED
     }
 

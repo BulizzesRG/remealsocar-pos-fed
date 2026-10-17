@@ -27,7 +27,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
@@ -62,6 +61,7 @@ import com.posfab.shared.features.catalog.domain.PriceType
 import com.posfab.shared.ui.components.PosChoiceRow
 import com.posfab.shared.ui.components.PosConfirmDialog
 import com.posfab.shared.ui.components.PosErrorBanner
+import com.posfab.shared.ui.components.PosLabeledSwitch
 import com.posfab.shared.ui.components.PosMoneyText
 import com.posfab.shared.ui.components.PosNoticeRow
 import com.posfab.shared.ui.components.PosPrimaryButton
@@ -477,7 +477,7 @@ private fun ProductFormPane(state: CatalogState, viewModel: CatalogViewModel) {
                 }
                 if (state.showCountSection) {
                     if (form.priceType != PriceType.OPEN) {
-                        LabeledSwitch(
+                        PosLabeledSwitch(
                             label = CatalogStrings.COUNTED,
                             description = CatalogStrings.COUNTED_HINT,
                             checked = form.counted,
@@ -498,7 +498,7 @@ private fun ProductFormPane(state: CatalogState, viewModel: CatalogViewModel) {
             }
 
             PosSectionCard {
-                LabeledSwitch(
+                PosLabeledSwitch(
                     label = CatalogStrings.ACTIVE,
                     description = CatalogStrings.ACTIVE_HINT,
                     checked = form.active,
@@ -606,26 +606,5 @@ private fun PriceRow(
             keyboardOptions = keyboard,
             modifier = Modifier.weight(1f),
         )
-    }
-}
-
-@Composable
-private fun LabeledSwitch(
-    label: String,
-    description: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-            Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }

@@ -44,6 +44,7 @@ import com.posfab.shared.network.customers.CustomersApi
 import com.posfab.shared.network.customers.DebtorDto
 import com.posfab.shared.network.customers.OpeningBalanceRequestDto
 import com.posfab.shared.network.customers.OpeningBalanceResponseDto
+import com.posfab.shared.network.customers.UpdateCustomerRequestDto
 import com.posfab.shared.network.pos.AddLineRequestDto
 import com.posfab.shared.network.pos.BarcodeLookupProductDto
 import com.posfab.shared.network.pos.BarcodeLookupResponseDto
@@ -1056,6 +1057,7 @@ private data class PaymentCall(
 private class FakeCustomersApi : CustomersApi {
     val searchQueries = mutableListOf<String?>()
     val searchLimits = mutableListOf<Int>()
+    val searchIncludeInactive = mutableListOf<Boolean>()
     val createRequests = mutableListOf<CreateCustomerRequestDto>()
     val paymentCalls = mutableListOf<PaymentCall>()
 
@@ -1069,9 +1071,15 @@ private class FakeCustomersApi : CustomersApi {
     )
     private val inactive = CustomerDto(id = 12L, name = "Juana Baja", active = false, balance = "20.00")
 
-    override suspend fun search(accessToken: String, query: String?, limit: Int): AppResult<List<CustomerDto>> {
+    override suspend fun search(
+        accessToken: String,
+        query: String?,
+        limit: Int,
+        includeInactive: Boolean,
+    ): AppResult<List<CustomerDto>> {
         searchQueries += query
         searchLimits += limit
+        searchIncludeInactive += includeInactive
         return AppResult.Success(listOf(juan, inactive))
     }
 
@@ -1109,6 +1117,12 @@ private class FakeCustomersApi : CustomersApi {
         idempotencyKey: String,
         request: OpeningBalanceRequestDto,
     ): AppResult<OpeningBalanceResponseDto> = AppResult.Failure(AppError.Unknown("unused"))
+
+    override suspend fun update(
+        accessToken: String,
+        customerId: Long,
+        request: UpdateCustomerRequestDto,
+    ): AppResult<CustomerDto> = AppResult.Failure(AppError.Unknown("unused"))
 
     override suspend fun updateAddress(accessToken: String, customerId: Long, address: String): AppResult<CustomerDto> =
         AppResult.Failure(AppError.Unknown("unused"))

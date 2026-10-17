@@ -10,6 +10,7 @@ import com.posfab.shared.auth.session.SessionManager
 import com.posfab.shared.core.model.UserRole
 import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
+import com.posfab.shared.features.credit.domain.CustomerEdit
 import com.posfab.shared.features.credit.domain.CustomerMatch
 import com.posfab.shared.features.credit.domain.CustomerStatement
 import com.posfab.shared.features.credit.domain.Debtor
@@ -25,10 +26,12 @@ import com.posfab.shared.network.customers.DebtorDto
 import com.posfab.shared.network.customers.LedgerEntryDto
 import com.posfab.shared.network.customers.OpeningBalanceRequestDto
 import com.posfab.shared.network.customers.OpeningBalanceResponseDto
+import com.posfab.shared.network.customers.UpdateCustomerRequestDto
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 
 private const val BUSINESS_UNIT_ID = 1L
 
@@ -163,6 +166,78 @@ class CreditRepositoryImplTest {
         assertEquals(350.5, balance, 0.001)
     }
 
+    @Test
+    fun statement_maps_the_address_and_blank_address_to_null() = runTest {
+        val withAddress = FakeCustomersApi(
+            ledger = AppResult.Success(
+                CustomerLedgerDto(customer = CustomerDto(id = 13, name = "Lupe", address = "Av juarez 5", balance = "379.00")),
+            ),
+        )
+        val blankAddress = FakeCustomersApi(
+            ledger = AppResult.Success(CustomerLedgerDto(customer = CustomerDto(id = 2, name = "María", address = "  ", balance = "0.00"))),
+        )
+
+        val lupe = assertIs<AppResult.Success<CustomerStatement>>(repository(withAddress).statement(13, 100)).value
+        val maria = assertIs<AppResult.Success<CustomerStatement>>(repository(blankAddress).statement(2, 100)).value
+
+        assertEquals("Av juarez 5", lupe.address)
+        assertNull(maria.address)
+    }
+
+    @Test
+    fun search_keeps_inactive_customers_only_when_asked() = runTest {
+        val api = FakeCustomersApi(
+            customers = listOf(
+                CustomerDto(id = 1, code = "30000018", name = "Juan", balance = "30.00"),
+                CustomerDto(id = 2, code = "30000025", name = "María", active = false, balance = "0.00"),
+            ),
+        )
+        val repo = repository(api)
+
+        val activeOnly = assertIs<AppResult.Success<List<CustomerMatch>>>(repo.searchCustomers("mar", 10)).value
+        val all = assertIs<AppResult.Success<List<CustomerMatch>>>(repo.searchCustomers("mar", 10, includeInactive = true)).value
+
+        assertEquals(listOf(1L), activeOnly.map { it.id })
+        assertEquals(listOf(1L, 2L), all.map { it.id })
+        assertEquals(listOf(true, false), all.map { it.active })
+        assertEquals(listOf("30000018", "30000025"), all.map { it.code })
+        assertEquals(listOf(false, true), api.searchIncludeInactive)
+    }
+
+    @Test
+    fun update_customer_trims_and_sends_null_for_blank_fields() = runTest {
+        val api = FakeCustomersApi()
+
+        val result = repository(api).updateCustomer(
+            13,
+            CustomerEdit(name = "  Lupe Hernández ", nickname = "  ", phone = " 5551122896 ", address = "", active = false),
+        )
+
+        assertIs<AppResult.Success<Unit>>(result)
+        assertEquals(
+            13L to UpdateCustomerRequestDto("Lupe Hernández", null, "5551122896", null, false),
+            api.updates.single(),
+        )
+    }
+
+    @Test
+    fun update_customer_trims_kept_nickname_and_address() = runTest {
+        val api = FakeCustomersApi()
+
+        repository(api).updateCustomer(2, CustomerEdit("María", " Mary ", null, " Calle 1 ", true))
+
+        assertEquals(UpdateCustomerRequestDto("María", "Mary", null, "Calle 1", true), api.updates.single().second)
+    }
+
+    @Test
+    fun update_customer_passes_the_failure_through() = runTest {
+        val api = FakeCustomersApi(updateResult = AppResult.Failure(AppError.Validation("phone must have 10 digits")))
+
+        val result = repository(api).updateCustomer(13, CustomerEdit("Lupe", null, "555", null, true))
+
+        assertEquals(AppError.Validation("phone must have 10 digits"), assertIs<AppResult.Failure>(result).error)
+    }
+
     private suspend fun repository(api: FakeCustomersApi): CreditRepositoryImpl {
         val manager = SessionManager(InMemorySessionStorage())
         manager.set(
@@ -192,14 +267,23 @@ private class FakeCustomersApi(
     private val debtors: AppResult<List<DebtorDto>> = AppResult.Success(emptyList()),
     private val ledger: AppResult<CustomerLedgerDto> = AppResult.Failure(AppError.Validation("Customer not found")),
     private val customers: List<CustomerDto> = emptyList(),
+    private val updateResult: AppResult<CustomerDto> = AppResult.Success(CustomerDto(id = 13, name = "Lupe", balance = "0.00")),
 ) : CustomersApi {
     val ledgerCalls = mutableListOf<Pair<Long, Int>>()
     val searchCalls = mutableListOf<Pair<String?, Int>>()
     val created = mutableListOf<CreateCustomerRequestDto>()
     val loads = mutableListOf<Triple<Long, String, OpeningBalanceRequestDto>>()
+    val searchIncludeInactive = mutableListOf<Boolean>()
+    val updates = mutableListOf<Pair<Long, UpdateCustomerRequestDto>>()
 
-    override suspend fun search(accessToken: String, query: String?, limit: Int): AppResult<List<CustomerDto>> {
+    override suspend fun search(
+        accessToken: String,
+        query: String?,
+        limit: Int,
+        includeInactive: Boolean,
+    ): AppResult<List<CustomerDto>> {
         searchCalls += query to limit
+        searchIncludeInactive += includeInactive
         return AppResult.Success(customers)
     }
 
@@ -229,6 +313,15 @@ private class FakeCustomersApi(
         idempotencyKey: String,
         request: CustomerPaymentRequestDto,
     ): AppResult<CustomerPaymentResponseDto> = AppResult.Failure(AppError.Unknown("unused"))
+
+    override suspend fun update(
+        accessToken: String,
+        customerId: Long,
+        request: UpdateCustomerRequestDto,
+    ): AppResult<CustomerDto> {
+        updates += customerId to request
+        return updateResult
+    }
 
     override suspend fun updateAddress(accessToken: String, customerId: Long, address: String): AppResult<CustomerDto> =
         AppResult.Failure(AppError.Unknown("unused"))

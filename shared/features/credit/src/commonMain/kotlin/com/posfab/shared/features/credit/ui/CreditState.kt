@@ -16,6 +16,12 @@ data class CreditState(
     val nowEpochMillis: Long = 0L,
     val canLoadLibreta: Boolean = false,
     val libreta: LibretaState? = null,
+    val canEditCustomers: Boolean = false,
+    val searchResults: List<CustomerMatch> = emptyList(),
+    val isSearching: Boolean = false,
+    val searchFailed: Boolean = false,
+    val savedNotice: String? = null,
+    val edit: CustomerEditState? = null,
 ) {
     val visibleDebtors: List<Debtor>
         get() {
@@ -30,7 +36,47 @@ data class CreditState(
     val showsDetail: Boolean get() = selectedId != null
 
     val showsLibreta: Boolean get() = libreta != null
+
+    val otherCustomers: List<CustomerMatch>
+        get() {
+            val debtorIds = debtors.mapTo(HashSet()) { it.id }
+            return searchResults.filterNot { it.id in debtorIds }
+        }
+
+    val showsNoMatches: Boolean
+        get() = filter.isNotBlank() && visibleDebtors.isEmpty() && otherCustomers.isEmpty() && !isSearching && !searchFailed
+
+    val isEditing: Boolean get() = edit != null
+
+    val selectedOwesSince: String?
+        get() = selectedId?.let { id -> debtors.firstOrNull { it.id == id }?.owesSince }
 }
+
+data class CustomerEditState(
+    val customerId: Long,
+    val code: String?,
+    val form: CustomerEditForm,
+    val original: CustomerEditForm,
+    val isSaving: Boolean = false,
+    val errorMessage: String? = null,
+    val confirm: CustomerEditConfirm? = null,
+    val leaveOnDiscard: Boolean = false,
+    val focusRequest: Int = 0,
+) {
+    val hasChanges: Boolean get() = form != original
+
+    val isDeactivating: Boolean get() = original.active && !form.active
+}
+
+data class CustomerEditForm(
+    val name: String = "",
+    val nickname: String = "",
+    val phone: String = "",
+    val address: String = "",
+    val active: Boolean = true,
+)
+
+enum class CustomerEditConfirm { SAVE, DEACTIVATE, DISCARD }
 
 data class LibretaState(
     val form: LibretaForm = LibretaForm(),

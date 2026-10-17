@@ -51,6 +51,26 @@ object CreditStrings {
     const val NOT_FOUND = "No se encontró el cliente"
     const val SAVE_FAILED = "No se pudo guardar, intenta de nuevo"
     const val NETWORK = "No hay conexión con el servidor"
+    const val EDIT = "Editar"
+    const val EDIT_TITLE = "Editar cliente"
+    const val SAVE = "Guardar"
+    const val CANCEL = "Cancelar"
+    const val ADDRESS_LABEL = "Dirección (opcional)"
+    const val ACTIVE_LABEL = "Activo"
+    const val ACTIVE_HINT = "Si lo apagas, ya no se le podrá fiar ni abonar"
+    const val SAVED = "Guardado"
+    const val OTHER_CUSTOMERS = "Otros clientes"
+    const val LAST_MOVEMENTS = "Últimos movimientos"
+    const val DISCARD_TITLE = "¿Salir sin guardar?"
+    const val DISCARD_MESSAGE = "Si sales se perderán los cambios"
+    const val DISCARD_CONFIRM = "Salir"
+    const val KEEP_EDITING = "Seguir editando"
+    const val DEACTIVATE_CONFIRM = "Dar de baja"
+    const val DEACTIVATE_MESSAGE = "Ya no se le podrá fiar ni abonar. Si debe, seguirá en Te deben."
+    const val SAVE_MESSAGE = "Se actualizarán los datos del cliente."
+    const val NO_EDIT_PERMISSION = "Tu cuenta no puede editar clientes"
+    const val NAME_TOO_LONG = "El nombre es muy largo"
+    const val ADDRESS_TOO_LONG = "La dirección es muy larga"
 
     val MONTHS: List<String> = listOf(
         "ene", "feb", "mar", "abr", "may", "jun",
@@ -58,6 +78,17 @@ object CreditStrings {
     )
 
     fun customerNumber(code: String): String = "Número $code"
+
+    fun customerLine(code: String?, phone: String?, address: String?): String =
+        listOfNotNull(
+            code.presentOrNull()?.let(::customerNumber),
+            phone.presentOrNull(),
+            address.presentOrNull(),
+        ).joinToString(SEPARATOR)
+
+    fun saveTitle(name: String): String = "¿Guardar los cambios de $name?"
+
+    fun deactivateTitle(name: String): String = "¿Dar de baja a $name?"
 
     fun loadedToday(count: Int): String = "Cargados hoy ($count)"
 
@@ -86,4 +117,6 @@ object CreditStrings {
         val whole = (absolute / 100).toString().reversed().chunked(3).joinToString(",").reversed()
         return "$sign$$whole.${(absolute % 100).toString().padStart(2, '0')}"
     }
+
+    private fun String?.presentOrNull(): String? = this?.trim()?.takeIf { it.isNotEmpty() }
 }

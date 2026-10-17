@@ -6,6 +6,7 @@ import com.posfab.shared.core.input.PhoneInput
 import com.posfab.shared.core.model.Permission
 import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
+import com.posfab.shared.features.credit.domain.CustomerEdit
 import com.posfab.shared.features.credit.domain.CustomerMatch
 import com.posfab.shared.features.credit.domain.LoadedCustomer
 import com.posfab.shared.features.credit.usecase.CreditUseCases
@@ -36,12 +37,18 @@ class CreditViewModel(
     private val now: () -> Instant = { Clock.System.now() },
     dispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : BaseViewModel(dispatcher) {
-    private val _state = MutableStateFlow(CreditState(canLoadLibreta = Permission.MANAGE_CREDIT in permissions))
+    private val _state = MutableStateFlow(
+        CreditState(
+            canLoadLibreta = Permission.MANAGE_CREDIT in permissions,
+            canEditCustomers = Permission.MANAGE_CREDIT in permissions,
+        ),
+    )
     val state: StateFlow<CreditState> = _state.asStateFlow()
 
     private var debtorsJob: Job? = null
     private var statementJob: Job? = null
     private var customerSearchJob: Job? = null
+    private var listSearchJob: Job? = null
     private var keySequence = 0
 
     fun load() {
@@ -66,17 +73,51 @@ class CreditViewModel(
     }
 
     fun onFilterChange(value: String) {
-        _state.update { it.copy(filter = value) }
+        listSearchJob?.cancel()
+        val query = value.trim()
+        val searches = query.length >= MIN_SEARCH_LENGTH
+        _state.update {
+            it.copy(
+                filter = value,
+                searchResults = emptyList(),
+                isSearching = searches,
+                searchFailed = false,
+            )
+        }
+        if (!searches) return
+        val includeInactive = _state.value.canEditCustomers
+        listSearchJob = scope.launch {
+            delay(CUSTOMER_SEARCH_DEBOUNCE_MS)
+            val result = guarded { creditUseCases.searchCustomers(query, LIST_SEARCH_LIMIT, includeInactive) }
+            _state.update {
+                if (it.filter.trim() != query) {
+                    it
+                } else {
+                    when (result) {
+                        is AppResult.Success -> it.copy(searchResults = result.value, isSearching = false, searchFailed = false)
+                        is AppResult.Failure -> it.copy(
+                            searchResults = emptyList(),
+                            isSearching = false,
+                            searchFailed = true,
+                            errorMessage = CreditErrorText.from(result.error),
+                        )
+                    }
+                }
+            }
+        }
     }
 
     fun select(customerId: Long) {
         statementJob?.cancel()
         _state.update {
+            val sameCustomer = it.selectedId == customerId
             it.copy(
                 selectedId = customerId,
                 selected = it.selected?.takeIf { statement -> statement.id == customerId },
                 isStatementLoading = true,
                 errorMessage = null,
+                edit = it.edit?.takeIf { edit -> edit.customerId == customerId },
+                savedNotice = it.savedNotice?.takeIf { sameCustomer },
             )
         }
         statementJob = scope.launch {
@@ -92,10 +133,178 @@ class CreditViewModel(
     }
 
     fun back() {
+        val edit = _state.value.edit
+        if (edit != null) {
+            if (edit.isSaving || edit.confirm != null) return
+            if (edit.hasChanges) {
+                updateEdit { copy(confirm = CustomerEditConfirm.DISCARD, leaveOnDiscard = true) }
+                return
+            }
+        }
+        leaveDetail()
+    }
+
+    private fun leaveDetail() {
         statementJob?.cancel()
         _state.update {
-            it.copy(selectedId = null, selected = null, isStatementLoading = false, errorMessage = null)
+            if (it.edit?.isSaving == true) {
+                it
+            } else {
+                it.copy(
+                    selectedId = null,
+                    selected = null,
+                    isStatementLoading = false,
+                    errorMessage = null,
+                    edit = null,
+                    savedNotice = null,
+                )
+            }
         }
+    }
+
+    fun startEdit() {
+        _state.update {
+            val statement = it.selected
+            if (!it.canEditCustomers || it.edit != null || it.isStatementLoading ||
+                statement == null || statement.id != it.selectedId
+            ) {
+                it
+            } else {
+                val form = CustomerEditForm(
+                    name = statement.name,
+                    nickname = statement.nickname.orEmpty(),
+                    phone = statement.phone.orEmpty(),
+                    address = statement.address.orEmpty(),
+                    active = statement.active,
+                )
+                it.copy(
+                    edit = CustomerEditState(customerId = statement.id, code = statement.code, form = form, original = form),
+                    savedNotice = null,
+                )
+            }
+        }
+    }
+
+    fun onEditName(value: String) {
+        editForm { copy(name = value.take(MAX_NAME_LENGTH)) }
+    }
+
+    fun onEditNickname(value: String) {
+        editForm { copy(nickname = value.take(MAX_NICKNAME_LENGTH)) }
+    }
+
+    fun onEditPhone(value: String) {
+        editForm { copy(phone = PhoneInput.sanitize(value)) }
+    }
+
+    fun onEditAddress(value: String) {
+        editForm { copy(address = value.take(MAX_ADDRESS_LENGTH)) }
+    }
+
+    fun onEditActive(value: Boolean) {
+        editForm { copy(active = value) }
+    }
+
+    fun saveEdit() {
+        val edit = _state.value.edit ?: return
+        if (edit.isSaving || edit.confirm != null) return
+        if (!edit.hasChanges) {
+            _state.update { it.copy(edit = null) }
+            return
+        }
+        val error = when {
+            !isValidName(edit.form.name) -> CreditStrings.NAME_REQUIRED
+            !PhoneInput.isComplete(edit.form.phone) -> CreditStrings.PHONE_INVALID
+            else -> null
+        }
+        if (error != null) {
+            updateEdit { copy(errorMessage = error, focusRequest = focusRequest + 1) }
+            return
+        }
+        val confirm = if (edit.isDeactivating) CustomerEditConfirm.DEACTIVATE else CustomerEditConfirm.SAVE
+        updateEdit { copy(confirm = confirm, leaveOnDiscard = false, errorMessage = null) }
+    }
+
+    fun confirmEdit() {
+        val previous = _state.getAndUpdate { current ->
+            val open = current.edit
+            if (open == null || open.isSaving || open.confirm == null || open.confirm == CustomerEditConfirm.DISCARD) {
+                current
+            } else {
+                current.copy(edit = open.copy(isSaving = true, confirm = null, errorMessage = null))
+            }
+        }
+        val before = previous.edit ?: return
+        if (before.isSaving || before.confirm == null || before.confirm == CustomerEditConfirm.DISCARD) return
+        val customerId = before.customerId
+        val form = before.form
+        scope.launch {
+            val change = CustomerEdit(
+                name = form.name.trim(),
+                nickname = form.nickname.trim().ifEmpty { null },
+                phone = form.phone.trim().ifEmpty { null },
+                address = form.address.trim().ifEmpty { null },
+                active = form.active,
+            )
+            val result = guarded { creditUseCases.updateCustomer(customerId, change) }
+            if (_state.value.edit?.customerId != customerId) return@launch
+            when (result) {
+                is AppResult.Success -> {
+                    _state.update { it.copy(edit = null, savedNotice = CreditStrings.SAVED) }
+                    select(customerId)
+                    load()
+                    refreshListSearch()
+                }
+                is AppResult.Failure -> updateEdit {
+                    copy(
+                        isSaving = false,
+                        errorMessage = CreditErrorText.edit(result.error),
+                        focusRequest = focusRequest + 1,
+                    )
+                }
+            }
+        }
+    }
+
+    fun cancelEdit() {
+        val edit = _state.value.edit ?: return
+        if (edit.isSaving || edit.confirm != null) return
+        if (edit.hasChanges) {
+            updateEdit { copy(confirm = CustomerEditConfirm.DISCARD, leaveOnDiscard = false) }
+        } else {
+            _state.update { it.copy(edit = null) }
+        }
+    }
+
+    fun onEditEscape() {
+        val edit = _state.value.edit ?: return
+        if (edit.confirm != null) dismissEditConfirm() else cancelEdit()
+    }
+
+    fun dismissEditConfirm() {
+        updateEdit {
+            if (isSaving || confirm == null) this else copy(confirm = null, leaveOnDiscard = false, focusRequest = focusRequest + 1)
+        }
+    }
+
+    fun confirmDiscard() {
+        val edit = _state.value.edit ?: return
+        if (edit.isSaving || edit.confirm != CustomerEditConfirm.DISCARD) return
+        _state.update { it.copy(edit = null) }
+        if (edit.leaveOnDiscard) leaveDetail()
+    }
+
+    private fun refreshListSearch() {
+        val filter = _state.value.filter
+        if (filter.trim().length >= MIN_SEARCH_LENGTH) onFilterChange(filter)
+    }
+
+    private fun editForm(change: CustomerEditForm.() -> CustomerEditForm) {
+        updateEdit { if (isSaving || confirm != null) this else copy(form = form.change(), errorMessage = null) }
+    }
+
+    private fun updateEdit(change: CustomerEditState.() -> CustomerEditState) {
+        _state.update { current -> current.edit?.let { current.copy(edit = it.change()) } ?: current }
     }
 
     fun openLibreta() {
@@ -436,6 +645,9 @@ class CreditViewModel(
         const val LEDGER_LIMIT = 100
         const val CUSTOMER_SEARCH_DEBOUNCE_MS = 250L
         const val CUSTOMER_SEARCH_LIMIT = 5
+        const val LIST_SEARCH_LIMIT = 10
+        private const val MAX_NAME_LENGTH = 255
+        private const val MAX_ADDRESS_LENGTH = 255
         private const val MIN_SEARCH_LENGTH = 2
         private const val MAX_AMOUNT_DIGITS = 6
         private const val MAX_AMOUNT_DECIMALS = 2

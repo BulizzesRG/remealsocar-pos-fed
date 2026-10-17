@@ -35,6 +35,7 @@ data class CustomerStatement(
     val entries: List<LedgerEntry>,
     val code: String? = null,
     val nickname: String? = null,
+    val address: String? = null,
 ) {
     val displayName: String get() = customerDisplayName(name, nickname)
 }
@@ -44,6 +45,16 @@ data class CustomerMatch(
     val displayName: String,
     val phone: String?,
     val balance: Double,
+    val active: Boolean = true,
+    val code: String? = null,
+)
+
+data class CustomerEdit(
+    val name: String,
+    val nickname: String?,
+    val phone: String?,
+    val address: String?,
+    val active: Boolean,
 )
 
 data class LoadedCustomer(

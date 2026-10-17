@@ -3,6 +3,7 @@ package com.posfab.shared.features.credit
 import com.posfab.shared.core.model.Permission
 import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
+import com.posfab.shared.features.credit.domain.CustomerEdit
 import com.posfab.shared.features.credit.domain.CustomerMatch
 import com.posfab.shared.features.credit.domain.CustomerStatement
 import com.posfab.shared.features.credit.domain.Debtor
@@ -14,6 +15,9 @@ import com.posfab.shared.features.credit.repository.CreditRepository
 import com.posfab.shared.features.credit.ui.CreditErrorText
 import com.posfab.shared.features.credit.ui.CreditStrings
 import com.posfab.shared.features.credit.ui.CreditViewModel
+import com.posfab.shared.features.credit.ui.CustomerEditConfirm
+import com.posfab.shared.features.credit.ui.CustomerEditForm
+import com.posfab.shared.features.credit.ui.CustomerEditState
 import com.posfab.shared.features.credit.ui.LibretaForm
 import com.posfab.shared.features.credit.ui.LibretaState
 import com.posfab.shared.features.credit.usecase.CreditUseCases
@@ -820,6 +824,772 @@ class CreditViewModelTest {
         assertEquals("04/", libreta(vm).form.owedSince)
     }
 
+    private val lupe = CustomerStatement(
+        id = 13,
+        name = "Lupe Hernández",
+        phone = "5551122896",
+        active = true,
+        balance = 379.0,
+        entries = emptyList(),
+        code = "30000117",
+        nickname = "Doña Lupe",
+        address = "Av juarez 5",
+    )
+    private val lupeDebtor = debtor(13, "Lupe Hernández", 379.0)
+    private val mariaCustomer = CustomerStatement(2, "María López", null, true, 0.0, emptyList(), code = "30000025")
+    private val mariaMatchInactive = CustomerMatch(2, "María López", null, 0.0, active = false, code = "30000025")
+
+    @Test
+    fun list_search_waits_for_two_letters_and_the_debounce() = runTest(dispatcher) {
+        val repo = FakeCreditRepository(customers = listOf(mariaMatchInactive))
+        val vm = manager(repo)
+        vm.load()
+        advanceUntilIdle()
+
+        vm.onFilterChange("m")
+        advanceUntilIdle()
+        assertTrue(repo.searchCalls.isEmpty())
+        assertFalse(vm.state.value.isSearching)
+
+        vm.onFilterChange("ma")
+        assertTrue(vm.state.value.isSearching)
+        advanceTimeBy(CreditViewModel.CUSTOMER_SEARCH_DEBOUNCE_MS - 1)
+        runCurrent()
+        assertTrue(repo.searchCalls.isEmpty())
+        advanceUntilIdle()
+
+        assertEquals(listOf("ma" to CreditViewModel.LIST_SEARCH_LIMIT), repo.searchCalls)
+        assertEquals(listOf(true), repo.searchIncludeInactive)
+        assertEquals(listOf(mariaMatchInactive), vm.state.value.otherCustomers)
+        assertFalse(vm.state.value.isSearching)
+    }
+
+    @Test
+    fun list_search_without_manage_credit_asks_for_active_only() = runTest(dispatcher) {
+        val repo = FakeCreditRepository(customers = listOf(mariaMatch))
+        val vm = viewModel(repo, setOf(Permission.VIEW_CREDIT))
+
+        vm.onFilterChange("mar")
+        advanceUntilIdle()
+
+        assertEquals(listOf(false), repo.searchIncludeInactive)
+        assertFalse(vm.state.value.canEditCustomers)
+    }
+
+    @Test
+    fun list_search_trims_the_query() = runTest(dispatcher) {
+        val repo = FakeCreditRepository()
+        val vm = manager(repo)
+
+        vm.onFilterChange("  ma  ")
+        advanceUntilIdle()
+        vm.onFilterChange(" m ")
+        advanceUntilIdle()
+
+        assertEquals(listOf("ma" to CreditViewModel.LIST_SEARCH_LIMIT), repo.searchCalls)
+    }
+
+    @Test
+    fun other_customers_leave_out_those_already_owing() = runTest(dispatcher) {
+        val repo = FakeCreditRepository(
+            debtors = AppResult.Success(listOf(juan)),
+            customers = listOf(juanMatch, mariaMatch),
+        )
+        val vm = manager(repo)
+        vm.load()
+        advanceUntilIdle()
+
+        vm.onFilterChange("lopez")
+        advanceUntilIdle()
+
+        assertEquals(listOf(juanMatch, mariaMatch), vm.state.value.searchResults)
+        assertEquals(listOf(mariaMatch), vm.state.value.otherCustomers)
+        assertFalse(vm.state.value.showsNoMatches)
+    }
+
+    @Test
+    fun a_stale_list_search_is_dropped_when_the_filter_changed() = runTest(dispatcher) {
+        val gate = CompletableDeferred<Unit>()
+        val repo = FakeCreditRepository(customers = listOf(mariaMatch), searchGates = mapOf("ma" to gate))
+        val vm = manager(repo)
+
+        vm.onFilterChange("ma")
+        advanceTimeBy(CreditViewModel.CUSTOMER_SEARCH_DEBOUNCE_MS + 1)
+        runCurrent()
+        assertEquals(1, repo.searchCalls.size)
+        vm.onFilterChange("x")
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        assertEquals(emptyList(), vm.state.value.searchResults)
+        assertFalse(vm.state.value.isSearching)
+    }
+
+    @Test
+    fun clearing_the_filter_clears_the_results() = runTest(dispatcher) {
+        val vm = manager(FakeCreditRepository(customers = listOf(mariaMatch)))
+        vm.onFilterChange("mar")
+        advanceUntilIdle()
+        assertEquals(listOf(mariaMatch), vm.state.value.searchResults)
+
+        vm.onFilterChange("")
+
+        assertEquals(emptyList(), vm.state.value.searchResults)
+        assertFalse(vm.state.value.isSearching)
+        assertFalse(vm.state.value.showsNoMatches)
+    }
+
+    @Test
+    fun no_matches_shows_only_after_the_search_answers() = runTest(dispatcher) {
+        val vm = manager(FakeCreditRepository(debtors = AppResult.Success(listOf(juan))))
+        vm.load()
+        advanceUntilIdle()
+
+        vm.onFilterChange("zz")
+        assertFalse(vm.state.value.showsNoMatches)
+        advanceUntilIdle()
+
+        assertTrue(vm.state.value.showsNoMatches)
+    }
+
+    @Test
+    fun a_failed_list_search_shows_the_error_instead_of_no_matches() = runTest(dispatcher) {
+        val repo = object : CreditRepository by FakeCreditRepository() {
+            override suspend fun searchCustomers(
+                query: String,
+                limit: Int,
+                includeInactive: Boolean,
+            ): AppResult<List<CustomerMatch>> = AppResult.Failure(AppError.Network("down"))
+        }
+        val vm = CreditViewModel(CreditUseCases(repo), setOf(Permission.MANAGE_CREDIT), now = { now }, dispatcher = dispatcher)
+
+        vm.onFilterChange("mar")
+        advanceUntilIdle()
+
+        val failed = vm.state.value
+        assertEquals(emptyList(), failed.searchResults)
+        assertFalse(failed.isSearching)
+        assertTrue(failed.searchFailed)
+        assertEquals(CreditErrorText.from(AppError.Network("down")), failed.errorMessage)
+        assertFalse(failed.showsNoMatches)
+
+        vm.onFilterChange("mari")
+        assertFalse(vm.state.value.searchFailed)
+    }
+
+    @Test
+    fun changing_the_query_drops_the_previous_other_customers_at_once() = runTest(dispatcher) {
+        val repo = FakeCreditRepository(customers = listOf(mariaMatch))
+        val vm = manager(repo)
+
+        vm.onFilterChange("mar")
+        advanceUntilIdle()
+        assertEquals(listOf(mariaMatch.id), vm.state.value.searchResults.map { it.id })
+
+        vm.onFilterChange("mari")
+        assertEquals(emptyList(), vm.state.value.searchResults)
+        assertTrue(vm.state.value.isSearching)
+        assertFalse(vm.state.value.showsNoMatches)
+    }
+
+    @Test
+    fun selecting_someone_without_debt_shows_the_sheet() = runTest(dispatcher) {
+        val repo = FakeCreditRepository(statements = mapOf(2L to AppResult.Success(mariaCustomer)))
+        val vm = manager(repo)
+
+        vm.select(2)
+        advanceUntilIdle()
+
+        val selected = assertNotNull(vm.state.value.selected)
+        assertEquals(0.0, selected.balance, 0.001)
+        assertTrue(selected.entries.isEmpty())
+        assertNull(vm.state.value.selectedOwesSince)
+        assertEquals("Número 30000025", CreditStrings.customerLine(selected.code, selected.phone, selected.address))
+    }
+
+    @Test
+    fun selected_debtor_exposes_its_owes_since() = runTest(dispatcher) {
+        val vm = manager(lupeRepo())
+        vm.load()
+        advanceUntilIdle()
+
+        vm.select(13)
+        advanceUntilIdle()
+
+        assertEquals(lupeDebtor.owesSince, vm.state.value.selectedOwesSince)
+    }
+
+    @Test
+    fun start_edit_needs_manage_credit() = runTest(dispatcher) {
+        val vm = viewModel(lupeRepo(), setOf(Permission.VIEW_CREDIT))
+        vm.select(13)
+        advanceUntilIdle()
+
+        vm.startEdit()
+
+        assertNull(vm.state.value.edit)
+    }
+
+    @Test
+    fun start_edit_does_nothing_while_the_sheet_loads() = runTest(dispatcher) {
+        val gate = CompletableDeferred<AppResult<CustomerStatement>>()
+        val vm = manager(FakeCreditRepository(gates = mapOf(13L to gate)))
+        vm.select(13)
+        runCurrent()
+
+        vm.startEdit()
+        assertNull(vm.state.value.edit)
+
+        gate.complete(AppResult.Success(lupe))
+        advanceUntilIdle()
+        vm.startEdit()
+        assertNotNull(vm.state.value.edit)
+    }
+
+    @Test
+    fun start_edit_does_nothing_without_a_selected_customer() = runTest(dispatcher) {
+        val vm = manager(lupeRepo())
+
+        vm.startEdit()
+
+        assertNull(vm.state.value.edit)
+    }
+
+    @Test
+    fun start_edit_prefills_the_form_from_the_sheet() = runTest(dispatcher) {
+        val vm = editingLupe(lupeRepo())
+
+        val edit = edit(vm)
+        val expected = CustomerEditForm("Lupe Hernández", "Doña Lupe", "5551122896", "Av juarez 5", true)
+        assertEquals(expected, edit.form)
+        assertEquals(expected, edit.original)
+        assertEquals("30000117", edit.code)
+        assertFalse(edit.hasChanges)
+        assertNull(edit.confirm)
+    }
+
+    @Test
+    fun start_edit_prefills_missing_fields_as_empty() = runTest(dispatcher) {
+        val repo = FakeCreditRepository(statements = mapOf(2L to AppResult.Success(mariaCustomer)))
+        val vm = manager(repo)
+        vm.select(2)
+        advanceUntilIdle()
+
+        vm.startEdit()
+
+        assertEquals(CustomerEditForm("María López", "", "", "", true), edit(vm).form)
+    }
+
+    @Test
+    fun edit_fields_are_sanitized_and_capped() = runTest(dispatcher) {
+        val vm = editingLupe(lupeRepo())
+
+        vm.onEditPhone("55-51 12a2896999")
+        vm.onEditNickname("x".repeat(70))
+        vm.onEditAddress("y".repeat(300))
+        vm.onEditName("z".repeat(300))
+
+        val form = edit(vm).form
+        assertEquals("5551122896", form.phone)
+        assertEquals(60, form.nickname.length)
+        assertEquals(255, form.address.length)
+        assertEquals(255, form.name.length)
+    }
+
+    @Test
+    fun save_validates_the_name_first_then_the_phone() = runTest(dispatcher) {
+        val repo = lupeRepo()
+        val vm = editingLupe(repo)
+
+        vm.onEditName("   ")
+        vm.onEditPhone("555")
+        vm.saveEdit()
+        assertEquals(CreditStrings.NAME_REQUIRED, edit(vm).errorMessage)
+        assertNull(edit(vm).confirm)
+
+        vm.onEditName("12345")
+        vm.saveEdit()
+        assertEquals(CreditStrings.NAME_REQUIRED, edit(vm).errorMessage)
+
+        vm.onEditName("Lupe")
+        assertNull(edit(vm).errorMessage)
+        vm.saveEdit()
+        assertEquals(CreditStrings.PHONE_INVALID, edit(vm).errorMessage)
+        assertNull(edit(vm).confirm)
+        assertTrue(repo.updateCalls.isEmpty())
+    }
+
+    @Test
+    fun an_empty_phone_is_valid() = runTest(dispatcher) {
+        val vm = editingLupe(lupeRepo())
+
+        vm.onEditPhone("")
+        vm.saveEdit()
+
+        assertNull(edit(vm).errorMessage)
+        assertEquals(CustomerEditConfirm.SAVE, edit(vm).confirm)
+    }
+
+    @Test
+    fun save_without_changes_just_closes_the_form() = runTest(dispatcher) {
+        val repo = lupeRepo()
+        val vm = editingLupe(repo)
+
+        vm.saveEdit()
+
+        assertNull(vm.state.value.edit)
+        assertTrue(repo.updateCalls.isEmpty())
+    }
+
+    @Test
+    fun save_with_changes_asks_to_confirm() = runTest(dispatcher) {
+        val vm = editingLupe(lupeRepo())
+
+        vm.onEditNickname("Lupita")
+        vm.saveEdit()
+
+        assertEquals(CustomerEditConfirm.SAVE, edit(vm).confirm)
+        assertEquals("¿Guardar los cambios de Lupe Hernández (Doña Lupe)?", CreditStrings.saveTitle(lupe.displayName))
+    }
+
+    @Test
+    fun turning_active_off_asks_to_deactivate() = runTest(dispatcher) {
+        val vm = editingLupe(lupeRepo())
+
+        vm.onEditActive(false)
+        vm.saveEdit()
+
+        assertEquals(CustomerEditConfirm.DEACTIVATE, edit(vm).confirm)
+        assertEquals("¿Dar de baja a María López (Mary)?", CreditStrings.deactivateTitle("María López (Mary)"))
+    }
+
+    @Test
+    fun reactivating_uses_the_normal_save_confirm() = runTest(dispatcher) {
+        val inactive = lupe.copy(active = false)
+        val vm = manager(FakeCreditRepository(statements = mapOf(13L to AppResult.Success(inactive))))
+        vm.select(13)
+        advanceUntilIdle()
+        vm.startEdit()
+
+        vm.onEditActive(true)
+        vm.saveEdit()
+
+        assertEquals(CustomerEditConfirm.SAVE, edit(vm).confirm)
+    }
+
+    @Test
+    fun fields_are_locked_while_a_confirm_is_open() = runTest(dispatcher) {
+        val vm = editingLupe(lupeRepo())
+        vm.onEditNickname("Lupita")
+        vm.saveEdit()
+
+        vm.onEditName("Otra")
+
+        assertEquals("Lupe Hernández", edit(vm).form.name)
+    }
+
+    @Test
+    fun confirming_sends_trimmed_values_with_nulls_for_blanks() = runTest(dispatcher) {
+        val repo = lupeRepo()
+        val vm = editingLupe(repo)
+
+        vm.onEditName("  Lupe Hernández  ")
+        vm.onEditNickname("  ")
+        vm.onEditPhone("")
+        vm.onEditAddress(" Calle 1 ")
+        vm.saveEdit()
+        vm.confirmEdit()
+        advanceUntilIdle()
+
+        assertEquals(
+            listOf(13L to CustomerEdit("Lupe Hernández", null, null, "Calle 1", true)),
+            repo.updateCalls,
+        )
+    }
+
+    @Test
+    fun a_successful_save_closes_the_form_and_reloads_sheet_and_list() = runTest(dispatcher) {
+        val repo = lupeRepo()
+        val vm = editingLupe(repo)
+        val debtorsBefore = repo.debtorsCalls
+        val statementsBefore = repo.statementCalls.size
+
+        vm.onEditActive(false)
+        vm.saveEdit()
+        vm.confirmEdit()
+        assertTrue(edit(vm).isSaving)
+        assertNull(edit(vm).confirm)
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertNull(state.edit)
+        assertEquals(CreditStrings.SAVED, state.savedNotice)
+        assertEquals(13L, state.selectedId)
+        assertEquals(statementsBefore + 1, repo.statementCalls.size)
+        assertEquals(debtorsBefore + 1, repo.debtorsCalls)
+        assertEquals(false, repo.updateCalls.single().second.active)
+    }
+
+    @Test
+    fun a_successful_save_refreshes_the_list_search() = runTest(dispatcher) {
+        val repo = lupeRepo()
+        val vm = manager(repo)
+        vm.load()
+        advanceUntilIdle()
+        vm.onFilterChange("lupe")
+        advanceUntilIdle()
+        vm.select(13)
+        advanceUntilIdle()
+        vm.startEdit()
+        val searchesBefore = repo.searchCalls.size
+
+        vm.onEditNickname("Lupita")
+        vm.saveEdit()
+        vm.confirmEdit()
+        advanceUntilIdle()
+
+        assertEquals(searchesBefore + 1, repo.searchCalls.size)
+    }
+
+    @Test
+    fun confirm_twice_sends_one_update() = runTest(dispatcher) {
+        val repo = lupeRepo()
+        val vm = editingLupe(repo)
+        vm.onEditNickname("Lupita")
+        vm.saveEdit()
+
+        vm.confirmEdit()
+        vm.confirmEdit()
+        advanceUntilIdle()
+
+        assertEquals(1, repo.updateCalls.size)
+    }
+
+    @Test
+    fun confirm_without_an_open_confirm_does_nothing() = runTest(dispatcher) {
+        val repo = lupeRepo()
+        val vm = editingLupe(repo)
+        vm.onEditNickname("Lupita")
+
+        vm.confirmEdit()
+        advanceUntilIdle()
+
+        assertTrue(repo.updateCalls.isEmpty())
+        assertFalse(edit(vm).isSaving)
+    }
+
+    @Test
+    fun a_server_validation_error_keeps_the_form_with_spanish_text() = runTest(dispatcher) {
+        val repo = lupeRepo(updateFailures = mutableListOf(AppError.Validation("phone must have 10 digits")))
+        val vm = editingLupe(repo)
+
+        vm.onEditNickname("Lupita")
+        vm.saveEdit()
+        vm.confirmEdit()
+        advanceUntilIdle()
+
+        val edit = edit(vm)
+        assertFalse(edit.isSaving)
+        assertEquals(CreditStrings.PHONE_INVALID, edit.errorMessage)
+        assertEquals("Lupita", edit.form.nickname)
+        assertNull(vm.state.value.savedNotice)
+    }
+
+    @Test
+    fun a_network_error_keeps_the_form_and_can_be_retried() = runTest(dispatcher) {
+        val repo = lupeRepo(updateFailures = mutableListOf(AppError.Network("down")))
+        val vm = editingLupe(repo)
+
+        vm.onEditNickname("Lupita")
+        vm.saveEdit()
+        vm.confirmEdit()
+        advanceUntilIdle()
+        assertEquals(CreditStrings.NETWORK, edit(vm).errorMessage)
+
+        vm.saveEdit()
+        vm.confirmEdit()
+        advanceUntilIdle()
+
+        assertNull(vm.state.value.edit)
+        assertEquals(2, repo.updateCalls.size)
+        assertEquals(CreditStrings.SAVED, vm.state.value.savedNotice)
+    }
+
+    @Test
+    fun cancel_with_changes_asks_to_discard_and_stays_on_the_sheet() = runTest(dispatcher) {
+        val vm = editingLupe(lupeRepo())
+        vm.onEditNickname("Lupita")
+
+        vm.cancelEdit()
+        assertEquals(CustomerEditConfirm.DISCARD, edit(vm).confirm)
+        vm.confirmDiscard()
+
+        assertNull(vm.state.value.edit)
+        assertEquals(13L, vm.state.value.selectedId)
+    }
+
+    @Test
+    fun cancel_without_changes_closes_directly() = runTest(dispatcher) {
+        val vm = editingLupe(lupeRepo())
+
+        vm.cancelEdit()
+
+        assertNull(vm.state.value.edit)
+        assertEquals(13L, vm.state.value.selectedId)
+    }
+
+    @Test
+    fun back_with_changes_asks_and_confirming_leaves_the_sheet() = runTest(dispatcher) {
+        val vm = editingLupe(lupeRepo())
+        vm.onEditAddress("Calle 2")
+
+        vm.back()
+        assertEquals(CustomerEditConfirm.DISCARD, edit(vm).confirm)
+        assertEquals(13L, vm.state.value.selectedId)
+        vm.confirmDiscard()
+
+        assertNull(vm.state.value.edit)
+        assertNull(vm.state.value.selectedId)
+        assertNull(vm.state.value.selected)
+    }
+
+    @Test
+    fun keep_editing_closes_the_discard_confirm() = runTest(dispatcher) {
+        val vm = editingLupe(lupeRepo())
+        vm.onEditAddress("Calle 2")
+        vm.back()
+
+        vm.dismissEditConfirm()
+
+        assertNull(edit(vm).confirm)
+        assertFalse(edit(vm).leaveOnDiscard)
+        assertEquals("Calle 2", edit(vm).form.address)
+        assertEquals(13L, vm.state.value.selectedId)
+    }
+
+    @Test
+    fun back_without_changes_leaves_the_sheet() = runTest(dispatcher) {
+        val vm = editingLupe(lupeRepo())
+
+        vm.back()
+
+        assertNull(vm.state.value.edit)
+        assertNull(vm.state.value.selectedId)
+    }
+
+    @Test
+    fun escape_asks_to_discard_and_escape_again_keeps_editing() = runTest(dispatcher) {
+        val vm = editingLupe(lupeRepo())
+        vm.onEditName("Lupe H.")
+
+        vm.onEditEscape()
+        assertEquals(CustomerEditConfirm.DISCARD, edit(vm).confirm)
+        vm.onEditEscape()
+
+        assertNull(edit(vm).confirm)
+        assertEquals("Lupe H.", edit(vm).form.name)
+    }
+
+    @Test
+    fun escape_without_changes_closes_the_form() = runTest(dispatcher) {
+        val vm = editingLupe(lupeRepo())
+
+        vm.onEditEscape()
+
+        assertNull(vm.state.value.edit)
+    }
+
+    @Test
+    fun confirm_discard_only_works_on_a_discard_confirm() = runTest(dispatcher) {
+        val vm = editingLupe(lupeRepo())
+        vm.onEditNickname("Lupita")
+        vm.saveEdit()
+
+        vm.confirmDiscard()
+
+        assertEquals(CustomerEditConfirm.SAVE, edit(vm).confirm)
+    }
+
+    @Test
+    fun nothing_leaves_the_form_while_saving() = runTest(dispatcher) {
+        val gate = CompletableDeferred<Unit>()
+        val repo = lupeRepo(updateGate = gate)
+        val vm = editingLupe(repo)
+        vm.onEditNickname("Lupita")
+        vm.saveEdit()
+        vm.confirmEdit()
+        runCurrent()
+        assertTrue(edit(vm).isSaving)
+
+        vm.back()
+        vm.cancelEdit()
+        vm.onEditEscape()
+        vm.onEditName("Otra")
+
+        val saving = edit(vm)
+        assertTrue(saving.isSaving)
+        assertNull(saving.confirm)
+        assertEquals("Lupe Hernández", saving.form.name)
+        assertEquals(13L, vm.state.value.selectedId)
+
+        gate.complete(Unit)
+        advanceUntilIdle()
+        assertNull(vm.state.value.edit)
+    }
+
+    @Test
+    fun back_while_a_save_confirm_is_open_does_nothing() = runTest(dispatcher) {
+        val vm = editingLupe(lupeRepo())
+        vm.onEditNickname("Lupita")
+        vm.saveEdit()
+
+        vm.back()
+
+        assertEquals(CustomerEditConfirm.SAVE, edit(vm).confirm)
+        assertEquals(13L, vm.state.value.selectedId)
+    }
+
+    @Test
+    fun selecting_another_customer_drops_the_edit_and_the_notice() = runTest(dispatcher) {
+        val repo = FakeCreditRepository(
+            debtors = AppResult.Success(listOf(lupeDebtor)),
+            statements = mapOf(13L to AppResult.Success(lupe), 2L to AppResult.Success(mariaCustomer)),
+        )
+        val vm = editingLupe(repo)
+        vm.onEditNickname("Lupita")
+
+        vm.select(2)
+        advanceUntilIdle()
+
+        assertNull(vm.state.value.edit)
+        assertEquals(2L, vm.state.value.selectedId)
+        vm.startEdit()
+        assertEquals(CustomerEditForm("María López", "", "", "", true), edit(vm).form)
+    }
+
+    @Test
+    fun the_saved_notice_clears_when_leaving_or_editing_again() = runTest(dispatcher) {
+        val vm = editingLupe(lupeRepo())
+        vm.onEditNickname("Lupita")
+        vm.saveEdit()
+        vm.confirmEdit()
+        advanceUntilIdle()
+        assertEquals(CreditStrings.SAVED, vm.state.value.savedNotice)
+
+        vm.startEdit()
+        assertNull(vm.state.value.savedNotice)
+        vm.back()
+        assertNull(vm.state.value.savedNotice)
+    }
+
+    @Test
+    fun libreta_suggestions_never_ask_for_inactive_customers() = runTest(dispatcher) {
+        val repo = FakeCreditRepository(customers = listOf(juanMatch))
+        val vm = openedLibreta(repo)
+
+        vm.onLibretaName("juan")
+        advanceUntilIdle()
+
+        assertEquals(listOf(false), repo.searchIncludeInactive)
+    }
+
+    @Test
+    fun an_inactive_debtor_stays_in_the_owing_list() = runTest(dispatcher) {
+        val repo = FakeCreditRepository(
+            debtors = AppResult.Success(listOf(debtor(13, "Lupe Hernández", 379.0, active = false))),
+        )
+        val vm = manager(repo)
+
+        vm.load()
+        advanceUntilIdle()
+        vm.onFilterChange("lupe")
+        advanceUntilIdle()
+
+        assertEquals(listOf(false), vm.state.value.visibleDebtors.map { it.active })
+        assertEquals(379.0, vm.state.value.totalOwed, 0.001)
+    }
+
+    @Test
+    fun refreshing_while_editing_keeps_the_typed_form() = runTest(dispatcher) {
+        val repo = lupeRepo()
+        val vm = editingLupe(repo)
+        vm.onEditNickname("Lupita")
+        vm.onEditPhone("55512")
+
+        vm.refresh()
+        advanceUntilIdle()
+
+        assertEquals("Lupita", edit(vm).form.nickname)
+        assertEquals("55512", edit(vm).form.phone)
+        assertEquals(13L, vm.state.value.selectedId)
+        assertFalse(vm.state.value.isStatementLoading)
+    }
+
+    @Test
+    fun selecting_the_same_customer_again_keeps_the_edit() = runTest(dispatcher) {
+        val vm = editingLupe(lupeRepo())
+        vm.onEditAddress("Calle 1")
+
+        vm.select(13)
+        advanceUntilIdle()
+
+        assertEquals("Calle 1", edit(vm).form.address)
+    }
+
+    @Test
+    fun going_back_after_discarding_from_back_clears_the_edit_for_the_next_customer() = runTest(dispatcher) {
+        val repo = FakeCreditRepository(
+            debtors = AppResult.Success(listOf(lupeDebtor)),
+            statements = mapOf(13L to AppResult.Success(lupe), 2L to AppResult.Success(mariaCustomer)),
+        )
+        val vm = editingLupe(repo)
+        vm.onEditNickname("Lupita")
+        vm.back()
+        vm.confirmDiscard()
+        vm.select(2)
+        advanceUntilIdle()
+        vm.startEdit()
+
+        assertEquals(CustomerEditForm("María López", "", "", "", true), edit(vm).form)
+        assertFalse(edit(vm).hasChanges)
+    }
+
+    @Test
+    fun edit_errors_translate_from_a_closed_table() {
+        assertEquals(CreditStrings.NOT_FOUND, CreditErrorText.edit(AppError.Validation("Customer not found")))
+        assertEquals(CreditStrings.PHONE_INVALID, CreditErrorText.edit(AppError.Validation("phone must have 10 digits")))
+        assertEquals(CreditStrings.NICKNAME_TOO_LONG, CreditErrorText.edit(AppError.Validation("nickname too long")))
+        assertEquals(CreditStrings.ADDRESS_TOO_LONG, CreditErrorText.edit(AppError.Validation("address too long")))
+        assertEquals(CreditStrings.NAME_TOO_LONG, CreditErrorText.edit(AppError.Validation("name too long")))
+        assertEquals(CreditStrings.NAME_REQUIRED, CreditErrorText.edit(AppError.Validation("name is required")))
+        assertEquals(CreditStrings.NO_EDIT_PERMISSION, CreditErrorText.edit(AppError.Forbidden))
+        assertEquals(CreditStrings.NETWORK, CreditErrorText.edit(AppError.Network("down")))
+        assertEquals(CreditStrings.SAVE_FAILED, CreditErrorText.edit(AppError.Validation("something else")))
+        assertEquals(CreditStrings.SAVE_FAILED, CreditErrorText.edit(AppError.Conflict))
+        assertEquals(CreditStrings.SAVE_FAILED, CreditErrorText.edit(AppError.Unknown("boom")))
+    }
+
+    private fun lupeRepo(
+        updateFailures: MutableList<AppError> = mutableListOf(),
+        updateGate: CompletableDeferred<Unit>? = null,
+    ) = FakeCreditRepository(
+        debtors = AppResult.Success(listOf(lupeDebtor)),
+        statements = mapOf(13L to AppResult.Success(lupe)),
+        customers = listOf(CustomerMatch(13, lupe.displayName, lupe.phone, lupe.balance, code = lupe.code)),
+        updateFailures = updateFailures,
+        updateGate = updateGate,
+    )
+
+    private fun TestScope.editingLupe(repo: FakeCreditRepository): CreditViewModel {
+        val vm = manager(repo)
+        vm.select(13)
+        advanceUntilIdle()
+        vm.startEdit()
+        return vm
+    }
+
+    private fun edit(vm: CreditViewModel): CustomerEditState = assertNotNull(vm.state.value.edit)
+
     private fun openedLibreta(repo: FakeCreditRepository): CreditViewModel =
         manager(repo).also { it.openLibreta() }
 
@@ -854,6 +1624,9 @@ private class FakeCreditRepository(
     private val loadFailures: MutableList<AppError> = mutableListOf(),
     private val loadGate: CompletableDeferred<Unit>? = null,
     private val createFailures: MutableList<AppError> = mutableListOf(),
+    private val searchGates: Map<String, CompletableDeferred<Unit>> = emptyMap(),
+    private val updateFailures: MutableList<AppError> = mutableListOf(),
+    private val updateGate: CompletableDeferred<Unit>? = null,
 ) : CreditRepository {
     var debtorsCalls = 0
     val statementCalls = mutableListOf<Pair<Long, Int>>()
@@ -861,10 +1634,25 @@ private class FakeCreditRepository(
     val createCalls = mutableListOf<Triple<String, String?, String?>>()
     val loadCalls = mutableListOf<LoadCall>()
     val loadKeys = mutableListOf<String>()
+    val searchIncludeInactive = mutableListOf<Boolean>()
+    val updateCalls = mutableListOf<Pair<Long, CustomerEdit>>()
 
-    override suspend fun searchCustomers(query: String, limit: Int): AppResult<List<CustomerMatch>> {
+    override suspend fun searchCustomers(
+        query: String,
+        limit: Int,
+        includeInactive: Boolean,
+    ): AppResult<List<CustomerMatch>> {
         searchCalls += query to limit
+        searchIncludeInactive += includeInactive
+        searchGates[query]?.await()
         return AppResult.Success(customers)
+    }
+
+    override suspend fun updateCustomer(customerId: Long, edit: CustomerEdit): AppResult<Unit> {
+        updateCalls += customerId to edit
+        updateGate?.await()
+        if (updateFailures.isNotEmpty()) return AppResult.Failure(updateFailures.removeAt(0))
+        return AppResult.Success(Unit)
     }
 
     override suspend fun createCustomer(name: String, nickname: String?, phone: String?): AppResult<CustomerMatch> {

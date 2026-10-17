@@ -24,6 +24,15 @@ data class CreateCustomerRequestDto(
 )
 
 @Serializable
+data class UpdateCustomerRequestDto(
+    val name: String,
+    val nickname: String?,
+    val phone: String?,
+    val address: String?,
+    val active: Boolean,
+)
+
+@Serializable
 data class UpdateCustomerAddressRequestDto(
     val address: String,
 )

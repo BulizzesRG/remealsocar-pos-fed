@@ -3,6 +3,7 @@ package com.posfab.shared.features.credit.repository
 import com.posfab.shared.auth.refresh.AuthorizedApiExecutor
 import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
+import com.posfab.shared.features.credit.domain.CustomerEdit
 import com.posfab.shared.features.credit.domain.CustomerMatch
 import com.posfab.shared.features.credit.domain.CustomerStatement
 import com.posfab.shared.features.credit.domain.Debtor
@@ -16,6 +17,7 @@ import com.posfab.shared.network.customers.CustomersApi
 import com.posfab.shared.network.customers.DebtorDto
 import com.posfab.shared.network.customers.LedgerEntryDto
 import com.posfab.shared.network.customers.OpeningBalanceRequestDto
+import com.posfab.shared.network.customers.UpdateCustomerRequestDto
 import kotlin.math.abs
 import kotlin.math.round
 
@@ -36,13 +38,36 @@ class CreditRepositoryImpl(
             is AppResult.Failure -> result
         }
 
-    override suspend fun searchCustomers(query: String, limit: Int): AppResult<List<CustomerMatch>> {
+    override suspend fun searchCustomers(
+        query: String,
+        limit: Int,
+        includeInactive: Boolean,
+    ): AppResult<List<CustomerMatch>> {
         val trimmed = query.trim().takeIf { it.isNotEmpty() }
-        return when (val result = executor.execute { customersApi.search(it, trimmed, limit) }) {
-            is AppResult.Success -> mapAll(result.value.filter { it.active }) { it.toMatch() }
+        return when (val result = executor.execute { customersApi.search(it, trimmed, limit, includeInactive) }) {
+            is AppResult.Success -> {
+                val visible = if (includeInactive) result.value else result.value.filter { it.active }
+                mapAll(visible) { it.toMatch() }
+            }
             is AppResult.Failure -> result
         }
     }
+
+    override suspend fun updateCustomer(customerId: Long, edit: CustomerEdit): AppResult<Unit> {
+        val request = UpdateCustomerRequestDto(
+            name = edit.name.trim(),
+            nickname = edit.nickname.trimmedOrNull(),
+            phone = edit.phone.trimmedOrNull(),
+            address = edit.address.trimmedOrNull(),
+            active = edit.active,
+        )
+        return when (val result = executor.execute { customersApi.update(it, customerId, request) }) {
+            is AppResult.Success -> AppResult.Success(Unit)
+            is AppResult.Failure -> result
+        }
+    }
+
+    private fun String?.trimmedOrNull(): String? = this?.trim()?.takeIf { it.isNotEmpty() }
 
     override suspend fun createCustomer(name: String, nickname: String?, phone: String?): AppResult<CustomerMatch> {
         val request = CreateCustomerRequestDto(
@@ -88,6 +113,8 @@ class CreditRepositoryImpl(
             displayName = customerDisplayName(name, nickname),
             phone = phone?.takeIf { it.isNotBlank() },
             balance = parsedBalance,
+            active = active,
+            code = code?.takeIf { it.isNotBlank() },
         )
     }
 
@@ -118,6 +145,7 @@ class CreditRepositoryImpl(
             entries = parsedEntries,
             code = customer.code?.takeIf { it.isNotBlank() },
             nickname = customer.nickname?.takeIf { it.isNotBlank() },
+            address = customer.address?.takeIf { it.isNotBlank() },
         )
     }
 

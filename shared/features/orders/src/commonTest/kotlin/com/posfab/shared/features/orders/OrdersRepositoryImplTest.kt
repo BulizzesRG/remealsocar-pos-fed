@@ -43,6 +43,7 @@ import com.posfab.shared.network.customers.CustomersApi
 import com.posfab.shared.network.customers.DebtorDto
 import com.posfab.shared.network.customers.OpeningBalanceRequestDto
 import com.posfab.shared.network.customers.OpeningBalanceResponseDto
+import com.posfab.shared.network.customers.UpdateCustomerRequestDto
 import com.posfab.shared.network.orders.OrderCancelRequestDto
 import com.posfab.shared.network.orders.OrderCreateRequestDto
 import com.posfab.shared.network.orders.OrderDto
@@ -647,7 +648,12 @@ private class FakeCatalogApi(private val products: List<ProductListItemDto>) : C
 private class FakeCustomersApi(private val searchResult: List<CustomerDto> = emptyList()) : CustomersApi {
     val created = mutableListOf<CreateCustomerRequestDto>()
 
-    override suspend fun search(accessToken: String, query: String?, limit: Int): AppResult<List<CustomerDto>> =
+    override suspend fun search(
+        accessToken: String,
+        query: String?,
+        limit: Int,
+        includeInactive: Boolean,
+    ): AppResult<List<CustomerDto>> =
         AppResult.Success(searchResult)
 
     override suspend fun get(accessToken: String, customerId: Long): AppResult<CustomerDto> = error("unused")
@@ -658,6 +664,12 @@ private class FakeCustomersApi(private val searchResult: List<CustomerDto> = emp
             CustomerDto(id = 20L, name = request.name, phone = request.phone, address = request.address, balance = "0"),
         )
     }
+
+    override suspend fun update(
+        accessToken: String,
+        customerId: Long,
+        request: UpdateCustomerRequestDto,
+    ): AppResult<CustomerDto> = error("unused")
 
     override suspend fun updateAddress(accessToken: String, customerId: Long, address: String): AppResult<CustomerDto> =
         error("unused")

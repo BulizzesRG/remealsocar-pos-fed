@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
@@ -31,9 +32,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -41,11 +45,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import com.posfab.shared.features.credit.domain.CustomerMatch
 import com.posfab.shared.features.credit.domain.CustomerStatement
 import com.posfab.shared.features.credit.domain.Debtor
 import com.posfab.shared.features.credit.domain.LedgerEntry
 import com.posfab.shared.features.credit.domain.LedgerEntryType
 import com.posfab.shared.ui.components.PosErrorBanner
+import com.posfab.shared.ui.components.PosNoticeRow
 import com.posfab.shared.ui.components.PosSecondaryButton
 import com.posfab.shared.ui.components.PosTextField
 import com.posfab.shared.ui.theme.PosLayout
@@ -69,10 +75,7 @@ fun CreditScreen(viewModel: CreditViewModel) {
             if (libreta != null) {
                 LibretaView(libreta = libreta, viewModel = viewModel)
             } else if (state.showsDetail) {
-                StatementView(
-                    state = state,
-                    onBack = viewModel::back,
-                )
+                StatementView(state = state, viewModel = viewModel)
             } else {
                 DebtorList(
                     state = state,
@@ -120,27 +123,32 @@ private fun DebtorList(
         )
     }
 
-    if (hasDebtors) {
-        PosTextField(
-            value = state.filter,
-            onValueChange = onFilterChange,
-            label = CreditStrings.SEARCH_LABEL,
-            modifier = Modifier.fillMaxWidth(),
-            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-        )
-    }
+    PosTextField(
+        value = state.filter,
+        onValueChange = onFilterChange,
+        label = CreditStrings.SEARCH_LABEL,
+        modifier = Modifier.fillMaxWidth(),
+        leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+        trailingIcon = if (state.isSearching) {
+            { CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp) }
+        } else {
+            null
+        },
+    )
 
     state.errorMessage?.let { PosErrorBanner(it) }
 
+    val searching = state.filter.isNotBlank()
     val visible = state.visibleDebtors
+    val others = state.otherCustomers
     when {
-        state.isLoading && !hasDebtors -> CenteredLoading()
-        !hasDebtors && state.errorMessage == null -> CenteredMessage(
+        state.isLoading && !hasDebtors && !searching -> CenteredLoading()
+        !searching && !hasDebtors && state.errorMessage == null -> CenteredMessage(
             text = CreditStrings.EMPTY,
             style = MaterialTheme.typography.headlineSmall,
         )
-        !hasDebtors -> Unit
-        visible.isEmpty() -> CenteredMessage(
+        !searching && !hasDebtors -> Unit
+        state.showsNoMatches -> CenteredMessage(
             text = CreditStrings.NO_MATCHES,
             style = MaterialTheme.typography.titleMedium,
         )
@@ -148,13 +156,60 @@ private fun DebtorList(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(PosSpacing.xs),
         ) {
-            items(visible, key = { it.id }) { debtor ->
+            items(visible, key = { "debtor-${it.id}" }) { debtor ->
                 DebtorRow(
                     debtor = debtor,
                     nowEpochMillis = state.nowEpochMillis,
                     onClick = { onSelect(debtor.id) },
                 )
             }
+            if (others.isNotEmpty()) {
+                item(key = "others-title") {
+                    Text(
+                        text = CreditStrings.OTHER_CUSTOMERS,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = PosSpacing.md, bottom = PosSpacing.xxs),
+                    )
+                }
+                items(others, key = { "other-${it.id}" }) { customer ->
+                    OtherCustomerRow(customer = customer, onClick = { onSelect(customer.id) })
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OtherCustomerRow(customer: CustomerMatch, onClick: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = MaterialTheme.shapes.small,
+        modifier = Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = PosSpacing.md, vertical = PosSpacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(PosSpacing.md),
+        ) {
+            Text(
+                text = customer.displayName,
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = if (customer.active) CreditStrings.NO_DEBT else CreditStrings.INACTIVE,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp),
+            )
         }
     }
 }
@@ -263,15 +318,24 @@ private fun CustomerName(
 @Composable
 private fun StatementView(
     state: CreditState,
-    onBack: () -> Unit,
+    viewModel: CreditViewModel,
 ) {
+    val edit = state.edit
     PosSecondaryButton(
         text = CreditStrings.BACK,
-        onClick = onBack,
+        onClick = viewModel::back,
+        enabled = edit?.isSaving != true,
         icon = Icons.AutoMirrored.Filled.ArrowBack,
     )
 
     state.errorMessage?.let { PosErrorBanner(it) }
+    state.savedNotice?.let { notice ->
+        PosNoticeRow(
+            notice = notice,
+            errorMessage = null,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        )
+    }
 
     val statement = state.selected
     if (statement == null) {
@@ -279,58 +343,93 @@ private fun StatementView(
         return
     }
 
-    StatementHeader(statement)
-    HorizontalDivider()
-
-    if (statement.entries.isEmpty()) {
-        CenteredMessage(
-            text = CreditStrings.NO_MOVEMENTS,
-            style = MaterialTheme.typography.titleMedium,
-        )
-        return
-    }
+    if (edit != null) CustomerEditConfirmDialog(edit, statement.displayName, viewModel)
 
     LazyColumn(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(PosSpacing.xs),
     ) {
-        items(statement.entries, key = { it.id }) { entry -> EntryRow(entry) }
+        item(key = "header") {
+            Column(
+                modifier = Modifier.padding(bottom = PosSpacing.sm),
+                verticalArrangement = Arrangement.spacedBy(PosSpacing.md),
+            ) {
+                if (edit != null) {
+                    CustomerEditView(edit = edit, viewModel = viewModel)
+                } else {
+                    StatementHeader(
+                        statement = statement,
+                        since = sinceLabel(state.selectedOwesSince, state.nowEpochMillis),
+                        canEdit = state.canEditCustomers && !state.isStatementLoading,
+                        onEdit = viewModel::startEdit,
+                    )
+                }
+                Text(
+                    text = CreditStrings.HOW_TO_PAY,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                HorizontalDivider()
+                Text(
+                    text = CreditStrings.LAST_MOVEMENTS,
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            }
+        }
+        if (statement.entries.isEmpty()) {
+            item(key = "empty") {
+                CenteredMessage(
+                    text = CreditStrings.NO_MOVEMENTS,
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            }
+        } else {
+            items(statement.entries, key = { it.id }) { entry -> EntryRow(entry) }
+        }
     }
 }
 
 @Composable
-private fun StatementHeader(statement: CustomerStatement) {
-    Column(verticalArrangement = Arrangement.spacedBy(PosSpacing.sm)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.Bottom,
-            horizontalArrangement = Arrangement.spacedBy(PosSpacing.lg),
+private fun StatementHeader(
+    statement: CustomerStatement,
+    since: String?,
+    canEdit: Boolean,
+    onEdit: () -> Unit,
+) {
+    val hasDebt = statement.balance > 0.0
+    val details = CreditStrings.customerLine(statement.code, statement.phone, statement.address)
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.Bottom,
+        horizontalArrangement = Arrangement.spacedBy(PosSpacing.lg),
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(PosSpacing.xs),
         ) {
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(PosSpacing.xs),
-            ) {
-                CustomerName(
-                    name = statement.displayName,
-                    active = statement.active,
-                    style = MaterialTheme.typography.headlineSmall,
+            CustomerName(
+                name = statement.displayName,
+                active = statement.active,
+                style = MaterialTheme.typography.headlineSmall,
+            )
+            if (details.isNotEmpty()) {
+                Text(
+                    text = details,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                statement.phone?.let {
-                    Text(
-                        text = it,
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                statement.code?.let {
-                    Text(
-                        text = CreditStrings.customerNumber(it),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
             }
-            Column(horizontalAlignment = Alignment.End) {
+            if (canEdit) {
+                PosSecondaryButton(
+                    text = CreditStrings.EDIT,
+                    onClick = onEdit,
+                    icon = Icons.Filled.Edit,
+                    modifier = Modifier.padding(top = PosSpacing.xs).focusProperties { canFocus = false },
+                )
+            }
+        }
+        Column(horizontalAlignment = Alignment.End) {
+            if (hasDebt) {
                 Text(
                     text = CreditStrings.BALANCE,
                     style = MaterialTheme.typography.labelLarge,
@@ -341,13 +440,21 @@ private fun StatementHeader(statement: CustomerStatement) {
                     style = MaterialTheme.typography.displaySmall,
                     fontWeight = FontWeight.SemiBold,
                 )
+                since?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
+                Text(
+                    text = CreditStrings.NO_DEBT,
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
-        Text(
-            text = CreditStrings.HOW_TO_PAY,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 
