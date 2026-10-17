@@ -1,9 +1,9 @@
 package com.posfab.shared.features.reports.common
 
-import com.posfab.shared.features.reports.daily.DailyHistoryRepository
 import com.posfab.shared.features.reports.manager.ManagerRepository
+import com.posfab.shared.features.reports.sales.SalesRepository
 
 class ReportsUseCases(
-    val dailyHistoryRepository: DailyHistoryRepository,
+    val salesRepository: SalesRepository,
     val managerRepository: ManagerRepository,
 )

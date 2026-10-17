@@ -15,14 +15,6 @@ data class CashSession(
     val closedAt: String?,
 )
 
-data class DailyCashReport(
-    val date: String,
-    val terminalId: Long,
-    val totalIn: Double,
-    val totalOut: Double,
-    val movements: Int,
-)
-
 enum class CashDrawerStatus { OPEN, CLOSED }
 
 data class CashSummary(

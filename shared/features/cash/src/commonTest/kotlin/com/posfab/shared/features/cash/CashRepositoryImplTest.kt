@@ -26,7 +26,6 @@ import com.posfab.shared.network.cash.CashSessionResponseDto
 import com.posfab.shared.network.cash.CashSessionSummaryDto
 import com.posfab.shared.network.cash.CashSummaryResponseDto
 import com.posfab.shared.network.cash.CloseCashSessionRequestDto
-import com.posfab.shared.network.cash.DailyCashReportResponseDto
 import com.posfab.shared.network.cash.OpenCashSessionRequestDto
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -173,12 +172,6 @@ private class FakeCashApi(
 
     override suspend fun currentSession(accessToken: String, terminalId: Long): AppResult<CashSessionResponseDto?> =
         AppResult.Success(null)
-
-    override suspend fun dailyReport(
-        accessToken: String,
-        date: String,
-        terminalId: Long,
-    ): AppResult<DailyCashReportResponseDto> = AppResult.Failure(AppError.Unknown("unused"))
 
     override suspend fun summary(accessToken: String, terminalId: Long): AppResult<CashSummaryResponseDto> = summary
 

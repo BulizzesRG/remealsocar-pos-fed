@@ -25,8 +25,8 @@ import com.posfab.shared.features.operations.repository.OperationsRepository
 import com.posfab.shared.features.operations.repository.OperationsRepositoryImpl
 import com.posfab.shared.features.reports.common.ReportsRepositoryImpl
 import com.posfab.shared.features.reports.common.ReportsUseCases
-import com.posfab.shared.features.reports.daily.DailyHistoryRepository
 import com.posfab.shared.features.reports.manager.ManagerRepository
+import com.posfab.shared.features.reports.sales.SalesRepository
 import com.posfab.shared.features.sale.repository.SaleRepository
 import com.posfab.shared.features.sale.repository.SaleRepositoryImpl
 import com.posfab.shared.features.sale.ui.CardPaymentAdapter
@@ -106,8 +106,8 @@ fun desktopModule(config: PosConfig): Module = module {
             ?: error("CreditRepository created before device registration")
         CreditRepositoryImpl(get(), get(), device.businessUnitId)
     }
-    single<ReportsRepositoryImpl> { ReportsRepositoryImpl(get(), get(), get()) }
-    single<DailyHistoryRepository> { get<ReportsRepositoryImpl>() }
+    single<ReportsRepositoryImpl> { ReportsRepositoryImpl(get(), get()) }
+    single<SalesRepository> { get<ReportsRepositoryImpl>() }
     single<ManagerRepository> { get<ReportsRepositoryImpl>() }
     single { LoginUseCase(get()) }
     single { RestoreSessionUseCase(get()) }

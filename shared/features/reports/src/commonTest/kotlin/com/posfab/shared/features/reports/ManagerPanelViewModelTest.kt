@@ -3,7 +3,6 @@ package com.posfab.shared.features.reports
 import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
 import com.posfab.shared.features.reports.common.ReportsUseCases
-import com.posfab.shared.features.reports.daily.DailyHistoryRepository
 import com.posfab.shared.features.reports.manager.DebtorItem
 import com.posfab.shared.features.reports.manager.IntegrityIssue
 import com.posfab.shared.features.reports.manager.IntegrityIssueSample
@@ -12,10 +11,15 @@ import com.posfab.shared.features.reports.manager.ManagerDailyTotal
 import com.posfab.shared.features.reports.manager.ManagerPanelViewModel
 import com.posfab.shared.features.reports.manager.ManagerRepository
 import com.posfab.shared.features.reports.manager.WasteItem
+import com.posfab.shared.features.reports.sales.DayUnits
+import com.posfab.shared.features.reports.sales.SaleDetail
+import com.posfab.shared.features.reports.sales.SaleListItem
+import com.posfab.shared.features.reports.sales.SalesRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import kotlinx.datetime.LocalDate
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -28,7 +32,7 @@ class ManagerPanelViewModelTest {
     @Test
     fun manager_sees_integrity_issue_samples() = runTest(dispatcher) {
         val repo = FakeManagerRepository()
-        val vm = ManagerPanelViewModel(ReportsUseCases(FakeDailyRepo(), repo), dispatcher)
+        val vm = ManagerPanelViewModel(ReportsUseCases(FakeSalesRepo(), repo), dispatcher)
         advanceUntilIdle()
 
         vm.refreshIntegrity()
@@ -45,7 +49,7 @@ class ManagerPanelViewModelTest {
     fun integrity_error_path_sets_error_without_crash() = runTest(dispatcher) {
         val repo = FakeManagerRepository()
         repo.failIntegrity = true
-        val vm = ManagerPanelViewModel(ReportsUseCases(FakeDailyRepo(), repo), dispatcher)
+        val vm = ManagerPanelViewModel(ReportsUseCases(FakeSalesRepo(), repo), dispatcher)
         advanceUntilIdle()
 
         vm.refreshIntegrity()
@@ -87,7 +91,8 @@ private class FakeManagerRepository : ManagerRepository {
     }
 }
 
-private class FakeDailyRepo : DailyHistoryRepository {
-    override suspend fun salesByDate(date: String, terminalId: String) = AppResult.Success(emptyList<com.posfab.shared.features.reports.daily.DailySaleItem>())
-    override suspend fun cashSummary(date: String, terminalId: String) = AppResult.Success(com.posfab.shared.features.cash.domain.DailyCashReport(date, terminalId.toLongOrNull() ?: 0L, 0.0, 0.0, 0))
+private class FakeSalesRepo : SalesRepository {
+    override suspend fun salesOfDay(date: LocalDate): AppResult<List<SaleListItem>> = AppResult.Success(emptyList())
+    override suspend fun unitsOfDay(date: LocalDate): AppResult<DayUnits> = AppResult.Success(DayUnits(0.0, 0.0, 0.0))
+    override suspend fun saleDetail(id: Long): AppResult<SaleDetail> = AppResult.Failure(AppError.Validation("Sale not found"))
 }

@@ -34,8 +34,8 @@ import com.posfab.shared.features.login.LoginViewModel
 import com.posfab.shared.features.reports.diagnostics.DiagnosticsScreen
 import com.posfab.shared.features.reports.diagnostics.DiagnosticsViewModel
 import com.posfab.shared.features.reports.common.ReportsUseCases
-import com.posfab.shared.features.reports.daily.DailyHistoryScreen
-import com.posfab.shared.features.reports.daily.DailyHistoryViewModel
+import com.posfab.shared.features.reports.sales.SalesScreen
+import com.posfab.shared.features.reports.sales.SalesViewModel
 import com.posfab.shared.features.sale.ui.CashierSaleScreen
 import com.posfab.shared.features.sale.ui.CashierSaleViewModel
 import com.posfab.shared.features.sale.ui.CardPaymentAdapter
@@ -124,8 +124,8 @@ fun PosApp(controller: AppStateController) {
                     val creditViewModel = remember(screen.session) {
                         CreditViewModel(koin.get<CreditUseCases>(), screen.session.user.permissions)
                     }
-                    val historyViewModel = remember(screen.session) {
-                        DailyHistoryViewModel(screen.session, koin.get<ReportsUseCases>())
+                    val salesViewModel = remember(screen.session) {
+                        SalesViewModel(koin.get<ReportsUseCases>())
                     }
                     val diagnosticsViewModel = remember(screen.session) {
                         DiagnosticsViewModel(screen.session, koin.get(), koin.get())
@@ -139,7 +139,7 @@ fun PosApp(controller: AppStateController) {
                         sellContent = { CashierSaleScreen(saleViewModel) },
                         cashContent = { CashScreen(cashViewModel) },
                         fiadoContent = { CreditScreen(creditViewModel) },
-                        dailySalesContent = { DailyHistoryScreen(historyViewModel) },
+                        dailySalesContent = { SalesScreen(salesViewModel) },
                         productsContent = { CatalogScreen(catalogViewModel) },
                         helpContent = { DiagnosticsScreen(diagnosticsViewModel) },
                     )

@@ -47,15 +47,6 @@ data class CashIdResponseDto(
 )
 
 @Serializable
-data class DailyCashReportResponseDto(
-    val date: String,
-    val terminalId: Long,
-    val totalIn: String,
-    val totalOut: String,
-    val movements: Int,
-)
-
-@Serializable
 data class CashSummaryResponseDto(
     val status: String,
     val previousClosingAmount: String? = null,

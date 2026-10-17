@@ -14,6 +14,7 @@ val includedModules = listOf(
     ":shared:features:shell",
     ":shared:features:sale",
     ":shared:features:cash",
+    ":shared:features:credit",
     ":shared:features:catalog",
     ":shared:features:operations",
     ":shared:features:reports",
@@ -22,7 +23,6 @@ val includedModules = listOf(
     ":shared:config",
 )
 
-// Pin the JDK for every Kotlin module so builds do not depend on whichever JDK launches Gradle.
 subprojects {
     plugins.withId("org.jetbrains.kotlin.multiplatform") {
         extensions.configure<org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension> {

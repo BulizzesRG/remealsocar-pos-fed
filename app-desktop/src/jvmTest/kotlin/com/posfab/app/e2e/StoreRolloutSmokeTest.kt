@@ -16,20 +16,21 @@ import com.posfab.shared.features.cash.domain.CashSession
 import com.posfab.shared.features.cash.domain.CashSessionStatus
 import com.posfab.shared.features.cash.domain.CashSessionSummary
 import com.posfab.shared.features.cash.domain.CashSummary
-import com.posfab.shared.features.cash.domain.DailyCashReport
 import com.posfab.shared.features.cash.domain.DrawerDifference
 import com.posfab.shared.features.cash.domain.PayoutReason
 import com.posfab.shared.features.cash.repository.CashRepository
 import com.posfab.shared.features.cash.usecase.CashUseCases
 import com.posfab.shared.features.reports.common.ReportsUseCases
-import com.posfab.shared.features.reports.daily.DailyHistoryRepository
-import com.posfab.shared.features.reports.daily.DailySaleItem
 import com.posfab.shared.features.reports.manager.DebtorItem
 import com.posfab.shared.features.reports.manager.IntegrityIssue
 import com.posfab.shared.features.reports.manager.IntegrityResult
 import com.posfab.shared.features.reports.manager.ManagerDailyTotal
 import com.posfab.shared.features.reports.manager.ManagerRepository
 import com.posfab.shared.features.reports.manager.WasteItem
+import com.posfab.shared.features.reports.sales.DayUnits
+import com.posfab.shared.features.reports.sales.SaleDetail
+import com.posfab.shared.features.reports.sales.SaleListItem
+import com.posfab.shared.features.reports.sales.SalesRepository
 import com.posfab.shared.features.sale.domain.CashSessionCheck
 import com.posfab.shared.features.sale.domain.CheckoutResult
 import com.posfab.shared.features.sale.domain.CustomerPaymentResult
@@ -44,12 +45,13 @@ import com.posfab.shared.features.sale.domain.SaleProduct
 import com.posfab.shared.features.sale.domain.SaleTotals
 import com.posfab.shared.features.sale.repository.SaleRepository
 import com.posfab.shared.features.sale.usecase.SaleUseCases
-import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlin.time.Instant
+import kotlinx.coroutines.runBlocking
+import kotlinx.datetime.LocalDate
 
 private const val EXPECTED_IN_DRAWER = 1060.0
 
@@ -118,7 +120,7 @@ private class FakeStoreBackend :
     AuthRepository,
     CashRepository,
     SaleRepository,
-    DailyHistoryRepository,
+    SalesRepository,
     ManagerRepository {
 
     var failFirstCheckout: Boolean = false
@@ -219,16 +221,6 @@ private class FakeStoreBackend :
         creditSales = 0.0,
         openAccounts = 0,
         payoutList = emptyList(),
-    )
-
-    private fun dailyReport(date: String, terminalId: Long): AppResult<DailyCashReport> = AppResult.Success(
-        DailyCashReport(
-            date = date,
-            terminalId = terminalId,
-            totalIn = 100.0,
-            totalOut = 40.0,
-            movements = 5,
-        )
     )
 
     override suspend fun cashSession(): AppResult<CashSessionCheck> = AppResult.Success(CashSessionCheck.Open)
@@ -372,9 +364,9 @@ private class FakeStoreBackend :
         return AppResult.Success(currentDraft)
     }
 
-    override suspend fun salesByDate(date: String, terminalId: String): AppResult<List<DailySaleItem>> = AppResult.Success(emptyList())
-    override suspend fun cashSummary(date: String, terminalId: String): AppResult<DailyCashReport> =
-        dailyReport(date, terminalId.toLongOrNull() ?: 1L)
+    override suspend fun salesOfDay(date: LocalDate): AppResult<List<SaleListItem>> = AppResult.Success(emptyList())
+    override suspend fun unitsOfDay(date: LocalDate): AppResult<DayUnits> = AppResult.Success(DayUnits(0.0, 0.0, 0.0))
+    override suspend fun saleDetail(id: Long): AppResult<SaleDetail> = AppResult.Failure(AppError.Validation("Sale not found"))
 
     override suspend fun dailyTotals(dateFrom: String, dateTo: String): AppResult<List<ManagerDailyTotal>> = AppResult.Success(emptyList())
     override suspend fun topDebtors(limit: Int?): AppResult<List<DebtorItem>> = AppResult.Success(emptyList())

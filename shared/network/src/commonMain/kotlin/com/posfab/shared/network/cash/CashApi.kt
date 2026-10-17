@@ -19,7 +19,6 @@ interface CashApi {
     suspend fun openSession(accessToken: String, request: OpenCashSessionRequestDto): AppResult<CashIdResponseDto>
     suspend fun closeSession(accessToken: String, request: CloseCashSessionRequestDto): AppResult<CashCloseResponseDto>
     suspend fun currentSession(accessToken: String, terminalId: Long): AppResult<CashSessionResponseDto?>
-    suspend fun dailyReport(accessToken: String, date: String, terminalId: Long): AppResult<DailyCashReportResponseDto>
     suspend fun summary(accessToken: String, terminalId: Long): AppResult<CashSummaryResponseDto>
     suspend fun payout(
         accessToken: String,
@@ -59,16 +58,6 @@ class CashApiClient(
         terminalId: Long,
     ): AppResult<CashSessionResponseDto?> = safeCallOrNull {
         httpClient.get("${config.apiBaseUrl}/cash/sessions/current?terminal_id=$terminalId") {
-            bearer(accessToken)
-        }
-    }
-
-    override suspend fun dailyReport(
-        accessToken: String,
-        date: String,
-        terminalId: Long,
-    ): AppResult<DailyCashReportResponseDto> = safeCall {
-        httpClient.get("${config.apiBaseUrl}/cash/reports/daily?date=$date&terminal_id=$terminalId") {
             bearer(accessToken)
         }
     }

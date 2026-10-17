@@ -13,7 +13,6 @@ kotlin {
             implementation(project(":shared:config"))
             implementation(project(":shared:auth"))
             implementation(project(":shared:network"))
-            implementation(project(":shared:features:cash"))
             implementation(project(":shared:ui"))
             implementation(compose.runtime)
             implementation(compose.ui)
@@ -21,7 +20,7 @@ kotlin {
             implementation(compose.material3)
             implementation(compose.materialIconsExtended)
             implementation(libs.coroutines.core)
-            implementation(libs.datetime)
+            api(libs.datetime)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
