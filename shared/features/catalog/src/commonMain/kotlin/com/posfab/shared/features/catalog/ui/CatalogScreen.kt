@@ -54,6 +54,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.posfab.shared.features.catalog.common.priceHistoryDateLabel
+import com.posfab.shared.features.catalog.common.priceHistoryLine
 import com.posfab.shared.features.catalog.domain.CatalogProductSummary
 import com.posfab.shared.features.catalog.domain.KitchenKind
 import com.posfab.shared.features.catalog.domain.PriceType
@@ -447,6 +449,10 @@ private fun ProductFormPane(state: CatalogState, viewModel: CatalogViewModel) {
                 }
             }
 
+            if (state.mode == CatalogFormMode.EDITING && form.priceType != PriceType.OPEN) {
+                PriceHistorySection(state = state, onToggle = viewModel::togglePriceHistory)
+            }
+
             PosSectionCard {
                 SectionLabel(CatalogStrings.KITCHEN)
                 PosChoiceRow(
@@ -528,6 +534,42 @@ private fun ProductFormPane(state: CatalogState, viewModel: CatalogViewModel) {
             )
         }
     }
+}
+
+@Composable
+private fun PriceHistorySection(state: CatalogState, onToggle: () -> Unit) {
+    PosSectionCard {
+        TextButton(onClick = onToggle) {
+            Text(CatalogStrings.PRICE_HISTORY)
+            Icon(
+                imageVector = if (state.showPriceHistory) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                contentDescription = null,
+            )
+        }
+        if (state.showPriceHistory) {
+            val history = state.priceHistory
+            val error = state.priceHistoryError
+            when {
+                state.isLoadingPriceHistory -> HistoryText(CatalogStrings.PRICE_HISTORY_LOADING)
+                error != null -> Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                history != null -> {
+                    history.currentSince?.let(::priceHistoryDateLabel)?.let {
+                        Text(CatalogStrings.currentPriceSince(it), style = MaterialTheme.typography.bodyMedium)
+                    }
+                    if (history.entries.isEmpty()) {
+                        HistoryText(CatalogStrings.PRICE_HISTORY_EMPTY)
+                    } else {
+                        history.entries.forEach { HistoryText(priceHistoryLine(it)) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HistoryText(text: String) {
+    Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
 @Composable

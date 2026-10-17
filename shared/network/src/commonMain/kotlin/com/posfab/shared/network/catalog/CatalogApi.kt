@@ -28,6 +28,7 @@ interface CatalogApi {
     suspend fun getProduct(accessToken: String, productId: String): AppResult<ProductDetailDto>
     suspend fun updateProduct(accessToken: String, productId: String, request: UpdateProductRequestDto): AppResult<ProductDetailDto>
     suspend fun setPrices(accessToken: String, productId: String, request: SetProductPricesRequestDto): AppResult<ProductDetailDto>
+    suspend fun getPriceHistory(accessToken: String, productId: String): AppResult<PriceHistoryResponseDto>
     suspend fun assignInternalCode(accessToken: String, productId: String): AppResult<ProductDetailDto>
     suspend fun getBusinessConfig(accessToken: String): AppResult<BusinessConfigDto>
     suspend fun listUnits(accessToken: String): AppResult<List<UnitDto>>
@@ -86,6 +87,12 @@ class CatalogApiClient(
             bearer(accessToken)
             contentType(ContentType.Application.Json)
             setBody(request)
+        }
+    }
+
+    override suspend fun getPriceHistory(accessToken: String, productId: String): AppResult<PriceHistoryResponseDto> = safeCall {
+        httpClient.get("${config.apiBaseUrl}/products/$productId/price-history") {
+            bearer(accessToken)
         }
     }
 

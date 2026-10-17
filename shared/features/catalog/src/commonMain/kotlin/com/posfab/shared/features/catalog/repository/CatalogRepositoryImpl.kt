@@ -7,6 +7,8 @@ import com.posfab.shared.core.result.map
 import com.posfab.shared.features.catalog.domain.CatalogProductDetail
 import com.posfab.shared.features.catalog.domain.CatalogProductSummary
 import com.posfab.shared.features.catalog.domain.KitchenKind
+import com.posfab.shared.features.catalog.domain.PriceHistory
+import com.posfab.shared.features.catalog.domain.PriceHistoryEntry
 import com.posfab.shared.features.catalog.domain.PriceType
 import com.posfab.shared.features.catalog.domain.PricesInput
 import com.posfab.shared.features.catalog.domain.ProductInput
@@ -14,6 +16,8 @@ import com.posfab.shared.features.catalog.domain.ProductPage
 import com.posfab.shared.features.catalog.domain.ProductPrices
 import com.posfab.shared.network.catalog.CatalogApi
 import com.posfab.shared.network.catalog.CreateProductRequestDto
+import com.posfab.shared.network.catalog.PriceHistoryEntryDto
+import com.posfab.shared.network.catalog.PriceHistoryResponseDto
 import com.posfab.shared.network.catalog.ProductDetailDto
 import com.posfab.shared.network.catalog.ProductListItemDto
 import com.posfab.shared.network.catalog.ProductPricesDto
@@ -92,6 +96,9 @@ class CatalogRepositoryImpl(
             )
         }.map { it.toDomain() }
 
+    override suspend fun getPriceHistory(productId: String): AppResult<PriceHistory> =
+        authorized { catalogApi.getPriceHistory(it, productId) }.map { it.toDomain() }
+
     override suspend fun assignInternalCode(productId: String): AppResult<CatalogProductDetail> =
         authorized { catalogApi.assignInternalCode(it, productId) }.map { it.toDomain() }
 
@@ -149,6 +156,27 @@ class CatalogRepositoryImpl(
             cashOnsite = cashOnsite?.toDoubleOrNull(),
             listOnsite = listOnsite?.toDoubleOrNull(),
             suggestedPrice = suggestedPrice,
+        )
+    }
+
+    private fun PriceHistoryResponseDto.toDomain() = PriceHistory(
+        currentSince = currentSince,
+        entries = items.mapNotNull { it.toDomain() },
+    )
+
+    private fun PriceHistoryEntryDto.toDomain(): PriceHistoryEntry? {
+        val cash = cashTakeaway.toDoubleOrNull() ?: return null
+        return PriceHistoryEntry(
+            prices = ProductPrices(
+                cashTakeaway = cash,
+                listTakeaway = listTakeaway.toDoubleOrNull() ?: cash,
+                cashOnsite = cashOnsite?.toDoubleOrNull(),
+                listOnsite = listOnsite?.toDoubleOrNull(),
+                suggestedPrice = suggestedPrice,
+            ),
+            validFrom = validFrom,
+            validUntil = validUntil,
+            changedBy = changedBy,
         )
     }
 

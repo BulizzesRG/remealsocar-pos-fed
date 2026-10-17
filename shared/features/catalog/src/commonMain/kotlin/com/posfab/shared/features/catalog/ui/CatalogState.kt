@@ -3,6 +3,7 @@ package com.posfab.shared.features.catalog.ui
 import com.posfab.shared.features.catalog.domain.CatalogProductDetail
 import com.posfab.shared.features.catalog.domain.CatalogProductSummary
 import com.posfab.shared.features.catalog.domain.KitchenKind
+import com.posfab.shared.features.catalog.domain.PriceHistory
 import com.posfab.shared.features.catalog.domain.PriceType
 
 enum class CatalogFormMode { IDLE, CREATING, EDITING }
@@ -53,6 +54,10 @@ data class CatalogState(
     val isGeneratingCode: Boolean = false,
     val cashDiscountPct: Double = 5.0,
     val showCountSection: Boolean = false,
+    val priceHistory: PriceHistory? = null,
+    val isLoadingPriceHistory: Boolean = false,
+    val priceHistoryError: String? = null,
+    val showPriceHistory: Boolean = false,
     val notice: String? = null,
     val errorMessage: String? = null,
     val isLoadingMore: Boolean = false,

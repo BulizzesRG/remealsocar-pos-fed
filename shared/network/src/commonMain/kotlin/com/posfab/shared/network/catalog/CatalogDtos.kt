@@ -121,3 +121,21 @@ data class BusinessUnitDto(
     val name: String,
     val active: Boolean = true,
 )
+
+@Serializable
+data class PriceHistoryEntryDto(
+    @SerialName("cashTakeaway") val cashTakeaway: String,
+    @SerialName("listTakeaway") val listTakeaway: String,
+    @SerialName("cashOnsite") val cashOnsite: String? = null,
+    @SerialName("listOnsite") val listOnsite: String? = null,
+    @SerialName("suggestedPrice") val suggestedPrice: Boolean = false,
+    @SerialName("validFrom") val validFrom: String,
+    @SerialName("validUntil") val validUntil: String,
+    @SerialName("changedBy") val changedBy: String,
+)
+
+@Serializable
+data class PriceHistoryResponseDto(
+    @SerialName("currentSince") val currentSince: String? = null,
+    val items: List<PriceHistoryEntryDto> = emptyList(),
+)

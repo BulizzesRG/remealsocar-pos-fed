@@ -27,6 +27,7 @@ import com.posfab.shared.network.catalog.BusinessConfigDto
 import com.posfab.shared.network.catalog.BusinessUnitDto
 import com.posfab.shared.network.catalog.CatalogApi
 import com.posfab.shared.network.catalog.CreateProductRequestDto
+import com.posfab.shared.network.catalog.PriceHistoryResponseDto
 import com.posfab.shared.network.catalog.ProductDetailDto
 import com.posfab.shared.network.catalog.ProductListItemDto
 import com.posfab.shared.network.catalog.ProductListResponseDto
@@ -1029,6 +1030,9 @@ private class FakeCatalogApi(
         productId: String,
         request: SetProductPricesRequestDto,
     ): AppResult<ProductDetailDto> = error("unused")
+
+    override suspend fun getPriceHistory(accessToken: String, productId: String): AppResult<PriceHistoryResponseDto> =
+        error("unused")
 
     override suspend fun assignInternalCode(accessToken: String, productId: String): AppResult<ProductDetailDto> =
         error("unused")

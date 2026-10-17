@@ -36,6 +36,7 @@ class CatalogViewModel(
     private var selectJob: Job? = null
     private var lookupJob: Job? = null
     private var loadMoreJob: Job? = null
+    private var priceHistoryJob: Job? = null
 
     init {
         loadCashDiscountPct()
@@ -177,8 +178,9 @@ class CatalogViewModel(
     }
 
     private fun openCreate() {
+        priceHistoryJob?.cancel()
         _state.update {
-            it.copy(
+            it.withoutPriceHistory().copy(
                 mode = CatalogFormMode.CREATING,
                 selected = null,
                 form = ProductForm(),
@@ -264,6 +266,49 @@ class CatalogViewModel(
         _state.update { it.copy(showCountSection = !it.showCountSection) }
     }
 
+    fun togglePriceHistory() {
+        val snapshot = _state.value
+        if (snapshot.mode != CatalogFormMode.EDITING) return
+        val opening = !snapshot.showPriceHistory
+        _state.update { it.copy(showPriceHistory = opening) }
+        if (opening && snapshot.priceHistory == null && !snapshot.isLoadingPriceHistory) loadPriceHistory()
+    }
+
+    private fun loadPriceHistory() {
+        val productId = _state.value.selected?.id ?: return
+        priceHistoryJob?.cancel()
+        _state.update { it.copy(isLoadingPriceHistory = true, priceHistoryError = null) }
+        priceHistoryJob = scope.launch {
+            val result = repository.getPriceHistory(productId)
+            _state.update {
+                if (it.selected?.id != productId) {
+                    it
+                } else {
+                    when (result) {
+                        is AppResult.Success -> it.copy(isLoadingPriceHistory = false, priceHistory = result.value)
+                        is AppResult.Failure -> it.copy(
+                            isLoadingPriceHistory = false,
+                            priceHistoryError = CatalogErrorText.from(result.error),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun invalidatePriceHistory() {
+        priceHistoryJob?.cancel()
+        _state.update { it.copy(priceHistory = null, isLoadingPriceHistory = false, priceHistoryError = null) }
+        if (_state.value.showPriceHistory) loadPriceHistory()
+    }
+
+    private fun CatalogState.withoutPriceHistory(): CatalogState = copy(
+        priceHistory = null,
+        isLoadingPriceHistory = false,
+        priceHistoryError = null,
+        showPriceHistory = false,
+    )
+
     fun requestGenerateCode() {
         val snapshot = _state.value
         if (snapshot.isGeneratingCode || snapshot.isSaving) return
@@ -334,6 +379,7 @@ class CatalogViewModel(
             if (valid.prices != null) {
                 detail = repository.setPrices(detail.id, valid.prices).valueOrStop() ?: return@launch
                 _state.update { it.copy(selected = detail) }
+                invalidatePriceHistory()
             }
 
             if (form.generateCodeOnSave && valid.product.barcode == null) {
@@ -355,8 +401,9 @@ class CatalogViewModel(
     }
 
     private fun closeForm() {
+        priceHistoryJob?.cancel()
         _state.update {
-            it.copy(
+            it.withoutPriceHistory().copy(
                 mode = CatalogFormMode.IDLE,
                 selected = null,
                 form = ProductForm(),
@@ -380,8 +427,9 @@ class CatalogViewModel(
     }
 
     private fun openProduct(detail: CatalogProductDetail) {
+        priceHistoryJob?.cancel()
         _state.update {
-            it.copy(
+            it.withoutPriceHistory().copy(
                 mode = CatalogFormMode.EDITING,
                 selected = detail,
                 form = formFrom(detail, it.cashDiscountPct),

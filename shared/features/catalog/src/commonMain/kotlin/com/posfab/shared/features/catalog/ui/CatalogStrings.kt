@@ -44,6 +44,19 @@ internal object CatalogStrings {
     const val CANCEL = "Cancelar"
     const val UNSAVED_CHANGES = "Cambios sin guardar"
 
+    const val PRICE_HISTORY = "Precios anteriores"
+    const val PRICE_HISTORY_EMPTY = "Este producto no ha cambiado de precio"
+    const val PRICE_HISTORY_LOADING = "Cargando…"
+    const val HISTORY_UNTIL = "Hasta"
+    const val HISTORY_WITH_CARD = "con tarjeta"
+    const val HISTORY_SUGGESTED = "precio sugerido"
+    const val HISTORY_ONSITE = "aquí"
+    const val HISTORY_CHANGED_BY = "lo cambió"
+    const val UNKNOWN_DATE = "—"
+    const val AM = "am"
+    const val PM = "pm"
+    val MONTHS = listOf("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic")
+
     const val SAVED = "Guardado"
     const val CODE_GENERATED = "Código generado"
 
@@ -64,6 +77,8 @@ internal object CatalogStrings {
     const val DISCARD_KEEP = "Seguir editando"
 
     fun notFoundWithCode(code: String): String = "No hay ningún producto con el código $code"
+
+    fun currentPriceSince(date: String): String = "Precio actual desde $date"
 
     fun showing(count: Int, total: Int): String = "Mostrando $count de $total"
 

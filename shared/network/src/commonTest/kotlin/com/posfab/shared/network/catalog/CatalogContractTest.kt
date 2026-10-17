@@ -72,4 +72,77 @@ class CatalogContractTest {
         assertNull(dto.prices)
         assertEquals("24.000000", dto.uoms.single().factorToBase)
     }
+
+    @Test
+    fun price_history_decodes_entries_with_onsite_prices() {
+        val body = """
+            {"currentSince":"2026-10-17T16:48:47.123456Z","items":[
+             {"cashTakeaway":"17.00","listTakeaway":"18.00","cashOnsite":"20.00","listOnsite":"21.00",
+              "suggestedPrice":false,"validFrom":"2026-10-01T12:00:00Z",
+              "validUntil":"2026-10-17T16:48:47.123456Z","changedBy":"gerente"}]}
+        """.trimIndent()
+        val dto = json.decodeFromString<PriceHistoryResponseDto>(body)
+        assertEquals("2026-10-17T16:48:47.123456Z", dto.currentSince)
+        val item = dto.items.single()
+        assertEquals("17.00", item.cashTakeaway)
+        assertEquals("18.00", item.listTakeaway)
+        assertEquals("20.00", item.cashOnsite)
+        assertEquals("21.00", item.listOnsite)
+        assertEquals(false, item.suggestedPrice)
+        assertEquals("2026-10-01T12:00:00Z", item.validFrom)
+        assertEquals("2026-10-17T16:48:47.123456Z", item.validUntil)
+        assertEquals("gerente", item.changedBy)
+    }
+
+    @Test
+    fun price_history_decodes_entries_without_onsite_prices() {
+        val body = """
+            {"currentSince":"2026-10-17T16:48:47Z","items":[
+             {"cashTakeaway":"17.00","listTakeaway":"18.00","suggestedPrice":false,
+              "validFrom":"2026-10-02T12:00:00Z","validUntil":"2026-10-03T12:00:00Z","changedBy":"admin"},
+             {"cashTakeaway":"16.00","listTakeaway":"17.00","cashOnsite":null,"listOnsite":null,
+              "suggestedPrice":false,"validFrom":"2026-10-01T12:00:00Z","validUntil":"2026-10-02T12:00:00Z",
+              "changedBy":"gerente"}]}
+        """.trimIndent()
+        val dto = json.decodeFromString<PriceHistoryResponseDto>(body)
+        assertEquals(2, dto.items.size)
+        dto.items.forEach {
+            assertNull(it.cashOnsite)
+            assertNull(it.listOnsite)
+        }
+        assertEquals(listOf("admin", "gerente"), dto.items.map { it.changedBy })
+    }
+
+    @Test
+    fun price_history_decodes_suggested_price() {
+        val body = """
+            {"currentSince":"2026-10-17T16:48:47Z","items":[
+             {"cashTakeaway":"17.00","listTakeaway":"17.00","cashOnsite":"20.00","listOnsite":"20.00",
+              "suggestedPrice":true,"validFrom":"2026-10-01T12:00:00Z","validUntil":"2026-10-02T12:00:00Z",
+              "changedBy":"gerente"}]}
+        """.trimIndent()
+        val dto = json.decodeFromString<PriceHistoryResponseDto>(body)
+        assertEquals(true, dto.items.single().suggestedPrice)
+    }
+
+    @Test
+    fun price_history_without_prices_decodes_null_since_and_empty_items() {
+        val explicit = json.decodeFromString<PriceHistoryResponseDto>("""{"currentSince":null,"items":[]}""")
+        assertNull(explicit.currentSince)
+        assertEquals(emptyList(), explicit.items)
+        val omitted = json.decodeFromString<PriceHistoryResponseDto>("{}")
+        assertNull(omitted.currentSince)
+        assertEquals(emptyList(), omitted.items)
+    }
+
+    @Test
+    fun price_history_entry_without_suggested_flag_defaults_to_false() {
+        val body = """
+            {"items":[{"cashTakeaway":"17.00","listTakeaway":"18.00",
+             "validFrom":"2026-10-01T12:00:00Z","validUntil":"2026-10-02T12:00:00Z","changedBy":"gerente"}]}
+        """.trimIndent()
+        val dto = json.decodeFromString<PriceHistoryResponseDto>(body)
+        assertEquals(false, dto.items.single().suggestedPrice)
+        assertNull(dto.currentSince)
+    }
 }

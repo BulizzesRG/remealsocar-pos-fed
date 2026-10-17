@@ -5,6 +5,8 @@ import com.posfab.shared.core.result.AppResult
 import com.posfab.shared.features.catalog.common.CatalogUseCases
 import com.posfab.shared.features.catalog.domain.CatalogProductDetail
 import com.posfab.shared.features.catalog.domain.CatalogProductSummary
+import com.posfab.shared.features.catalog.domain.PriceHistory
+import com.posfab.shared.features.catalog.domain.PriceHistoryEntry
 import com.posfab.shared.features.catalog.domain.PriceType
 import com.posfab.shared.features.catalog.domain.PricesInput
 import com.posfab.shared.features.catalog.domain.ProductInput
@@ -15,13 +17,16 @@ import com.posfab.shared.features.catalog.ui.CatalogConfirm
 import com.posfab.shared.features.catalog.ui.CatalogFormMode
 import com.posfab.shared.features.catalog.ui.CatalogViewModel
 import com.posfab.shared.features.catalog.ui.PendingAction
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -62,7 +67,12 @@ class CatalogViewModelTest {
         val listOffsets = mutableListOf<Int>()
         var listCalls = 0
         var failSetPricesOnce = false
+        var failAssignCodeOnce = false
         var cashDiscountPct = 5.0
+        val priceHistoryCalls = mutableListOf<String>()
+        val priceHistories = mutableMapOf<String, PriceHistory>()
+        var priceHistoryFailure: AppError? = null
+        val priceHistoryGates = mutableMapOf<String, CompletableDeferred<Unit>>()
         private var nextId = 100
 
         override suspend fun listProducts(query: String?, activeOnly: Boolean, offset: Int): AppResult<ProductPage> {
@@ -130,9 +140,20 @@ class CatalogViewModelTest {
             return AppResult.Success(updated)
         }
 
+        override suspend fun getPriceHistory(productId: String): AppResult<PriceHistory> {
+            priceHistoryCalls += productId
+            priceHistoryGates[productId]?.await()
+            priceHistoryFailure?.let { return AppResult.Failure(it) }
+            return AppResult.Success(priceHistories[productId] ?: PriceHistory(currentSince = null, entries = emptyList()))
+        }
+
         override suspend fun assignInternalCode(productId: String): AppResult<CatalogProductDetail> {
             callOrder += "code"
             internalCodeCalls += productId
+            if (failAssignCodeOnce) {
+                failAssignCodeOnce = false
+                return AppResult.Failure(AppError.Network("timeout"))
+            }
             val updated = products.getValue(productId).copy(barcode = "2000000000017")
             products[productId] = updated
             return AppResult.Success(updated)
@@ -721,5 +742,379 @@ class CatalogViewModelTest {
         vm.loadMore()
         advanceUntilIdle()
         assertEquals(calls, repo.listCalls)
+    }
+
+    private fun history(changedBy: String, cash: Double = 17.0) = PriceHistory(
+        currentSince = "2026-10-17T16:48:47.123456Z",
+        entries = listOf(
+            PriceHistoryEntry(
+                prices = ProductPrices(cash, cash + 1, null, null, false),
+                validFrom = "2026-10-01T12:00:00Z",
+                validUntil = "2026-10-17T16:48:47.123456Z",
+                changedBy = changedBy,
+            ),
+        ),
+    )
+
+    private fun TestScope.openedProduct(repo: FakeRepo, id: String = "1"): CatalogViewModel {
+        repo.products[id] = detail(id, "Coca").copy(prices = ProductPrices(17.0, 18.0, null, null, false))
+        val vm = newVm(repo)
+        advanceUntilIdle()
+        vm.selectProduct(id)
+        advanceUntilIdle()
+        return vm
+    }
+
+    @Test
+    fun opening_a_product_does_not_load_price_history() = runTest(dispatcher) {
+        val repo = FakeRepo()
+        val vm = openedProduct(repo)
+
+        val state = vm.state.value
+        assertEquals(CatalogFormMode.EDITING, state.mode)
+        assertTrue(repo.priceHistoryCalls.isEmpty())
+        assertFalse(state.showPriceHistory)
+        assertNull(state.priceHistory)
+    }
+
+    @Test
+    fun first_toggle_opens_and_loads_price_history() = runTest(dispatcher) {
+        val repo = FakeRepo()
+        repo.priceHistories["1"] = history("gerente")
+        val vm = openedProduct(repo)
+
+        vm.togglePriceHistory()
+        assertTrue(vm.state.value.isLoadingPriceHistory)
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertTrue(state.showPriceHistory)
+        assertFalse(state.isLoadingPriceHistory)
+        assertEquals("gerente", state.priceHistory?.entries?.single()?.changedBy)
+        assertEquals(listOf("1"), repo.priceHistoryCalls)
+    }
+
+    @Test
+    fun closing_and_reopening_price_history_does_not_reload() = runTest(dispatcher) {
+        val repo = FakeRepo()
+        val vm = openedProduct(repo)
+
+        vm.togglePriceHistory()
+        advanceUntilIdle()
+        vm.togglePriceHistory()
+        assertFalse(vm.state.value.showPriceHistory)
+        vm.togglePriceHistory()
+        advanceUntilIdle()
+
+        assertTrue(vm.state.value.showPriceHistory)
+        assertEquals(listOf("1"), repo.priceHistoryCalls)
+    }
+
+    @Test
+    fun price_history_error_stays_out_of_the_general_banner() = runTest(dispatcher) {
+        val repo = FakeRepo()
+        repo.priceHistoryFailure = AppError.Network("timeout")
+        val vm = openedProduct(repo)
+
+        vm.togglePriceHistory()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertNotNull(state.priceHistoryError)
+        assertNull(state.errorMessage)
+        assertNull(state.priceHistory)
+        assertFalse(state.isLoadingPriceHistory)
+    }
+
+    @Test
+    fun price_history_retries_after_an_error_when_reopened() = runTest(dispatcher) {
+        val repo = FakeRepo()
+        repo.priceHistoryFailure = AppError.Network("timeout")
+        val vm = openedProduct(repo)
+        vm.togglePriceHistory()
+        advanceUntilIdle()
+
+        repo.priceHistoryFailure = null
+        vm.togglePriceHistory()
+        vm.togglePriceHistory()
+        advanceUntilIdle()
+
+        assertEquals(2, repo.priceHistoryCalls.size)
+        assertNull(vm.state.value.priceHistoryError)
+        assertNotNull(vm.state.value.priceHistory)
+    }
+
+    @Test
+    fun opening_another_product_clears_price_history() = runTest(dispatcher) {
+        val repo = FakeRepo()
+        repo.priceHistories["1"] = history("gerente")
+        repo.products["2"] = detail("2", "Jamón")
+        val vm = openedProduct(repo)
+        vm.togglePriceHistory()
+        advanceUntilIdle()
+
+        vm.selectProduct("2")
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals("2", state.selected?.id)
+        assertNull(state.priceHistory)
+        assertFalse(state.showPriceHistory)
+        assertFalse(state.isLoadingPriceHistory)
+        assertNull(state.priceHistoryError)
+        assertEquals(listOf("1"), repo.priceHistoryCalls)
+    }
+
+    @Test
+    fun cancel_and_new_clear_price_history() = runTest(dispatcher) {
+        val repo = FakeRepo()
+        repo.priceHistories["1"] = history("gerente")
+        val vm = openedProduct(repo)
+        vm.togglePriceHistory()
+        advanceUntilIdle()
+
+        vm.startCreate()
+        assertNull(vm.state.value.priceHistory)
+        assertFalse(vm.state.value.showPriceHistory)
+
+        vm.selectProduct("1")
+        advanceUntilIdle()
+        vm.togglePriceHistory()
+        advanceUntilIdle()
+        vm.cancel()
+
+        assertEquals(CatalogFormMode.IDLE, vm.state.value.mode)
+        assertNull(vm.state.value.priceHistory)
+        assertFalse(vm.state.value.showPriceHistory)
+    }
+
+    @Test
+    fun saving_prices_with_history_open_reloads_it() = runTest(dispatcher) {
+        val repo = FakeRepo()
+        repo.priceHistories["1"] = history("gerente")
+        val vm = openedProduct(repo)
+        vm.togglePriceHistory()
+        advanceUntilIdle()
+
+        repo.priceHistories["1"] = history("admin", cash = 18.0)
+        vm.onCashTakeawayChange("19")
+        vm.save()
+        vm.confirmSave()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals("Guardado", state.notice)
+        assertTrue(state.showPriceHistory)
+        assertEquals(listOf("1", "1"), repo.priceHistoryCalls)
+        assertEquals("admin", state.priceHistory?.entries?.single()?.changedBy)
+    }
+
+    @Test
+    fun saving_prices_with_history_closed_reloads_on_next_toggle() = runTest(dispatcher) {
+        val repo = FakeRepo()
+        repo.priceHistories["1"] = history("gerente")
+        val vm = openedProduct(repo)
+        vm.togglePriceHistory()
+        advanceUntilIdle()
+        vm.togglePriceHistory()
+
+        vm.onCashTakeawayChange("19")
+        vm.save()
+        vm.confirmSave()
+        advanceUntilIdle()
+
+        assertFalse(vm.state.value.showPriceHistory)
+        assertNull(vm.state.value.priceHistory)
+        assertEquals(1, repo.priceHistoryCalls.size)
+
+        vm.togglePriceHistory()
+        advanceUntilIdle()
+        assertEquals(2, repo.priceHistoryCalls.size)
+        assertNotNull(vm.state.value.priceHistory)
+    }
+
+    @Test
+    fun saving_an_open_price_product_keeps_loaded_history() = runTest(dispatcher) {
+        val repo = FakeRepo()
+        val vm = openedProduct(repo)
+        vm.togglePriceHistory()
+        advanceUntilIdle()
+
+        vm.onPriceTypeChange(PriceType.OPEN)
+        vm.save()
+        vm.confirmSave()
+        advanceUntilIdle()
+
+        assertTrue(repo.pricesSet.isEmpty())
+        assertEquals(1, repo.priceHistoryCalls.size)
+        assertNotNull(vm.state.value.priceHistory)
+    }
+
+    @Test
+    fun toggle_in_creating_mode_never_calls_repository() = runTest(dispatcher) {
+        val repo = FakeRepo()
+        val vm = newVm(repo)
+        advanceUntilIdle()
+
+        vm.startCreate()
+        vm.togglePriceHistory()
+        advanceUntilIdle()
+        vm.togglePriceHistory()
+        advanceUntilIdle()
+
+        assertTrue(repo.priceHistoryCalls.isEmpty())
+        assertFalse(vm.state.value.showPriceHistory)
+        assertFalse(vm.state.value.isLoadingPriceHistory)
+    }
+
+    @Test
+    fun toggle_with_no_product_open_does_nothing() = runTest(dispatcher) {
+        val repo = FakeRepo()
+        val vm = newVm(repo)
+        advanceUntilIdle()
+
+        vm.togglePriceHistory()
+        advanceUntilIdle()
+
+        assertTrue(repo.priceHistoryCalls.isEmpty())
+        assertFalse(vm.state.value.showPriceHistory)
+    }
+
+    @Test
+    fun history_in_flight_for_a_previous_product_is_ignored() = runTest(dispatcher) {
+        val repo = FakeRepo()
+        val gate = CompletableDeferred<Unit>()
+        repo.priceHistoryGates["1"] = gate
+        repo.priceHistories["1"] = history("gerente")
+        repo.products["2"] = detail("2", "Jamón")
+        val vm = openedProduct(repo)
+
+        vm.togglePriceHistory()
+        advanceUntilIdle()
+        assertTrue(vm.state.value.isLoadingPriceHistory)
+
+        vm.selectProduct("2")
+        advanceUntilIdle()
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals("2", state.selected?.id)
+        assertNull(state.priceHistory)
+        assertFalse(state.isLoadingPriceHistory)
+        assertFalse(state.showPriceHistory)
+    }
+
+    @Test
+    fun switching_product_then_opening_history_shows_only_the_new_product() = runTest(dispatcher) {
+        val repo = FakeRepo()
+        val gate = CompletableDeferred<Unit>()
+        repo.priceHistoryGates["1"] = gate
+        repo.priceHistories["1"] = history("gerente")
+        repo.products["2"] = detail("2", "Jamón")
+        val vm = openedProduct(repo)
+        vm.togglePriceHistory()
+        advanceUntilIdle()
+
+        vm.selectProduct("2")
+        advanceUntilIdle()
+        vm.togglePriceHistory()
+        advanceUntilIdle()
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals("2", state.selected?.id)
+        assertTrue(state.showPriceHistory)
+        assertTrue(state.priceHistory?.entries.orEmpty().isEmpty())
+        assertEquals(listOf("1", "2"), repo.priceHistoryCalls)
+    }
+
+    @Test
+    fun failed_set_prices_keeps_loaded_history_untouched() = runTest(dispatcher) {
+        val repo = FakeRepo()
+        repo.priceHistories["1"] = history("gerente")
+        val vm = openedProduct(repo)
+        vm.togglePriceHistory()
+        advanceUntilIdle()
+
+        repo.failSetPricesOnce = true
+        vm.onCashTakeawayChange("19")
+        vm.save()
+        vm.confirmSave()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(1, repo.priceHistoryCalls.size)
+        assertEquals("gerente", state.priceHistory?.entries?.single()?.changedBy)
+        assertTrue(state.showPriceHistory)
+        assertNull(state.priceHistoryError)
+    }
+
+    @Test
+    fun history_opens_fresh_after_prices_were_saved_but_the_code_step_failed() = runTest(dispatcher) {
+        val repo = FakeRepo()
+        repo.failAssignCodeOnce = true
+        val vm = newVm(repo)
+        advanceUntilIdle()
+
+        vm.startCreate()
+        vm.onNameChange("Pan")
+        vm.onCashTakeawayChange("8")
+        vm.requestGenerateCode()
+        vm.save()
+        vm.confirmSave()
+        advanceUntilIdle()
+
+        val afterSave = vm.state.value
+        assertEquals(listOf("create", "prices", "code"), repo.callOrder)
+        assertEquals(CatalogFormMode.EDITING, afterSave.mode)
+        assertNotNull(afterSave.errorMessage)
+        assertNull(afterSave.priceHistory)
+        assertTrue(repo.priceHistoryCalls.isEmpty())
+
+        val newId = afterSave.selected?.id ?: error("product was not created")
+        repo.priceHistories[newId] = history("admin", cash = 8.0)
+        vm.togglePriceHistory()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(listOf(newId), repo.priceHistoryCalls)
+        assertEquals("admin", state.priceHistory?.entries?.single()?.changedBy)
+        assertNull(state.priceHistoryError)
+    }
+
+    @Test
+    fun history_with_entries_but_no_current_since_is_kept() = runTest(dispatcher) {
+        val repo = FakeRepo()
+        repo.priceHistories["1"] = history("gerente").copy(currentSince = null)
+        val vm = openedProduct(repo)
+
+        vm.togglePriceHistory()
+        advanceUntilIdle()
+
+        val loaded = vm.state.value.priceHistory
+        assertNull(loaded?.currentSince)
+        assertEquals(1, loaded?.entries?.size)
+        assertNull(vm.state.value.priceHistoryError)
+    }
+
+    @Test
+    fun toggling_twice_while_loading_does_not_start_a_second_request() = runTest(dispatcher) {
+        val repo = FakeRepo()
+        val gate = CompletableDeferred<Unit>()
+        repo.priceHistoryGates["1"] = gate
+        val vm = openedProduct(repo)
+
+        vm.togglePriceHistory()
+        advanceUntilIdle()
+        vm.togglePriceHistory()
+        vm.togglePriceHistory()
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        assertEquals(listOf("1"), repo.priceHistoryCalls)
+        assertTrue(vm.state.value.showPriceHistory)
+        assertNotNull(vm.state.value.priceHistory)
     }
 }

@@ -79,3 +79,15 @@ data class PricesInput(
     val listOnsite: Double?,
     val suggestedPrice: Boolean,
 )
+
+data class PriceHistoryEntry(
+    val prices: ProductPrices,
+    val validFrom: String,
+    val validUntil: String,
+    val changedBy: String,
+)
+
+data class PriceHistory(
+    val currentSince: String?,
+    val entries: List<PriceHistoryEntry>,
+)
