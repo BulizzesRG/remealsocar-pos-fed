@@ -1,13 +1,113 @@
 package com.posfab.shared.network.pos
 
+import com.posfab.shared.config.PosConfig
+import com.posfab.shared.config.PosEnv
+import com.posfab.shared.core.logging.LogLevel
+import com.posfab.shared.core.result.AppResult
+import com.posfab.shared.network.http.HttpClientFactory
+import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.respond
+import io.ktor.http.ContentType
+import io.ktor.http.HttpMethod
+import io.ktor.http.HttpStatusCode
+import io.ktor.http.headersOf
+import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNull
 
 class PosContractTest {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false; isLenient = true }
+
+    private val config = PosConfig(
+        env = PosEnv.DEV,
+        apiBaseUrl = "http://localhost:8080",
+        logLevel = LogLevel.DEBUG,
+        requestTimeoutMs = 5_000,
+        enableVerboseLogs = false,
+    )
+
+    private class Captured {
+        var method: HttpMethod? = null
+        var path = ""
+        var query = ""
+        var auth: String? = null
+    }
+
+    private fun api(captured: Captured, response: String): PosApiClient {
+        val engine = MockEngine { request ->
+            captured.method = request.method
+            captured.path = request.url.encodedPath
+            captured.query = request.url.encodedQuery
+            captured.auth = request.headers["Authorization"]
+            respond(response, HttpStatusCode.OK, headersOf("Content-Type", ContentType.Application.Json.toString()))
+        }
+        return PosApiClient(HttpClientFactory.create(config, engine), config)
+    }
+
+    @Test
+    fun delivery_listing_requests_delivery_type_and_decodes_delivery_fields() = runTest {
+        val captured = Captured()
+
+        val result = api(captured, DELIVERY_LIST_JSON).listOpenDrafts("tok-1", "DELIVERY")
+
+        val dto = assertIs<AppResult.Success<DraftListDto>>(result).value
+        assertEquals(HttpMethod.Get, captured.method)
+        assertEquals("/pos/drafts", captured.path)
+        assertEquals("type=DELIVERY&status=OPEN", captured.query)
+        assertEquals("Bearer tok-1", captured.auth)
+        val delivery = dto.items.single()
+        assertEquals("DELIVERY", delivery.type)
+        assertEquals("Rosa Martínez", delivery.customerName)
+        assertEquals("la de la esquina", delivery.customerNickname)
+        assertEquals("Calle 5 #12", delivery.deliveryAddress)
+        assertEquals("ENVIADO", delivery.deliveryStage)
+        assertEquals("200.00", delivery.paysWith)
+    }
+
+    @Test
+    fun sale_listing_convenience_requests_sale_type() = runTest {
+        val captured = Captured()
+
+        val result = api(captured, """{"items":[]}""").listOpenSaleDrafts("tok-2")
+
+        assertIs<AppResult.Success<DraftListDto>>(result)
+        assertEquals("/pos/drafts", captured.path)
+        assertEquals("type=SALE&status=OPEN", captured.query)
+    }
+
+    @Test
+    fun delivery_draft_without_optional_fields_decodes_nulls() {
+        val body = """
+            {"id":31,"type":"DELIVERY","status":"OPEN","terminalId":3,"version":0,"lines":[],
+             "totals":{"amount":"0.00","subtotal":"0.00","tax":"0.00","total":"0.00"},
+             "customerName":"Pedro Barraza","deliveryStage":"ANOTADO"}
+        """.trimIndent()
+        val dto = json.decodeFromString<DraftDto>(body)
+        assertEquals("Pedro Barraza", dto.customerName)
+        assertEquals("ANOTADO", dto.deliveryStage)
+        assertNull(dto.customerNickname)
+        assertNull(dto.deliveryAddress)
+        assertNull(dto.paysWith)
+    }
+
+    @Test
+    fun sale_draft_without_delivery_fields_decodes_nulls() {
+        val body = """
+            {"id":9,"type":"SALE","status":"OPEN","terminalId":1,"version":2,"lines":[],
+             "totals":{"amount":"0.00","subtotal":"0.00","tax":"0.00","total":"0.00"}}
+        """.trimIndent()
+        val dto = json.decodeFromString<DraftDto>(body)
+        assertEquals("SALE", dto.type)
+        assertNull(dto.customerName)
+        assertNull(dto.customerNickname)
+        assertNull(dto.deliveryAddress)
+        assertNull(dto.deliveryStage)
+        assertNull(dto.paysWith)
+    }
 
     @Test
     fun draft_with_cash_fields_decodes() {
@@ -167,5 +267,20 @@ class PosContractTest {
     fun empty_draft_list_decodes() {
         val dto = json.decodeFromString<DraftListDto>("""{"items":[]}""")
         assertEquals(emptyList(), dto.items)
+    }
+
+    private companion object {
+        const val DELIVERY_LIST_JSON = """
+            {"items":[
+             {"id":30,"type":"DELIVERY","status":"OPEN","terminalId":3,"version":4,
+              "lines":[{"id":41,"lineNo":1,"productId":75,"unitId":2,"qty":"2.000000",
+              "unitPrice":"75.00","cashUnitPrice":"71.25","productName":"Comida",
+              "unitCode":"PZA","lineTotal":"150.00"}],
+              "totals":{"amount":"150.00","subtotal":"150.00","tax":"0.00","total":"150.00",
+              "cashDiscount":"7.50","cashTotal":"142.50"},
+              "channel":"TAKEAWAY","customerName":"Rosa Martínez","customerNickname":"la de la esquina",
+              "deliveryAddress":"Calle 5 #12","deliveryStage":"ENVIADO","paysWith":"200.00"}
+            ]}
+        """
     }
 }

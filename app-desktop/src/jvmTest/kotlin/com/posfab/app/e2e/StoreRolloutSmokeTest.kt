@@ -246,6 +246,8 @@ private class FakeStoreBackend :
         return AppResult.Success(listOf(currentDraft))
     }
 
+    override suspend fun openDeliveryDrafts(): AppResult<List<SaleDraft>> = AppResult.Success(emptyList())
+
     override suspend fun searchProducts(query: String, limit: Int): AppResult<List<SaleProduct>> = AppResult.Success(listOf(product))
     override suspend fun kitchenProducts(): AppResult<List<SaleProduct>> = AppResult.Success(emptyList())
     override suspend fun findProductByBarcode(barcode: String): AppResult<SaleProduct?> = AppResult.Success(product)

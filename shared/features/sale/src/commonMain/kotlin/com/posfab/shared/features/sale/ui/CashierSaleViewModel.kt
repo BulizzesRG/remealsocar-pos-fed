@@ -102,7 +102,7 @@ class CashierSaleViewModel(
                         it.copy(
                             phase = SalePhase.Selling,
                             accounts = accounts.value,
-                            activeDraftId = accounts.value.first().id,
+                            activeDraftId = accounts.value.first { draft -> !draft.isDelivery }.id,
                             kitchenProducts = (kitchen as? AppResult.Success)?.value.orEmpty(),
                             variosProduct = (varios as? AppResult.Success)?.value,
                             notice = if (kitchen is AppResult.Failure) SaleStrings.KITCHEN_UNAVAILABLE else null,
@@ -172,6 +172,10 @@ class CashierSaleViewModel(
         if (query.isEmpty()) return
         searchJob?.cancel()
         if (query.isBarcode()) {
+            if (blockedByDelivery()) {
+                _state.update { it.copy(query = "", searchResults = emptyList()) }
+                return
+            }
             _state.update { it.copy(query = "", searchResults = emptyList(), errorMessage = null, notice = null) }
             scope.launch { lookupBarcode(query) }
         } else {
@@ -181,6 +185,7 @@ class CashierSaleViewModel(
 
     fun addProduct(product: SaleProduct) {
         if (_state.value.abonoOverlayOpen) return
+        if (blockedByDelivery()) return
         if (!product.isSellable) {
             _state.update { it.copy(errorMessage = SaleStrings.NO_PRICE) }
             return
@@ -249,6 +254,7 @@ class CashierSaleViewModel(
     }
 
     fun changeSelectedLine() {
+        if (blockedByDelivery()) return
         if (!isSelling()) return
         val line = _state.value.selectedLine ?: return
         if (line.priceType == SalePriceType.PIECE) return
@@ -275,6 +281,10 @@ class CashierSaleViewModel(
             _state.update {
                 it.copy(promptInput = "", promptInputRejected = false, errorMessage = SaleStrings.INPUT_REJECTED)
             }
+            return
+        }
+        if (blockedByDelivery()) {
+            dismissPrompt()
             return
         }
         val snapshot = _state.value
@@ -306,6 +316,7 @@ class CashierSaleViewModel(
     }
 
     fun selectLine(lineId: Long) {
+        if (blockedByDelivery()) return
         _state.update { current ->
             val line = current.draft?.lines?.firstOrNull { it.id == lineId } ?: return@update current
             current.copy(selectedLineId = line.id, qtyInput = SaleStrings.qtyText(line.qty))
@@ -313,6 +324,7 @@ class CashierSaleViewModel(
     }
 
     fun incrementQty() {
+        if (blockedByDelivery()) return
         if (!isSelling()) return
         val selected = _state.value.selectedLine ?: return
         if (selected.priceType != SalePriceType.PIECE) return
@@ -324,6 +336,7 @@ class CashierSaleViewModel(
     }
 
     fun decrementQty() {
+        if (blockedByDelivery()) return
         if (!isSelling()) return
         val selected = _state.value.selectedLine ?: return
         if (selected.priceType != SalePriceType.PIECE) return
@@ -339,6 +352,7 @@ class CashierSaleViewModel(
     }
 
     fun applyQty() {
+        if (blockedByDelivery()) return
         if (!isSelling()) return
         val snapshot = _state.value
         val line = snapshot.selectedLine ?: return
@@ -356,6 +370,7 @@ class CashierSaleViewModel(
     }
 
     fun removeSelectedLine() {
+        if (blockedByDelivery()) return
         if (!isSelling()) return
         val lineId = _state.value.selectedLineId ?: return
         enqueueOnAccount { draftId ->
@@ -367,6 +382,7 @@ class CashierSaleViewModel(
     }
 
     fun requestClear() {
+        if (blockedByDelivery()) return
         val snapshot = _state.value
         if (snapshot.prompt != null || snapshot.abonoOverlayOpen) return
         if (snapshot.canCloseEmptyAccount) {
@@ -384,6 +400,7 @@ class CashierSaleViewModel(
 
     fun confirmClear() {
         _state.update { it.copy(confirm = null) }
+        if (blockedByDelivery()) return
         enqueueOnAccount { draftId ->
             val account = _state.value.accountById(draftId) ?: return@enqueueOnAccount
             when (val cancelled = saleUseCases.cancelDraft(draftId, account.version)) {
@@ -406,10 +423,11 @@ class CashierSaleViewModel(
         paidScans.reset()
         _state.update {
             if (it.canCharge) {
+                val paysWith = it.draft?.takeIf { draft -> draft.isDelivery }?.paysWith
                 it.copy(
                     phase = SalePhase.Charging,
                     paymentType = SalePaymentType.CASH,
-                    paidInput = "",
+                    paidInput = paysWith?.let(::paysWithInput).orEmpty(),
                     paidInputRejected = false,
                     credit = CreditState(),
                     errorMessage = null,
@@ -426,6 +444,7 @@ class CashierSaleViewModel(
         val previous = _state.getAndUpdate {
             if (
                 it.phase == SalePhase.Charging &&
+                type in it.paymentOptions &&
                 !it.isCheckoutInFlight &&
                 !it.isPaidLocked &&
                 !it.credit.isAbonoBusy &&
@@ -658,6 +677,7 @@ class CashierSaleViewModel(
     }
 
     fun openAbono() {
+        if (blockedByDelivery()) return
         customerSearchJob?.cancel()
         _state.update {
             if (it.canOpenAbono) {
@@ -706,6 +726,7 @@ class CashierSaleViewModel(
     }
 
     fun setChannel(channel: SaleChannel) {
+        if (blockedByDelivery()) return
         val snapshot = _state.value
         if (!snapshot.canSetChannel || snapshot.channel == channel) return
         enqueueOnAccount { draftId ->
@@ -804,7 +825,49 @@ class CashierSaleViewModel(
     }
 
     fun startNextSale() {
-        enqueue { resumeSelling() }
+        enqueue {
+            resumeSelling()
+            reloadDeliveries()
+        }
+    }
+
+    fun refreshDeliveries() {
+        val snapshot = _state.value
+        if (snapshot.phase != SalePhase.Selling && snapshot.phase != SalePhase.Done) return
+        if (snapshot.isCheckoutInFlight) return
+        enqueue { reloadDeliveries() }
+    }
+
+    private suspend fun reloadDeliveries() {
+        val phase = _state.value.phase
+        if (phase != SalePhase.Selling && phase != SalePhase.Done) return
+        when (val listed = saleUseCases.openDeliveryDrafts()) {
+            is AppResult.Failure -> _state.update { it.copy(errorMessage = SaleErrorText.from(listed.error)) }
+            is AppResult.Success -> {
+                val fresh = listed.value.filter { it.isDelivery && it.isOpen }.sortedBy { it.id }
+                _state.update { state ->
+                    if (state.phase != SalePhase.Selling && state.phase != SalePhase.Done) return@update state
+                    val activeGone = state.isDeliveryAccount && fresh.none { it.id == state.activeDraftId }
+                    val withFresh = state.copy(accounts = state.saleAccounts + fresh)
+                    if (activeGone) {
+                        withFresh.switchedTo(null).copy(
+                            notice = SaleStrings.DELIVERY_ALREADY_CHARGED,
+                            errorMessage = null,
+                        )
+                    } else {
+                        withFresh
+                    }
+                }
+                ensureActiveAccount()
+            }
+        }
+    }
+
+    private fun blockedByDelivery(): Boolean {
+        val snapshot = _state.value
+        if (!snapshot.isDeliveryAccount || snapshot.phase != SalePhase.Selling) return false
+        _state.update { it.copy(notice = SaleStrings.DELIVERY_READ_ONLY, errorMessage = null) }
+        return true
     }
 
     private suspend fun runCheckout(
@@ -856,7 +919,12 @@ class CashierSaleViewModel(
                 } else {
                     result.value
                 }
-                val charged = if (customer != null) withCustomerBalance(totalled, customer) else totalled
+                val withCustomer = if (customer != null) withCustomerBalance(totalled, customer) else totalled
+                val charged = if (chargedDraft.isDelivery) {
+                    withCustomer.copy(isDelivery = true, deliveryCustomerName = chargedDraft.customerName)
+                } else {
+                    withCustomer
+                }
                 _state.update {
                     it.withoutAccount(chargedDraft.id).copy(
                         phase = SalePhase.Done,
@@ -1021,12 +1089,18 @@ class CashierSaleViewModel(
                         paymentType = SalePaymentType.CASH,
                     )
                 }
+                val delivery = draft.isDelivery || _state.value.accountById(draftId)?.isDelivery == true
                 when {
                     draft.isOpen -> {
                         applyDraft(draft, null, null)
                         _state.update { it.copy(errorMessage = SaleStrings.CHECKOUT_CONFLICT) }
                     }
-                    draft.status == CHECKED_OUT -> closeAccount(draftId, SaleStrings.POSSIBLY_CHARGED)
+                    draft.status == CHECKED_OUT ->
+                        closeAccount(
+                            draftId,
+                            if (delivery) SaleStrings.DELIVERY_ALREADY_CHARGED else SaleStrings.POSSIBLY_CHARGED,
+                        )
+                    delivery && draft.status == CANCELLED -> closeAccount(draftId, SaleStrings.DELIVERY_CANCELLED)
                     else -> closeAccount(draftId, SaleStrings.ACCOUNT_CLOSED)
                 }
             }
@@ -1238,7 +1312,7 @@ class CashierSaleViewModel(
             } else {
                 current.accounts + draft
             }
-            current.copy(accounts = accounts)
+            current.copy(accounts = accounts.filterNot { it.isDelivery } + accounts.filter { it.isDelivery })
         }
     }
 
@@ -1256,8 +1330,14 @@ class CashierSaleViewModel(
 
     private suspend fun ensureActiveAccount() {
         if (_state.value.draft != null) return
+        ensureSaleAccount()
+    }
+
+    private suspend fun ensureSaleAccount() {
+        val active = _state.value.draft
+        if (active != null && !active.isDelivery) return
         promptScans.reset()
-        val fallback = _state.value.accounts.firstOrNull()
+        val fallback = _state.value.saleAccounts.firstOrNull()
         if (fallback != null) {
             _state.update { it.switchedTo(fallback.id) }
             return
@@ -1273,7 +1353,7 @@ class CashierSaleViewModel(
 
     private suspend fun resumeSelling() {
         if (_state.value.phase != SalePhase.Done) return
-        ensureActiveAccount()
+        ensureSaleAccount()
         val active = _state.value.activeDraftId ?: return
         promptScans.reset()
         paidScans.reset()
@@ -1283,15 +1363,18 @@ class CashierSaleViewModel(
     private suspend fun openAccountsOrNew(): AppResult<List<SaleDraft>> =
         when (val open = saleUseCases.openDrafts()) {
             is AppResult.Failure -> open
-            is AppResult.Success ->
-                if (open.value.isNotEmpty()) {
-                    open
+            is AppResult.Success -> {
+                val sales = open.value.filterNot { it.isDelivery }
+                val deliveries = open.value.filter { it.isDelivery }
+                if (sales.isNotEmpty()) {
+                    AppResult.Success(sales + deliveries)
                 } else {
                     when (val created = saleUseCases.newDraft()) {
                         is AppResult.Failure -> created
-                        is AppResult.Success -> AppResult.Success(listOf(created.value))
+                        is AppResult.Success -> AppResult.Success(listOf(created.value) + deliveries)
                     }
                 }
+            }
         }
 
     private fun CashierSaleState.withoutAccount(draftId: Long): CashierSaleState {
@@ -1299,7 +1382,13 @@ class CashierSaleViewModel(
         if (index < 0) return this
         val remaining = accounts.filterNot { it.id == draftId }
         if (activeDraftId != draftId) return copy(accounts = remaining)
-        val next = accounts.getOrNull(index + 1) ?: accounts.getOrNull(index - 1)
+        val sales = saleAccounts
+        val saleIndex = sales.indexOfFirst { it.id == draftId }
+        val next = if (saleIndex < 0) {
+            remaining.firstOrNull { !it.isDelivery }
+        } else {
+            sales.getOrNull(saleIndex + 1) ?: sales.getOrNull(saleIndex - 1)
+        }
         return copy(
             accounts = remaining,
             activeDraftId = next?.id,
@@ -1311,7 +1400,7 @@ class CashierSaleViewModel(
         )
     }
 
-    private fun CashierSaleState.switchedTo(draftId: Long): CashierSaleState = copy(
+    private fun CashierSaleState.switchedTo(draftId: Long?): CashierSaleState = copy(
         activeDraftId = draftId,
         selectedLineId = null,
         qtyInput = "",
@@ -1391,6 +1480,13 @@ class CashierSaleViewModel(
 
     private fun String.isBarcode(): Boolean = length in BARCODE_LENGTH && all(Char::isDigit)
 
+    private fun paysWithInput(amount: Double): String {
+        val cents = round(amount * 100.0).toLong()
+        val formatted = if (cents % 100 == 0L) (cents / 100).toString() else formatAmount(amount)
+        val sanitized = sanitizeAmount(formatted, MAX_AMOUNT_DIGITS)
+        return if (sanitized == formatted) sanitized else ""
+    }
+
     private fun formatAmount(amount: Double): String = SaleStrings.money(amount).removePrefix("$").replace(",", "")
 
     private fun sanitizeAmount(value: String, maxWholeDigits: Int): String =
@@ -1420,6 +1516,7 @@ class CashierSaleViewModel(
         const val GRAMS_PER_KILO = 1000.0
         const val GRAMS_TOLERANCE = 1e-6
         const val CHECKED_OUT = "CHECKED_OUT"
+        const val CANCELLED = "CANCELLED"
         const val CUSTOMER_SEARCH_DEBOUNCE_MS = 250L
         const val CUSTOMER_SEARCH_LIMIT = 5
         const val OPEN_CASH_REQUIRED = "Open cash session is required"

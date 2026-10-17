@@ -43,6 +43,19 @@ enum class SaleChannel {
     }
 }
 
+enum class SaleDraftKind {
+    SALE,
+    DELIVERY,
+    ;
+
+    companion object {
+        fun fromRaw(raw: String?): SaleDraftKind {
+            val normalized = raw?.trim()?.uppercase() ?: return SALE
+            return entries.firstOrNull { it.name == normalized } ?: SALE
+        }
+    }
+}
+
 enum class SalePaymentType {
     CASH,
     TRANSFER,
@@ -128,8 +141,15 @@ data class SaleDraft(
     val lines: List<SaleLine>,
     val totals: SaleTotals,
     val channel: SaleChannel = SaleChannel.TAKEAWAY,
+    val kind: SaleDraftKind = SaleDraftKind.SALE,
+    val customerName: String? = null,
+    val deliveryAddress: String? = null,
+    val paysWith: Double? = null,
 ) {
     val isOpen: Boolean get() = status == "OPEN"
+    val isDelivery: Boolean get() = kind == SaleDraftKind.DELIVERY
+    val customerShortName: String?
+        get() = customerName?.trim()?.split(' ')?.firstOrNull { it.isNotBlank() }
 }
 
 data class CheckoutResult(
@@ -140,6 +160,8 @@ data class CheckoutResult(
     val paidAmount: Double,
     val customerName: String? = null,
     val customerBalanceAfter: Double? = null,
+    val deliveryCustomerName: String? = null,
+    val isDelivery: Boolean = false,
 ) {
     val change: Double?
         get() = if (paymentType == SalePaymentType.CASH) roundMoney(paidAmount - totalCharged) else null

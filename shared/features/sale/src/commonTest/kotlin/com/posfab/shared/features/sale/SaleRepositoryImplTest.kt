@@ -15,6 +15,7 @@ import com.posfab.shared.features.sale.domain.CustomerPaymentResult
 import com.posfab.shared.features.sale.domain.SaleChannel
 import com.posfab.shared.features.sale.domain.SaleCustomer
 import com.posfab.shared.features.sale.domain.SaleDraft
+import com.posfab.shared.features.sale.domain.SaleDraftKind
 import com.posfab.shared.features.sale.domain.SaleKitchenKind
 import com.posfab.shared.features.sale.domain.SaleLineInput
 import com.posfab.shared.features.sale.domain.SaleMutationResult
@@ -99,6 +100,87 @@ class SaleRepositoryImplTest {
         assertEquals(listOf(7L, 9L), drafts.map { it.id })
         assertEquals(18.0, drafts.first().totals.cashTotal)
         assertEquals(0, posApi.createCalls.size)
+    }
+
+    @Test
+    fun open_drafts_lists_sale_accounts_then_deliveries_each_by_id() = runTest {
+        val posApi = FakePosApi().apply {
+            openDrafts = AppResult.Success(DraftListDto(listOf(draftDto(id = 9), draftDto(id = 7))))
+            deliveryDrafts = AppResult.Success(
+                DraftListDto(
+                    listOf(
+                        draftDto(id = 5, type = "DELIVERY", cashTotal = "47.00"),
+                        draftDto(id = 3, type = "DELIVERY", cashTotal = "20.00"),
+                    ),
+                ),
+            )
+        }
+        val drafts = assertIs<AppResult.Success<List<SaleDraft>>>(repository(posApi).openDrafts()).value
+
+        assertEquals(listOf(7L, 9L, 3L, 5L), drafts.map { it.id })
+        assertEquals(
+            listOf(SaleDraftKind.SALE, SaleDraftKind.SALE, SaleDraftKind.DELIVERY, SaleDraftKind.DELIVERY),
+            drafts.map { it.kind },
+        )
+        assertEquals(listOf("SALE", "DELIVERY"), posApi.listedTypes)
+    }
+
+    @Test
+    fun open_drafts_keeps_sale_accounts_when_the_delivery_list_fails() = runTest {
+        val posApi = FakePosApi().apply {
+            openDrafts = AppResult.Success(DraftListDto(listOf(draftDto(id = 7))))
+            deliveryDrafts = AppResult.Failure(AppError.Forbidden)
+        }
+        val drafts = assertIs<AppResult.Success<List<SaleDraft>>>(repository(posApi).openDrafts()).value
+
+        assertEquals(listOf(7L), drafts.map { it.id })
+    }
+
+    @Test
+    fun open_delivery_drafts_maps_customer_address_and_pays_with() = runTest {
+        val posApi = FakePosApi().apply {
+            deliveryDrafts = AppResult.Success(
+                DraftListDto(
+                    listOf(
+                        draftDto(
+                            id = 4,
+                            type = "DELIVERY",
+                            customerName = "Lupe Hernández",
+                            customerNickname = "Doña Lupe",
+                            deliveryAddress = "Av. Juárez 5",
+                            paysWith = "100.00",
+                        ),
+                        draftDto(id = 6, type = "DELIVERY", customerName = "Rosa Martínez", paysWith = "0.00"),
+                    ),
+                ),
+            )
+        }
+        val drafts = assertIs<AppResult.Success<List<SaleDraft>>>(repository(posApi).openDeliveryDrafts()).value
+
+        val lupe = drafts.first()
+        assertEquals(SaleDraftKind.DELIVERY, lupe.kind)
+        assertEquals("Lupe Hernández (Doña Lupe)", lupe.customerName)
+        assertEquals("Lupe", lupe.customerShortName)
+        assertEquals("Av. Juárez 5", lupe.deliveryAddress)
+        assertEquals(100.0, lupe.paysWith)
+        val rosa = drafts.last()
+        assertEquals("Rosa Martínez", rosa.customerName)
+        assertNull(rosa.paysWith)
+        assertNull(rosa.deliveryAddress)
+        assertEquals(listOf("DELIVERY"), posApi.listedTypes)
+    }
+
+    @Test
+    fun unknown_draft_type_maps_to_sale() = runTest {
+        val posApi = FakePosApi().apply {
+            openDrafts = AppResult.Success(DraftListDto(listOf(draftDto(id = 7, type = "SOMETHING"))))
+        }
+        val draft = assertIs<AppResult.Success<List<SaleDraft>>>(repository(posApi).openDrafts()).value.single()
+
+        assertEquals(SaleDraftKind.SALE, draft.kind)
+        assertFalse(draft.isDelivery)
+        assertNull(draft.customerName)
+        assertNull(draft.paysWith)
     }
 
     @Test
@@ -304,6 +386,25 @@ class SaleRepositoryImplTest {
         val charged = assertIs<AppResult.Success<CheckoutResult>>(result).value
         assertEquals(SalePaymentType.CREDIT, charged.paymentType)
         assertNull(charged.change)
+    }
+
+    @Test
+    fun checkout_of_a_delivery_is_cash_without_customer_id() = runTest {
+        val posApi = FakePosApi().apply {
+            deliveryDrafts = AppResult.Success(
+                DraftListDto(listOf(draftDto(id = 50, type = "DELIVERY", cashTotal = "47.00", customerName = "Lupe Hernández"))),
+            )
+        }
+        val repository = repository(posApi)
+        val delivery = assertIs<AppResult.Success<List<SaleDraft>>>(repository.openDeliveryDrafts()).value.single()
+
+        repository.checkout(delivery.id, SalePaymentType.CASH, 100.0, "key-delivery")
+
+        val request = posApi.checkoutRequests.single()
+        assertEquals("PAID", request.paymentStatus)
+        assertEquals("CASH", request.paymentType)
+        assertEquals("100.00", request.paidAmount)
+        assertNull(request.customerId)
     }
 
     @Test
@@ -761,9 +862,14 @@ internal fun draftDto(
     cashDiscount: String = "0",
     channel: String = "TAKEAWAY",
     version: Int = 1,
+    type: String = "SALE",
+    customerName: String? = null,
+    customerNickname: String? = null,
+    deliveryAddress: String? = null,
+    paysWith: String? = null,
 ) = DraftDto(
     id = id,
-    type = "SALE",
+    type = type,
     status = status,
     terminalId = 3L,
     version = version,
@@ -777,6 +883,10 @@ internal fun draftDto(
         cashTotal = cashTotal,
     ),
     channel = channel,
+    customerName = customerName,
+    customerNickname = customerNickname,
+    deliveryAddress = deliveryAddress,
+    paysWith = paysWith,
 )
 
 private class NoRefreshAuthRepository(private val manager: SessionManager) : AuthRepository {
@@ -793,6 +903,8 @@ private class NoRefreshAuthRepository(private val manager: SessionManager) : Aut
 
 private class FakePosApi : PosApi {
     var openDrafts: AppResult<DraftListDto> = AppResult.Success(DraftListDto(emptyList()))
+    var deliveryDrafts: AppResult<DraftListDto> = AppResult.Success(DraftListDto(emptyList()))
+    val listedTypes = mutableListOf<String>()
     var draftStatus: String = "OPEN"
     var addLineResult: AppResult<DraftDto>? = null
     var barcode: AppResult<BarcodeLookupResponseDto> = AppResult.Failure(AppError.Validation("Barcode not found"))
@@ -808,7 +920,10 @@ private class FakePosApi : PosApi {
     override suspend fun currentCashSession(accessToken: String, terminalId: Long): AppResult<Boolean> =
         AppResult.Success(true)
 
-    override suspend fun listOpenSaleDrafts(accessToken: String): AppResult<DraftListDto> = openDrafts
+    override suspend fun listOpenDrafts(accessToken: String, type: String): AppResult<DraftListDto> {
+        listedTypes += type
+        return if (type == "DELIVERY") deliveryDrafts else openDrafts
+    }
 
     override suspend fun createDraft(accessToken: String, request: DraftCreateRequestDto): AppResult<DraftCreateResponseDto> {
         createCalls += request

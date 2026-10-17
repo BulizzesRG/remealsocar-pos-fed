@@ -37,6 +37,8 @@ class ShellViewModelTest {
 
     private val cashierPermissions = setOf(Permission.VIEW_PRODUCTS, Permission.SELL, Permission.OPEN_CASH)
     private val stockerPermissions = setOf(Permission.VIEW_PRODUCTS, Permission.COUNT_STOCK)
+    private val ordersPermissions = setOf(Permission.VIEW_PRODUCTS, Permission.MANAGE_ORDERS)
+    private val adminPermissions = Permission.entries.toSet()
 
     @Test
     fun without_open_cash_permission_status_is_hidden_and_repo_not_called() = runTest(dispatcher) {
@@ -149,6 +151,48 @@ class ShellViewModelTest {
     }
 
     @Test
+    fun orders_role_opens_on_pedidos() = runTest(dispatcher) {
+        val vm = makeViewModel(FakeCashRepository(AppResult.Success(null)), ordersPermissions, setOf(UserRole.ORDERS))
+
+        assertEquals(ShellRoute.PEDIDOS, vm.state.value.selectedRoute)
+    }
+
+    @Test
+    fun cashier_opens_on_home() = runTest(dispatcher) {
+        val vm = makeViewModel(FakeCashRepository(AppResult.Success(null)), cashierPermissions, setOf(UserRole.CASHIER))
+
+        assertEquals(ShellRoute.HOME, vm.state.value.selectedRoute)
+    }
+
+    @Test
+    fun admin_opens_on_home_even_with_manage_orders() = runTest(dispatcher) {
+        val vm = makeViewModel(FakeCashRepository(AppResult.Success(null)), adminPermissions, setOf(UserRole.ADMIN))
+
+        assertEquals(ShellRoute.HOME, vm.state.value.selectedRoute)
+    }
+
+    @Test
+    fun orders_user_can_go_back_to_home_from_pedidos() = runTest(dispatcher) {
+        val vm = makeViewModel(FakeCashRepository(AppResult.Success(null)), ordersPermissions, setOf(UserRole.ORDERS))
+
+        vm.select(ShellRoute.HOME)
+
+        assertEquals(ShellRoute.HOME, vm.state.value.selectedRoute)
+        assertEquals(listOf(ShellRoute.PEDIDOS), vm.state.value.modules)
+    }
+
+    @Test
+    fun orders_role_without_manage_orders_opens_on_home() = runTest(dispatcher) {
+        val vm = makeViewModel(
+            FakeCashRepository(AppResult.Success(null)),
+            setOf(Permission.VIEW_PRODUCTS),
+            setOf(UserRole.ORDERS),
+        )
+
+        assertEquals(ShellRoute.HOME, vm.state.value.selectedRoute)
+    }
+
+    @Test
     fun opened_at_time_label_formats_local_time_without_leading_zero() {
         val label = openedAtTimeLabel("2026-10-14T08:15:00-06:00")
 
@@ -173,10 +217,14 @@ class ShellViewModelTest {
         assertNull(openedAtTimeLabel(""))
     }
 
-    private fun makeViewModel(repo: FakeCashRepository, permissions: Set<Permission>) = ShellViewModel(
+    private fun makeViewModel(
+        repo: FakeCashRepository,
+        permissions: Set<Permission>,
+        roles: Set<UserRole> = setOf(UserRole.CASHIER),
+    ) = ShellViewModel(
         session = UserSession(
             tokens = AuthTokens("a", "r"),
-            user = AuthUser("1", "user", setOf(UserRole.CASHIER), permissions),
+            user = AuthUser("1", "user", roles, permissions),
             terminalCode = "POS1",
         ),
         logoutUseCase = LogoutUseCase(FakeAuthRepository()),

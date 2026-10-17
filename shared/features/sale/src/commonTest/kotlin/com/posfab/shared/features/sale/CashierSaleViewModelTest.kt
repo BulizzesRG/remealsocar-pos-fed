@@ -8,6 +8,7 @@ import com.posfab.shared.features.sale.domain.CustomerPaymentResult
 import com.posfab.shared.features.sale.domain.SaleChannel
 import com.posfab.shared.features.sale.domain.SaleCustomer
 import com.posfab.shared.features.sale.domain.SaleDraft
+import com.posfab.shared.features.sale.domain.SaleDraftKind
 import com.posfab.shared.features.sale.domain.SaleKitchenKind
 import com.posfab.shared.features.sale.domain.SaleLine
 import com.posfab.shared.features.sale.domain.SaleLineInput
@@ -2733,6 +2734,442 @@ class CashierSaleViewModelTest {
         assertTrue(vm.state.value.credit.showsPicker)
     }
 
+    private fun deliveryDraft(
+        id: Long,
+        paysWith: Double? = 100.0,
+        name: String = "Lupe Hernández (Doña Lupe)",
+    ) = SaleDraft(
+        id = id,
+        status = "OPEN",
+        version = 3,
+        lines = listOf(
+            SaleLine(
+                id = id * 100,
+                productId = 4L,
+                productName = "Comida",
+                qty = 1.0,
+                unitId = 1L,
+                unitPrice = 49.35,
+                cashUnitPrice = 47.0,
+                lineTotal = 49.35,
+            ),
+        ),
+        totals = SaleTotals(cashTotal = 47.0, listTotal = 49.35, cashDiscount = 2.35),
+        kind = SaleDraftKind.DELIVERY,
+        customerName = name,
+        deliveryAddress = "Av. Juárez 5",
+        paysWith = paysWith,
+    )
+
+    @Test
+    fun deliveries_are_listed_after_sale_accounts_and_a_sale_account_starts_active() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(openDraftsSeed = listOf(1L, 2L), deliverySeed = listOf(deliveryDraft(51L), deliveryDraft(50L)))
+        val vm = start(repo)
+
+        val state = vm.state.value
+        assertEquals(listOf(1L, 2L, 50L, 51L), state.accounts.map { it.id })
+        assertEquals(listOf(1L, 2L), state.saleAccounts.map { it.id })
+        assertEquals(listOf(50L, 51L), state.deliveryAccounts.map { it.id })
+        assertEquals(1L, state.activeDraftId)
+        assertFalse(state.isDeliveryAccount)
+    }
+
+    @Test
+    fun only_deliveries_open_creates_a_sale_account_first() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(openDraftsSeed = emptyList(), deliverySeed = listOf(deliveryDraft(50L)))
+        val vm = start(repo)
+
+        val state = vm.state.value
+        assertEquals(1, repo.newDraftCalls)
+        assertEquals(1, state.saleAccounts.size)
+        assertEquals(state.saleAccounts.single().id, state.activeDraftId)
+        assertEquals(listOf(50L), state.deliveryAccounts.map { it.id })
+    }
+
+    @Test
+    fun an_active_delivery_is_read_only() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(deliverySeed = listOf(deliveryDraft(50L)))
+        val vm = start(repo)
+        vm.selectAccount(50L)
+        val state = vm.state.value
+        assertTrue(state.isDeliveryAccount)
+        assertFalse(state.canSetChannel)
+        assertFalse(state.canOpenAbono)
+        assertFalse(state.canCloseEmptyAccount)
+        assertTrue(state.canCharge)
+        assertEquals(listOf(SalePaymentType.CASH), state.paymentOptions)
+
+        val attempts: List<() -> Unit> = listOf(
+            { vm.addProduct(repo.cigarro) },
+            { vm.addProduct(repo.jamon) },
+            { vm.addProduct(repo.varios) },
+            {
+                vm.onQueryChange(repo.cigarro.barcode!!)
+                vm.onSubmit()
+            },
+            { vm.selectLine(5000L) },
+            { vm.incrementQty() },
+            { vm.decrementQty() },
+            { vm.applyQty() },
+            { vm.changeSelectedLine() },
+            { vm.removeSelectedLine() },
+            { vm.setChannel(SaleChannel.ONSITE) },
+            { vm.requestClear() },
+            { vm.confirmClear() },
+            { vm.openAbono() },
+        )
+        attempts.forEach { attempt ->
+            vm.selectAccount(1L)
+            vm.selectAccount(50L)
+            assertNull(vm.state.value.notice)
+            attempt()
+            advanceUntilIdle()
+            val after = vm.state.value
+            assertEquals(SaleStrings.DELIVERY_READ_ONLY, after.notice)
+            assertNull(after.prompt)
+            assertNull(after.confirm)
+            assertNull(after.selectedLineId)
+            assertFalse(after.abonoOverlayOpen)
+            assertEquals(50L, after.activeDraftId)
+        }
+        assertEquals(0, repo.addLineCalls)
+        assertEquals(0, repo.updateLineCalls)
+        assertEquals(0, repo.setChannelCalls)
+        assertEquals(0, repo.cancelCalls)
+        assertEquals(0, repo.barcodeLookups)
+        assertEquals("", vm.state.value.query)
+        assertEquals(deliveryDraft(50L), repo.drafts[50L])
+    }
+
+    @Test
+    fun new_account_is_allowed_with_a_delivery_active() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(deliverySeed = listOf(deliveryDraft(50L)))
+        val vm = start(repo)
+        assertFalse(vm.state.value.canOpenAccount)
+
+        vm.selectAccount(50L)
+        assertTrue(vm.state.value.canOpenAccount)
+        vm.openAccount()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(listOf(1L, 2L, 50L), state.accounts.map { it.id })
+        assertEquals(2L, state.activeDraftId)
+        assertFalse(state.isDeliveryAccount)
+    }
+
+    @Test
+    fun account_limit_counts_only_sale_accounts() = runTest(dispatcher) {
+        val full = FakeSaleRepository(
+            openDraftsSeed = (1L..MAX_ACCOUNTS.toLong()).toList(),
+            deliverySeed = listOf(deliveryDraft(50L)),
+        )
+        val fullVm = start(full)
+        fullVm.selectAccount(50L)
+        assertFalse(fullVm.state.value.canOpenAccount)
+
+        val repo = FakeSaleRepository(
+            openDraftsSeed = (1L until MAX_ACCOUNTS.toLong()).toList(),
+            deliverySeed = listOf(deliveryDraft(50L), deliveryDraft(51L), deliveryDraft(52L)),
+        )
+        val vm = start(repo)
+        vm.selectAccount(50L)
+        assertTrue(vm.state.value.accounts.size > MAX_ACCOUNTS)
+        assertTrue(vm.state.value.canOpenAccount)
+    }
+
+    @Test
+    fun charging_a_delivery_is_cash_only_with_the_pays_with_prefilled() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(deliverySeed = listOf(deliveryDraft(50L)))
+        val vm = start(repo)
+        vm.selectAccount(50L)
+
+        vm.startCharge()
+        assertEquals(SalePhase.Charging, vm.state.value.phase)
+        assertEquals(SalePaymentType.CASH, vm.state.value.paymentType)
+        assertEquals("100", vm.state.value.paidInput)
+        assertEquals(47.0, vm.state.value.amountDue)
+
+        vm.selectPaymentType(SalePaymentType.CARD)
+        vm.selectPaymentType(SalePaymentType.CREDIT)
+        assertEquals(SalePaymentType.CASH, vm.state.value.paymentType)
+        assertEquals("100", vm.state.value.paidInput)
+
+        vm.confirmCharge()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SalePaymentType.CASH, repo.lastPaymentType)
+        assertNull(repo.lastCheckoutCustomerId)
+        assertEquals(100.0, repo.lastPaidAmount)
+        assertEquals(SalePhase.Done, state.phase)
+        val result = assertNotNull(state.lastResult)
+        assertTrue(result.isDelivery)
+        assertEquals("Lupe Hernández (Doña Lupe)", result.deliveryCustomerName)
+        assertEquals(53.0, result.change)
+        assertTrue(state.deliveryAccounts.isEmpty())
+        assertEquals(1L, state.activeDraftId)
+    }
+
+    @Test
+    fun charging_a_delivery_without_pays_with_leaves_the_paid_field_empty() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(deliverySeed = listOf(deliveryDraft(50L, paysWith = null)))
+        val vm = start(repo)
+        vm.selectAccount(50L)
+
+        vm.startCharge()
+
+        assertEquals("", vm.state.value.paidInput)
+        assertFalse(vm.state.value.canConfirmCharge)
+    }
+
+    @Test
+    fun charging_the_last_sale_account_with_deliveries_pending_creates_a_new_sale_account() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(deliverySeed = listOf(deliveryDraft(50L)))
+        val vm = start(repo)
+        vm.addProduct(repo.cigarro)
+        advanceUntilIdle()
+        vm.startCharge()
+        vm.payExact()
+        advanceUntilIdle()
+        assertEquals(SalePhase.Done, vm.state.value.phase)
+        assertEquals(0, repo.newDraftCalls)
+        val deliveryCallsBefore = repo.openDeliveryCalls
+
+        vm.startNextSale()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SalePhase.Selling, state.phase)
+        assertEquals(1, repo.newDraftCalls)
+        assertEquals(listOf(2L), state.saleAccounts.map { it.id })
+        assertEquals(2L, state.activeDraftId)
+        assertEquals(listOf(50L), state.deliveryAccounts.map { it.id })
+        assertEquals(listOf(2L, 50L), state.accounts.map { it.id })
+        assertEquals(deliveryCallsBefore + 1, repo.openDeliveryCalls)
+    }
+
+    @Test
+    fun refresh_deliveries_drops_a_delivery_charged_elsewhere_and_adds_new_ones() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(deliverySeed = listOf(deliveryDraft(50L), deliveryDraft(51L)))
+        val vm = start(repo)
+        vm.selectAccount(50L)
+        repo.closeElsewhere(50L, "CHECKED_OUT")
+        repo.addDelivery(deliveryDraft(52L, name = "Rosa Martínez"))
+
+        vm.refreshDeliveries()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(listOf(1L, 51L, 52L), state.accounts.map { it.id })
+        assertEquals(1L, state.activeDraftId)
+        assertEquals(SaleStrings.DELIVERY_ALREADY_CHARGED, state.notice)
+        assertEquals(0, repo.newDraftCalls)
+    }
+
+    @Test
+    fun refresh_deliveries_keeps_the_active_account_when_it_is_still_there() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(deliverySeed = listOf(deliveryDraft(50L), deliveryDraft(51L)))
+        val vm = start(repo)
+        vm.selectAccount(51L)
+        repo.closeElsewhere(50L, "CHECKED_OUT")
+
+        vm.refreshDeliveries()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(listOf(1L, 51L), state.accounts.map { it.id })
+        assertEquals(51L, state.activeDraftId)
+        assertNull(state.notice)
+    }
+
+    @Test
+    fun refresh_deliveries_failure_keeps_the_accounts() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(deliverySeed = listOf(deliveryDraft(50L)))
+        val vm = start(repo)
+        repo.failNextDeliveryList = true
+
+        vm.refreshDeliveries()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(listOf(1L, 50L), state.accounts.map { it.id })
+        assertEquals(SaleStrings.NO_CONNECTION, state.errorMessage)
+    }
+
+    @Test
+    fun conflict_charging_a_delivery_already_charged_removes_it() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(deliverySeed = listOf(deliveryDraft(50L))).apply {
+            failCheckoutWithConflict = true
+            conflictAfterServerCharged = true
+        }
+        val vm = start(repo)
+        vm.selectAccount(50L)
+        vm.startCharge()
+
+        vm.confirmCharge()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SalePhase.Selling, state.phase)
+        assertEquals(listOf(1L), state.accounts.map { it.id })
+        assertEquals(1L, state.activeDraftId)
+        assertEquals(SaleStrings.DELIVERY_ALREADY_CHARGED, state.notice)
+        assertNull(state.checkoutIdempotencyKey)
+    }
+
+    @Test
+    fun switching_to_a_sale_account_during_the_delivery_fetch_keeps_it_without_notice() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(deliverySeed = listOf(deliveryDraft(50L), deliveryDraft(51L))).apply {
+            deliveryListDelayMs = 1_000L
+        }
+        val vm = start(repo)
+        vm.selectAccount(50L)
+        repo.closeElsewhere(50L, "CHECKED_OUT")
+
+        vm.refreshDeliveries()
+        runCurrent()
+        vm.selectAccount(1L)
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(1L, state.activeDraftId)
+        assertNull(state.notice)
+        assertEquals(listOf(1L, 51L), state.accounts.map { it.id })
+    }
+
+    @Test
+    fun switching_to_a_delivery_that_vanished_during_the_fetch_moves_to_a_sale_account() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(deliverySeed = listOf(deliveryDraft(50L), deliveryDraft(51L))).apply {
+            deliveryListDelayMs = 1_000L
+        }
+        val vm = start(repo)
+        repo.closeElsewhere(51L, "CHECKED_OUT")
+
+        vm.refreshDeliveries()
+        runCurrent()
+        vm.selectAccount(51L)
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(1L, state.activeDraftId)
+        assertNotNull(state.draft)
+        assertFalse(state.isDeliveryAccount)
+        assertEquals(SaleStrings.DELIVERY_ALREADY_CHARGED, state.notice)
+        assertEquals(listOf(1L, 50L), state.accounts.map { it.id })
+    }
+
+    @Test
+    fun refresh_deliveries_while_charging_changes_nothing() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(deliverySeed = listOf(deliveryDraft(50L)))
+        val vm = start(repo)
+        vm.selectAccount(50L)
+        vm.startCharge()
+        repo.closeElsewhere(50L, "CHECKED_OUT")
+        val before = vm.state.value
+        val callsBefore = repo.openDeliveryCalls
+
+        vm.refreshDeliveries()
+        advanceUntilIdle()
+
+        assertEquals(before, vm.state.value)
+        assertEquals(callsBefore, repo.openDeliveryCalls)
+    }
+
+    @Test
+    fun next_sale_after_charging_a_delivery_with_others_pending_lands_on_a_sale_account() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(deliverySeed = listOf(deliveryDraft(50L), deliveryDraft(51L)))
+        val vm = start(repo)
+        vm.selectAccount(50L)
+        vm.startCharge()
+        vm.confirmCharge()
+        advanceUntilIdle()
+        assertEquals(SalePhase.Done, vm.state.value.phase)
+
+        vm.startNextSale()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SalePhase.Selling, state.phase)
+        assertEquals(1L, state.activeDraftId)
+        assertFalse(state.isDeliveryAccount)
+        assertEquals(listOf(1L, 51L), state.accounts.map { it.id })
+    }
+
+    @Test
+    fun fast_typed_code_in_the_search_field_with_a_delivery_active_adds_nothing() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(deliverySeed = listOf(deliveryDraft(50L)))
+        val vm = start(repo)
+        vm.selectAccount(50L)
+
+        repo.cigarro.barcode!!.forEach { char ->
+            clock += SCANNER_MS
+            vm.onQueryChange(vm.state.value.query + char)
+        }
+        vm.onSubmit()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SaleStrings.DELIVERY_READ_ONLY, state.notice)
+        assertEquals("", state.query)
+        assertEquals(0, repo.barcodeLookups)
+        assertEquals(0, repo.addLineCalls)
+        assertEquals(deliveryDraft(50L), repo.drafts[50L])
+    }
+
+    @Test
+    fun pays_with_above_the_field_limit_leaves_the_paid_field_empty() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(deliverySeed = listOf(deliveryDraft(50L, paysWith = 1_234_567.0)))
+        val vm = start(repo)
+        vm.selectAccount(50L)
+
+        vm.startCharge()
+
+        assertEquals("", vm.state.value.paidInput)
+    }
+
+    @Test
+    fun conflict_charging_a_delivery_cancelled_in_pedidos_removes_it() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(deliverySeed = listOf(deliveryDraft(50L))).apply {
+            failCheckoutWithConflict = true
+        }
+        val vm = start(repo)
+        vm.selectAccount(50L)
+        vm.startCharge()
+        repo.closeElsewhere(50L, "CANCELLED")
+
+        vm.confirmCharge()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SalePhase.Selling, state.phase)
+        assertEquals(listOf(1L), state.accounts.map { it.id })
+        assertEquals(1L, state.activeDraftId)
+        assertEquals(SaleStrings.DELIVERY_CANCELLED, state.notice)
+    }
+
+    @Test
+    fun conflict_charging_a_delivery_with_a_forbidden_refetch_keeps_it_and_shows_the_error() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(deliverySeed = listOf(deliveryDraft(50L))).apply {
+            failCheckoutWithConflict = true
+            failNextDraftReadWithForbidden = true
+        }
+        val vm = start(repo)
+        vm.selectAccount(50L)
+        vm.startCharge()
+
+        vm.confirmCharge()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SalePhase.Charging, state.phase)
+        assertFalse(state.isCheckoutInFlight)
+        assertNull(state.checkoutIdempotencyKey)
+        assertEquals(SaleStrings.NOT_ALLOWED, state.errorMessage)
+        assertEquals(50L, state.activeDraftId)
+        assertEquals(listOf(1L, 50L), state.accounts.map { it.id })
+    }
+
     private companion object {
         const val HUMAN_MS = 120L
         const val SCANNER_MS = 5L
@@ -2745,6 +3182,7 @@ private const val JUAN_CODE = "30000011"
 private class FakeSaleRepository(
     private val checkoutDelayMs: Long = 0,
     openDraftsSeed: List<Long> = listOf(1L),
+    deliverySeed: List<SaleDraft> = emptyList(),
 ) : SaleRepository {
     val cigarro = SaleProduct(
         id = 1L, name = "Cigarro suelto", barcode = "7501000100015", unitId = 1L, cashPrice = 21.0,
@@ -2813,7 +3251,17 @@ private class FakeSaleRepository(
     var paymentDelayMs = 0L
     var customerSearchDelayMs = 0L
 
-    val drafts: MutableMap<Long, SaleDraft> = openDraftsSeed.associateWith { emptyDraft(it) }.toMutableMap()
+    val drafts: MutableMap<Long, SaleDraft> =
+        (openDraftsSeed.associateWith { emptyDraft(it) } + deliverySeed.associateBy { it.id }).toMutableMap()
+    var openDeliveryCalls = 0
+    var barcodeLookups = 0
+    var failNextDeliveryList = false
+    var deliveryListDelayMs = 0L
+    var failNextDraftReadWithForbidden = false
+
+    fun addDelivery(draft: SaleDraft) {
+        drafts[draft.id] = draft
+    }
 
     var cashSession: CashSessionCheck = CashSessionCheck.Open
     var failFirstCheckoutWithNetwork = false
@@ -2886,10 +3334,25 @@ private class FakeSaleRepository(
 
     override suspend fun openDrafts(): AppResult<List<SaleDraft>> {
         openDraftsCalls += 1
-        return AppResult.Success(drafts.values.filter { it.isOpen }.sortedBy { it.id })
+        val open = drafts.values.filter { it.isOpen }.sortedBy { it.id }
+        return AppResult.Success(open.filterNot { it.isDelivery } + open.filter { it.isDelivery })
+    }
+
+    override suspend fun openDeliveryDrafts(): AppResult<List<SaleDraft>> {
+        openDeliveryCalls += 1
+        if (deliveryListDelayMs > 0) delay(deliveryListDelayMs)
+        if (failNextDeliveryList) {
+            failNextDeliveryList = false
+            return AppResult.Failure(AppError.Network("network down"))
+        }
+        return AppResult.Success(drafts.values.filter { it.isOpen && it.isDelivery }.sortedBy { it.id })
     }
 
     override suspend fun draft(draftId: Long): AppResult<SaleDraft> {
+        if (failNextDraftReadWithForbidden) {
+            failNextDraftReadWithForbidden = false
+            return AppResult.Failure(AppError.Forbidden)
+        }
         if (failNextDraftReadWithNetwork) {
             failNextDraftReadWithNetwork = false
             return AppResult.Failure(AppError.Network("network down"))
@@ -2918,8 +3381,10 @@ private class FakeSaleRepository(
 
     private val allProducts: List<SaleProduct> get() = searchPool + jamon + kitchenPool + chicle + varios + arrozSuelto
 
-    override suspend fun findProductByBarcode(barcode: String): AppResult<SaleProduct?> =
-        AppResult.Success(allProducts.firstOrNull { it.barcode == barcode })
+    override suspend fun findProductByBarcode(barcode: String): AppResult<SaleProduct?> {
+        barcodeLookups += 1
+        return AppResult.Success(allProducts.firstOrNull { it.barcode == barcode })
+    }
 
     override suspend fun variosProduct(): AppResult<SaleProduct?> = AppResult.Success(varios.takeUnless { variosMissing })
 

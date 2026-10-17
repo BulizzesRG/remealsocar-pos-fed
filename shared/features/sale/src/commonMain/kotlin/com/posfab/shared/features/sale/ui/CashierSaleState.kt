@@ -102,6 +102,12 @@ data class CashierSaleState(
     val abonoOverlayOpen: Boolean = false,
 ) {
     val draft: SaleDraft? get() = activeDraftId?.let(::accountById)
+    val isDeliveryAccount: Boolean get() = draft?.isDelivery == true
+    val saleAccounts: List<SaleDraft> get() = accounts.filterNot { it.isDelivery }
+    val deliveryAccounts: List<SaleDraft> get() = accounts.filter { it.isDelivery }
+    val paymentOptions: List<SalePaymentType>
+        get() = if (isDeliveryAccount) listOf(SalePaymentType.CASH) else SalePaymentType.entries
+    val cartTotal: Double get() = if (isDeliveryAccount) cashTotal else listTotal
     val isBusy: Boolean get() = pendingMutations > 0
     val isPaidLocked: Boolean get() = checkoutIdempotencyKey != null
     val channel: SaleChannel get() = draft?.channel ?: SaleChannel.TAKEAWAY
@@ -131,21 +137,22 @@ data class CashierSaleState(
         get() = phase == SalePhase.Selling && draft?.lines?.isNotEmpty() == true && listTotal > 0 && !isBusy && prompt == null &&
             !abonoOverlayOpen
     val canSetChannel: Boolean
-        get() = phase == SalePhase.Selling && !isBusy && !isCheckoutInFlight && confirm == null && prompt == null &&
+        get() = phase == SalePhase.Selling && !isDeliveryAccount && !isBusy && !isCheckoutInFlight && confirm == null && prompt == null &&
             !abonoOverlayOpen
     val canOpenAbono: Boolean
-        get() = phase == SalePhase.Selling && !isBusy && prompt == null && confirm == null && !isCheckoutInFlight &&
+        get() = phase == SalePhase.Selling && !isDeliveryAccount && !isBusy && prompt == null && confirm == null && !isCheckoutInFlight &&
             !abonoOverlayOpen
     val selectedLine: SaleLine? get() = selectedLineId?.let { id -> draft?.lines?.firstOrNull { it.id == id } }
     val canOpenAccount: Boolean
         get() = (phase == SalePhase.Selling || phase == SalePhase.Done) &&
-            accounts.size < MAX_ACCOUNTS &&
-            draft?.lines?.isNotEmpty() != false &&
+            saleAccounts.size < MAX_ACCOUNTS &&
+            (isDeliveryAccount || draft?.lines?.isNotEmpty() != false) &&
             !isCheckoutInFlight &&
             prompt == null &&
             !abonoOverlayOpen
     val canCloseEmptyAccount: Boolean
-        get() = phase == SalePhase.Selling && draft?.lines?.isEmpty() == true && accounts.size > 1
+        get() = phase == SalePhase.Selling && !isDeliveryAccount && draft?.lines?.isEmpty() == true &&
+            saleAccounts.size > 1
 
     val promptValue: Double? get() = promptInput.toDoubleOrNull()?.takeIf { it > 0.0 }
     val canConfirmPrompt: Boolean

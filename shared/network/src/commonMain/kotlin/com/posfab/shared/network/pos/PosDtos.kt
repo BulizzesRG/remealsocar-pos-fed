@@ -16,6 +16,11 @@ data class DraftDto(
     val lines: List<DraftLineDto>,
     val totals: DraftTotalsDto,
     @SerialName("channel") val channel: String = "TAKEAWAY",
+    @SerialName("customerName") val customerName: String? = null,
+    @SerialName("customerNickname") val customerNickname: String? = null,
+    @SerialName("deliveryAddress") val deliveryAddress: String? = null,
+    @SerialName("deliveryStage") val deliveryStage: String? = null,
+    @SerialName("paysWith") val paysWith: String? = null,
 )
 
 @Serializable

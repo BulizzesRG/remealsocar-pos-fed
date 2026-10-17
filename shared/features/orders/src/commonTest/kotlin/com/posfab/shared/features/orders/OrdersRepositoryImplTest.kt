@@ -541,7 +541,7 @@ private class FakePosApi(
 
     override suspend fun currentCashSession(accessToken: String, terminalId: Long): AppResult<Boolean> = error("unused")
 
-    override suspend fun listOpenSaleDrafts(accessToken: String): AppResult<DraftListDto> = error("unused")
+    override suspend fun listOpenDrafts(accessToken: String, type: String): AppResult<DraftListDto> = error("unused")
 
     override suspend fun createDraft(accessToken: String, request: DraftCreateRequestDto): AppResult<DraftCreateResponseDto> =
         error("unused")

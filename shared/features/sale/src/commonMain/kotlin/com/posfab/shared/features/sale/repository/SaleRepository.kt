@@ -15,6 +15,7 @@ import com.posfab.shared.features.sale.domain.SaleProduct
 interface SaleRepository {
     suspend fun cashSession(): AppResult<CashSessionCheck>
     suspend fun openDrafts(): AppResult<List<SaleDraft>>
+    suspend fun openDeliveryDrafts(): AppResult<List<SaleDraft>>
     suspend fun draft(draftId: Long): AppResult<SaleDraft>
     suspend fun newDraft(): AppResult<SaleDraft>
     suspend fun searchProducts(query: String, limit: Int): AppResult<List<SaleProduct>>

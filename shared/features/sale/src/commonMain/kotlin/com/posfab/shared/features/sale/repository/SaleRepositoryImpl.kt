@@ -1,6 +1,7 @@
 package com.posfab.shared.features.sale.repository
 
 import com.posfab.shared.auth.refresh.AuthorizedApiExecutor
+import com.posfab.shared.core.logging.AppLogger
 import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
 import com.posfab.shared.features.sale.domain.CashSessionCheck
@@ -9,6 +10,7 @@ import com.posfab.shared.features.sale.domain.CustomerPaymentResult
 import com.posfab.shared.features.sale.domain.SaleChannel
 import com.posfab.shared.features.sale.domain.SaleCustomer
 import com.posfab.shared.features.sale.domain.SaleDraft
+import com.posfab.shared.features.sale.domain.SaleDraftKind
 import com.posfab.shared.features.sale.domain.SaleKitchenKind
 import com.posfab.shared.features.sale.domain.SaleLine
 import com.posfab.shared.features.sale.domain.SaleLineInput
@@ -55,8 +57,30 @@ class SaleRepositoryImpl(
         }
 
     override suspend fun openDrafts(): AppResult<List<SaleDraft>> =
-        when (val result = authorized { posApi.listOpenSaleDrafts(it) }) {
-            is AppResult.Success -> AppResult.Success(result.value.items.map { it.toDomain() }.sortedBy { it.id })
+        when (val sales = listOpen(DRAFT_TYPE_SALE)) {
+            is AppResult.Failure -> sales
+            is AppResult.Success -> {
+                val deliveries = when (val listed = openDeliveryDrafts()) {
+                    is AppResult.Success -> listed.value
+                    is AppResult.Failure -> {
+                        AppLogger.w("sale.delivery_list_failed reason=${listed.error::class.simpleName}")
+                        emptyList()
+                    }
+                }
+                AppResult.Success(sales.value + deliveries)
+            }
+        }
+
+    override suspend fun openDeliveryDrafts(): AppResult<List<SaleDraft>> = listOpen(DRAFT_TYPE_DELIVERY)
+
+    private suspend fun listOpen(type: String): AppResult<List<SaleDraft>> =
+        when (val result = authorized { posApi.listOpenDrafts(it, type) }) {
+            is AppResult.Success -> AppResult.Success(
+                result.value.items
+                    .map { it.toDomain() }
+                    .filter { it.kind.name == type }
+                    .sortedBy { it.id },
+            )
             is AppResult.Failure -> result
         }
 
@@ -333,7 +357,17 @@ class SaleRepositoryImpl(
             cashDiscount = totals.cashDiscount.toDoubleOrNull() ?: 0.0,
         ),
         channel = SaleChannel.fromRaw(channel),
+        kind = SaleDraftKind.fromRaw(type),
+        customerName = customerDisplayName(),
+        deliveryAddress = deliveryAddress?.trim()?.takeIf { it.isNotEmpty() },
+        paysWith = paysWith?.toDoubleOrNull()?.takeIf { roundMoney(it) > 0.0 },
     )
+
+    private fun DraftDto.customerDisplayName(): String? {
+        val name = customerName?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val nickname = customerNickname?.trim()?.takeIf { it.isNotEmpty() } ?: return name
+        return "$name ($nickname)"
+    }
 
     private fun DraftLineDto.toDomain(): SaleLine {
         val quantity = qty.toDoubleOrNull() ?: 0.0
@@ -403,6 +437,7 @@ class SaleRepositoryImpl(
 
     private companion object {
         const val DRAFT_TYPE_SALE = "SALE"
+        const val DRAFT_TYPE_DELIVERY = "DELIVERY"
         const val PAYMENT_STATUS_PAID = "PAID"
         const val PAYMENT_STATUS_ON_CREDIT = "ON_CREDIT"
         const val BARCODE_NOT_FOUND = "Barcode not found"

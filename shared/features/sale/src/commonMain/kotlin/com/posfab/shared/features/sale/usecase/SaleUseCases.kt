@@ -18,6 +18,8 @@ class SaleUseCases(private val repository: SaleRepository) {
 
     suspend fun openDrafts(): AppResult<List<SaleDraft>> = repository.openDrafts()
 
+    suspend fun openDeliveryDrafts(): AppResult<List<SaleDraft>> = repository.openDeliveryDrafts()
+
     suspend fun draft(draftId: Long): AppResult<SaleDraft> = repository.draft(draftId)
 
     suspend fun newDraft(): AppResult<SaleDraft> = repository.newDraft()

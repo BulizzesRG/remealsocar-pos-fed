@@ -4,6 +4,7 @@ import com.posfab.shared.auth.domain.UserSession
 import com.posfab.shared.auth.usecase.LogoutUseCase
 import com.posfab.shared.core.BaseViewModel
 import com.posfab.shared.core.model.Permission
+import com.posfab.shared.core.model.UserRole
 import com.posfab.shared.core.result.AppResult
 import com.posfab.shared.features.cash.domain.CashSession
 import com.posfab.shared.features.cash.domain.CashSessionStatus
@@ -37,7 +38,7 @@ class ShellViewModel(
     private val _state = MutableStateFlow(
         ShellState(
             session = session,
-            selectedRoute = ShellRoute.HOME,
+            selectedRoute = initialRoute(session),
             modules = RouteGuard.modules(session),
             cashStatus = if (canSeeCash) HomeCashStatus.Loading else HomeCashStatus.Hidden,
         ),
@@ -69,6 +70,13 @@ class ShellViewModel(
         HomeCashStatus.Hidden, HomeCashStatus.Loading, HomeCashStatus.Unavailable -> HomeCashStatus.Loading
         HomeCashStatus.Closed, is HomeCashStatus.Open -> this
     }
+
+    private fun initialRoute(session: UserSession): ShellRoute =
+        if (UserRole.ORDERS in session.user.roles && RouteGuard.canAccess(session, ShellRoute.PEDIDOS)) {
+            ShellRoute.PEDIDOS
+        } else {
+            ShellRoute.HOME
+        }
 
     fun logout(onDone: () -> Unit) {
         scope.launch {

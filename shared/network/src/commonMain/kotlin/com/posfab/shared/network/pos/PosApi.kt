@@ -19,7 +19,8 @@ import io.ktor.http.contentType
 
 interface PosApi {
     suspend fun currentCashSession(accessToken: String, terminalId: Long): AppResult<Boolean>
-    suspend fun listOpenSaleDrafts(accessToken: String): AppResult<DraftListDto>
+    suspend fun listOpenDrafts(accessToken: String, type: String): AppResult<DraftListDto>
+    suspend fun listOpenSaleDrafts(accessToken: String): AppResult<DraftListDto> = listOpenDrafts(accessToken, "SALE")
     suspend fun createDraft(accessToken: String, request: DraftCreateRequestDto): AppResult<DraftCreateResponseDto>
     suspend fun getDraft(accessToken: String, draftId: Long): AppResult<DraftDto>
     suspend fun addDraftLine(accessToken: String, draftId: Long, request: AddLineRequestDto): AppResult<DraftDto>
@@ -68,10 +69,10 @@ class PosApiClient(
         }
     }
 
-    override suspend fun listOpenSaleDrafts(accessToken: String): AppResult<DraftListDto> = safeCall {
+    override suspend fun listOpenDrafts(accessToken: String, type: String): AppResult<DraftListDto> = safeCall {
         httpClient.get("${config.apiBaseUrl}/pos/drafts") {
             bearer(accessToken)
-            parameter("type", "SALE")
+            parameter("type", type)
             parameter("status", "OPEN")
         }
     }

@@ -105,7 +105,6 @@ class DeviceSetupViewModelTest {
         assertEquals("POS1", device.terminalCode)
         assertEquals("POS", device.terminalType)
         assertEquals(5L, device.businessUnitId)
-        // confirmAndRegister does NOT emit registrationComplete
         assertTrue(emissions.isEmpty())
 
         collectJob.cancel()
@@ -221,7 +220,56 @@ class DeviceSetupViewModelTest {
         assertFalse(vm.state.value.isRegistering)
     }
 
-    // --- Helpers ---
+    @Test
+    fun terminal_options_are_both_cajas_and_cocina() {
+        assertEquals(listOf("POS1", "POS2", "COCINA"), DeviceSetupState().terminalOptions)
+    }
+
+    @Test
+    fun submit_without_terminal_asks_to_choose_an_equipo() = runTest(dispatcher) {
+        val vm = makeViewModel()
+
+        vm.onAdminUsernameChange("admin")
+        vm.onAdminPasswordChange("secret123")
+        vm.submit()
+        advanceUntilIdle()
+
+        assertEquals("Elige un equipo", vm.state.value.error)
+        assertFalse(vm.state.value.isConfirmingRegistration)
+    }
+
+    @Test
+    fun registering_cocina_stores_the_terminal_the_backend_returns() = runTest(dispatcher) {
+        val cocinaResponse = DeviceRegisterResponseDto(
+            deviceToken = "token-cocina",
+            terminal = DeviceTerminalInfoDto(
+                id = 4L,
+                code = "COCINA",
+                terminalType = "POS",
+                businessUnitId = 2L,
+            ),
+        )
+        val api = FakeDeviceApi(registerResult = AppResult.Success(cocinaResponse))
+        val storage = FakeDeviceStorage()
+        val vm = makeViewModel(api, storage)
+
+        vm.onAdminUsernameChange("admin")
+        vm.onAdminPasswordChange("secret123")
+        vm.onTerminalSelect("COCINA")
+        vm.submit()
+        advanceUntilIdle()
+        vm.confirmAndRegister()
+        advanceUntilIdle()
+
+        assertEquals("COCINA", api.lastRequest?.terminalCode)
+        val saved = assertNotNull(storage.savedRegistration)
+        assertEquals("token-cocina", saved.deviceToken)
+        assertEquals(4L, saved.terminalId)
+        assertEquals("COCINA", saved.terminalCode)
+        assertEquals("POS", saved.terminalType)
+        assertEquals(2L, saved.businessUnitId)
+        assertEquals(saved, vm.state.value.registeredDevice)
+    }
 
     private fun fillValidFields(vm: DeviceSetupViewModel) {
         vm.onAdminUsernameChange("admin")
@@ -245,9 +293,12 @@ private class FakeDeviceApi(
 ) : DeviceApi {
     var registerCallCount = 0
         private set
+    var lastRequest: DeviceRegisterRequestDto? = null
+        private set
 
     override suspend fun register(request: DeviceRegisterRequestDto): AppResult<DeviceRegisterResponseDto> {
         registerCallCount++
+        lastRequest = request
         return registerResult
     }
 

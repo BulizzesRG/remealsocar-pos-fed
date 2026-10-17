@@ -105,6 +105,15 @@ internal object SaleStrings {
     const val VARIOS = "Varios"
     const val AMOUNT_TOO_SMALL = "Ese importe es muy chico para este producto"
     const val AMOUNT_NOT_EXACT = "No se puede cobrar ese importe exacto"
+    const val DELIVERY_READ_ONLY = "Es un pedido: solo se cobra. Cambia a una cuenta para vender"
+    const val REFRESH_DELIVERIES = "Actualizar pedidos"
+    const val DELIVERY_ALREADY_CHARGED = "Este pedido ya se cobró en otra caja"
+    const val PAYS_WITH_PREFIX = "Paga con "
+    const val DELIVERY = "Pedido"
+    const val DELIVERY_CANCELLED = "Este pedido se canceló en Pedidos"
+    const val DELIVERY_READ_ONLY_HINT = "Solo cobro · no se puede editar"
+    const val DELIVERY_SEARCH_DISABLED = "Cambia a una cuenta para vender"
+    const val DELIVERY_TAKEAWAY = "Pedido · Para llevar"
     val QUICK_BILLS: List<Int> = listOf(20, 50, 100, 200, 500)
     val QUICK_AMOUNTS: List<Int> = listOf(3, 5, 10)
     val QUICK_WEIGHTS: List<Pair<Double, String>> = listOf(
@@ -126,11 +135,35 @@ internal object SaleStrings {
         SalePaymentType.CREDIT -> CREDIT_DONE
     }
 
+    fun paymentOptionLabel(type: SalePaymentType): String = when (type) {
+        SalePaymentType.CASH -> PAYMENT_CASH
+        SalePaymentType.TRANSFER -> PAYMENT_TRANSFER
+        SalePaymentType.CARD -> PAYMENT_CARD
+        SalePaymentType.CREDIT -> PAYMENT_CREDIT
+    }
+
     fun discount(amount: Double): String = "\u2212${money(amount)}"
 
     fun notFoundWithCode(code: String): String = "No hay ningún producto con el código $code"
 
     fun accountChip(total: Double, count: Int): String = "${money(total)} · $count"
+
+    fun deliveryChip(customerShortName: String?, cashTotal: Double): String =
+        listOfNotNull(DELIVERY, customerShortName, money(cashTotal)).joinToString(" · ")
+
+    fun deliveryChipName(customerShortName: String?): String =
+        listOfNotNull(DELIVERY, customerShortName).joinToString(" · ")
+
+    fun deliveriesLabel(count: Int): String = "Pedidos ($count)"
+
+    fun changeAmount(amount: Double): String = "$CHANGE ${money(amount)}"
+
+    fun deliveryHeader(name: String?, address: String?): String =
+        listOfNotNull(name?.let { "$DELIVERY de $it" } ?: DELIVERY, address).joinToString(" · ")
+
+    fun deliveryDone(name: String?): String = name?.let { "$DELIVERY de $it" } ?: DELIVERY
+
+    fun paysWith(amount: Double): String = "$PAYS_WITH_PREFIX${money(amount)}"
 
     fun accountDescription(total: Double, count: Int): String =
         "Cuenta con ${money(total)}, $count ${if (count == 1) "producto" else "productos"}"

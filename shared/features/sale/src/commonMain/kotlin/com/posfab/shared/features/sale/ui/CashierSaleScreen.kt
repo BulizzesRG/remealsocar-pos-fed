@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -33,16 +34,19 @@ import androidx.compose.material.icons.filled.AttachMoney
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeliveryDining
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -65,6 +69,7 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
@@ -81,9 +86,11 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -214,6 +221,10 @@ private fun SellingView(state: CashierSaleState, viewModel: CashierSaleViewModel
         if (state.prompt == null && !state.abonoOverlayOpen && sellingOrDone) focusSearch()
     }
 
+    LaunchedEffect(state.isDeliveryAccount) {
+        if (!state.isDeliveryAccount && state.prompt == null && !state.abonoOverlayOpen && sellingOrDone) focusSearch()
+    }
+
     LaunchedEffect(state.credit.customer?.id) {
         if (state.isCreditCharge && state.credit.customer != null) focusSearch()
     }
@@ -278,11 +289,12 @@ private fun SellingView(state: CashierSaleState, viewModel: CashierSaleViewModel
                 verticalArrangement = Arrangement.spacedBy(PosSpacing.sm),
             ) {
                 Row(
-                    verticalAlignment = Alignment.CenterVertically,
+                    verticalAlignment = Alignment.Top,
                     horizontalArrangement = Arrangement.spacedBy(PosSpacing.md),
                 ) {
                     AccountStrip(
-                        accounts = state.accounts,
+                        accounts = state.saleAccounts,
+                        deliveries = state.deliveryAccounts,
                         activeDraftId = state.activeDraftId,
                         canOpen = state.canOpenAccount,
                         enabled = state.phase != SalePhase.Charging &&
@@ -297,19 +309,36 @@ private fun SellingView(state: CashierSaleState, viewModel: CashierSaleViewModel
                             viewModel.openAccount()
                             focusSearch()
                         },
+                        onRefreshDeliveries = {
+                            viewModel.refreshDeliveries()
+                            focusSearch()
+                        },
                         modifier = Modifier.weight(1f),
                     )
-                    PosChoiceRow(
-                        options = listOf(
-                            SaleChannel.TAKEAWAY to SaleStrings.CHANNEL_TAKEAWAY,
-                            SaleChannel.ONSITE to SaleStrings.CHANNEL_ONSITE,
-                        ),
-                        selected = state.channel,
-                        onSelect = viewModel::setChannel,
-                        enabled = state.canSetChannel,
-                        height = 48.dp,
-                        modifier = Modifier.width(240.dp).focusProperties { canFocus = false },
-                    )
+                    if (state.isDeliveryAccount) {
+                        Box(
+                            modifier = Modifier.width(240.dp).height(48.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                SaleStrings.DELIVERY_TAKEAWAY,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    } else {
+                        PosChoiceRow(
+                            options = listOf(
+                                SaleChannel.TAKEAWAY to SaleStrings.CHANNEL_TAKEAWAY,
+                                SaleChannel.ONSITE to SaleStrings.CHANNEL_ONSITE,
+                            ),
+                            selected = state.channel,
+                            onSelect = viewModel::setChannel,
+                            enabled = state.canSetChannel,
+                            height = 48.dp,
+                            modifier = Modifier.width(240.dp).focusProperties { canFocus = false },
+                        )
+                    }
                 }
                 PosNoticeRow(notice = state.notice, errorMessage = null)
                 if (state.phase != SalePhase.Charging && state.prompt == null && !state.abonoOverlayOpen) {
@@ -385,12 +414,75 @@ private fun SellingView(state: CashierSaleState, viewModel: CashierSaleViewModel
 @Composable
 private fun AccountStrip(
     accounts: List<SaleDraft>,
+    deliveries: List<SaleDraft>,
     activeDraftId: Long?,
     canOpen: Boolean,
     enabled: Boolean,
     onSelect: (Long) -> Unit,
     onNew: () -> Unit,
+    onRefreshDeliveries: () -> Unit,
     modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.fillMaxWidth().alpha(if (enabled) 1f else DISABLED_ALPHA),
+        verticalArrangement = Arrangement.spacedBy(PosSpacing.sm),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(PosSpacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ChipRow(
+                accounts = accounts,
+                activeDraftId = activeDraftId,
+                enabled = enabled,
+                onSelect = onSelect,
+                modifier = Modifier.weight(1f),
+            ) {
+                PosSecondaryButton(
+                    text = SaleStrings.NEW_ACCOUNT,
+                    onClick = onNew,
+                    enabled = enabled && canOpen,
+                    icon = Icons.Filled.Add,
+                    modifier = Modifier.focusProperties { canFocus = false },
+                )
+            }
+            if (deliveries.isEmpty()) {
+                RefreshDeliveriesButton(enabled = enabled, onClick = onRefreshDeliveries)
+            }
+        }
+        if (deliveries.isNotEmpty()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(PosSpacing.sm),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    SaleStrings.deliveriesLabel(deliveries.size),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                ChipRow(
+                    accounts = deliveries,
+                    activeDraftId = activeDraftId,
+                    enabled = enabled,
+                    onSelect = onSelect,
+                    modifier = Modifier.weight(1f),
+                )
+                RefreshDeliveriesButton(enabled = enabled, onClick = onRefreshDeliveries)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChipRow(
+    accounts: List<SaleDraft>,
+    activeDraftId: Long?,
+    enabled: Boolean,
+    onSelect: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+    trailing: @Composable () -> Unit = {},
 ) {
     val scrollState = rememberScrollState()
     val chipRanges = remember { mutableStateMapOf<Long, IntRange>() }
@@ -404,10 +496,7 @@ private fun AccountStrip(
         }
     }
     Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .alpha(if (enabled) 1f else DISABLED_ALPHA)
-            .horizontalScroll(scrollState),
+        modifier = modifier.horizontalScroll(scrollState),
         horizontalArrangement = Arrangement.spacedBy(PosSpacing.sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -423,13 +512,18 @@ private fun AccountStrip(
                 },
             )
         }
-        PosSecondaryButton(
-            text = SaleStrings.NEW_ACCOUNT,
-            onClick = onNew,
-            enabled = enabled && canOpen,
-            icon = Icons.Filled.Add,
-            modifier = Modifier.focusProperties { canFocus = false },
-        )
+        trailing()
+    }
+}
+
+@Composable
+private fun RefreshDeliveriesButton(enabled: Boolean, onClick: () -> Unit) {
+    IconButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.size(PosLayout.touchTarget).focusProperties { canFocus = false },
+    ) {
+        Icon(Icons.Filled.Refresh, contentDescription = SaleStrings.REFRESH_DELIVERIES)
     }
 }
 
@@ -443,21 +537,28 @@ private fun AccountChip(
 ) {
     val colors = MaterialTheme.colorScheme
     val isEmpty = account.lines.isEmpty()
-    val label = if (isEmpty) {
-        SaleStrings.EMPTY_ACCOUNT
-    } else {
-        SaleStrings.accountChip(account.totals.listTotal, account.lines.size)
+    val description = when {
+        account.isDelivery -> SaleStrings.deliveryChip(account.customerShortName, account.totals.cashTotal)
+        isEmpty -> SaleStrings.EMPTY_ACCOUNT_DESCRIPTION
+        else -> SaleStrings.accountDescription(account.totals.listTotal, account.lines.size)
     }
-    val description = if (isEmpty) {
-        SaleStrings.EMPTY_ACCOUNT_DESCRIPTION
-    } else {
-        SaleStrings.accountDescription(account.totals.listTotal, account.lines.size)
+    val container = when {
+        account.isDelivery && isActive -> colors.tertiary.copy(alpha = ACTIVE_DELIVERY_ALPHA).compositeOver(colors.tertiaryContainer)
+        account.isDelivery -> colors.tertiaryContainer
+        isActive -> colors.primaryContainer
+        else -> colors.surfaceVariant
     }
+    val content = when {
+        account.isDelivery -> colors.onTertiaryContainer
+        isActive -> colors.onPrimaryContainer
+        else -> colors.onSurfaceVariant
+    }
+    val accent = if (account.isDelivery) colors.tertiary else colors.primary
     Surface(
         shape = MaterialTheme.shapes.medium,
-        color = if (isActive) colors.primaryContainer else colors.surfaceVariant,
-        contentColor = if (isActive) colors.onPrimaryContainer else colors.onSurfaceVariant,
-        border = if (isActive) BorderStroke(2.dp, colors.primary) else BorderStroke(1.dp, colors.outline),
+        color = container,
+        contentColor = content,
+        border = if (isActive) BorderStroke(2.dp, accent) else BorderStroke(1.dp, colors.outline),
         modifier = modifier
             .heightIn(min = PosLayout.touchTarget)
             .semantics {
@@ -476,13 +577,33 @@ private fun AccountChip(
             if (isActive) {
                 Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(16.dp))
             }
-            Text(
-                label,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                modifier = Modifier.clearAndSetSemantics {},
-            )
+            if (account.isDelivery) {
+                Icon(Icons.Filled.DeliveryDining, contentDescription = null, modifier = Modifier.size(18.dp))
+                Text(
+                    SaleStrings.deliveryChipName(account.customerShortName),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = 200.dp).clearAndSetSemantics {},
+                )
+                Text(
+                    "· ${SaleStrings.money(account.totals.cashTotal)}",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.clearAndSetSemantics {},
+                )
+            } else {
+                Text(
+                    if (isEmpty) SaleStrings.EMPTY_ACCOUNT else SaleStrings.accountChip(account.totals.listTotal, account.lines.size),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    modifier = Modifier.clearAndSetSemantics {},
+                )
+            }
         }
     }
 }
@@ -490,7 +611,9 @@ private fun AccountChip(
 @Composable
 private fun CartPanel(state: CashierSaleState, viewModel: CashierSaleViewModel, modifier: Modifier = Modifier) {
     val lines = state.draft?.lines.orEmpty()
+    val delivery = state.draft?.takeIf { it.isDelivery }
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(PosSpacing.sm)) {
+        delivery?.let { DeliveryHeader(it) }
         if (lines.isEmpty()) {
             Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Text(
@@ -507,13 +630,13 @@ private fun CartPanel(state: CashierSaleState, viewModel: CashierSaleViewModel, 
                 items(lines, key = { it.id }) { line ->
                     CartLineRow(
                         line = line,
-                        selected = line.id == state.selectedLineId,
-                        onClick = { viewModel.selectLine(line.id) },
+                        selected = delivery == null && line.id == state.selectedLineId,
+                        onClick = if (delivery == null) ({ viewModel.selectLine(line.id) }) else null,
                     )
                 }
             }
         }
-        state.selectedLine?.let { line ->
+        state.selectedLine?.takeIf { delivery == null }?.let { line ->
             SelectedLineActions(
                 line = line,
                 qtyInput = state.qtyInput,
@@ -527,9 +650,9 @@ private fun CartPanel(state: CashierSaleState, viewModel: CashierSaleViewModel, 
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(SaleStrings.TOTAL, style = MaterialTheme.typography.headlineLarge)
-            PosMoneyText(amount = state.listTotal, style = MaterialTheme.typography.displaySmall)
+            PosMoneyText(amount = state.cartTotal, style = MaterialTheme.typography.displaySmall)
         }
-        if (state.cashDiscount > 0.0) {
+        if (delivery == null && state.cashDiscount > 0.0) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(PosSpacing.xs, Alignment.End),
@@ -554,6 +677,7 @@ private fun CartPanel(state: CashierSaleState, viewModel: CashierSaleViewModel, 
             verticalAlignment = Alignment.CenterVertically,
         ) {
             val footerLabel = when {
+                delivery != null -> null
                 lines.isNotEmpty() -> SaleStrings.CLEAR
                 state.canCloseEmptyAccount -> SaleStrings.CLOSE_ACCOUNT
                 else -> null
@@ -567,15 +691,17 @@ private fun CartPanel(state: CashierSaleState, viewModel: CashierSaleViewModel, 
                     Text(footerLabel)
                 }
             }
-            PosSecondaryButton(
-                text = SaleStrings.ABONO,
-                onClick = viewModel::openAbono,
-                enabled = state.canOpenAbono,
-                icon = Icons.Filled.AccountBalanceWallet,
-                modifier = Modifier.height(64.dp).focusProperties { canFocus = false },
-            )
+            if (delivery == null) {
+                PosSecondaryButton(
+                    text = SaleStrings.ABONO,
+                    onClick = viewModel::openAbono,
+                    enabled = state.canOpenAbono,
+                    icon = Icons.Filled.AccountBalanceWallet,
+                    modifier = Modifier.height(64.dp).focusProperties { canFocus = false },
+                )
+            }
             PosPrimaryButton(
-                text = SaleStrings.chargeLabel(state.listTotal),
+                text = SaleStrings.chargeLabel(state.cartTotal),
                 onClick = viewModel::startCharge,
                 enabled = state.canCharge,
                 icon = Icons.Filled.Payments,
@@ -586,11 +712,84 @@ private fun CartPanel(state: CashierSaleState, viewModel: CashierSaleViewModel, 
 }
 
 @Composable
-private fun CartLineRow(line: SaleLine, selected: Boolean, onClick: () -> Unit) {
+private fun DeliveryHeader(delivery: SaleDraft) {
+    val colors = MaterialTheme.colorScheme
     Surface(
         shape = MaterialTheme.shapes.medium,
-        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        color = colors.tertiaryContainer,
+        contentColor = colors.onTertiaryContainer,
+        modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite },
+    ) {
+        Column(
+            modifier = Modifier.padding(PosSpacing.md),
+            verticalArrangement = Arrangement.spacedBy(PosSpacing.xs),
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(PosSpacing.sm),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.DeliveryDining, contentDescription = null, modifier = Modifier.size(20.dp))
+                Text(
+                    SaleStrings.deliveryDone(delivery.customerName),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            delivery.deliveryAddress?.let { address ->
+                Text(
+                    address,
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text(
+                SaleStrings.DELIVERY_READ_ONLY_HINT,
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.onTertiaryContainer,
+            )
+            delivery.paysWith?.let { amount ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(PosSpacing.lg, Alignment.End),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        SaleStrings.paysWith(amount),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    val change = roundMoney(amount - delivery.totals.cashTotal)
+                    if (change > 0.0) {
+                        Text(
+                            SaleStrings.changeAmount(change),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CartLineRow(line: SaleLine, selected: Boolean, onClick: (() -> Unit)?) {
+    val colors = MaterialTheme.colorScheme
+    val readOnly = onClick == null
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = when {
+            readOnly -> Color.Transparent
+            selected -> colors.primaryContainer
+            else -> colors.surfaceVariant
+        },
+        border = if (readOnly) BorderStroke(1.dp, colors.outline.copy(alpha = READ_ONLY_BORDER_ALPHA)) else null,
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
     ) {
         Row(
             modifier = Modifier.padding(PosSpacing.md),
@@ -714,6 +913,16 @@ private fun DonePanel(result: CheckoutResult, onNext: () -> Unit, modifier: Modi
                     )
                 } else {
                     Text(SaleStrings.CHARGED, style = MaterialTheme.typography.headlineMedium)
+                    if (result.isDelivery) {
+                        Text(
+                            SaleStrings.deliveryDone(result.deliveryCustomerName),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                     Text(SaleStrings.paymentTypeLabel(result.paymentType), style = MaterialTheme.typography.titleLarge)
                 }
                 PosMoneyText(amount = result.totalCharged, style = MaterialTheme.typography.headlineMedium)
@@ -770,7 +979,8 @@ private fun ProductPanel(
         PosTextField(
             value = state.query,
             onValueChange = onQueryChange,
-            label = SaleStrings.SEARCH_LABEL,
+            label = if (state.isDeliveryAccount) SaleStrings.DELIVERY_SEARCH_DISABLED else SaleStrings.SEARCH_LABEL,
+            enabled = !state.isDeliveryAccount,
             leadingIcon = { Icon(Icons.Filled.QrCodeScanner, contentDescription = null) },
             modifier = searchModifier,
         )
@@ -1076,20 +1286,20 @@ private fun ChargeOverlay(
         }
     }
     ModalScrim(width = CHARGE_OVERLAY_WIDTH) {
-        PosChoiceRow(
-            options = listOf(
-                SalePaymentType.CASH to SaleStrings.PAYMENT_CASH,
-                SalePaymentType.TRANSFER to SaleStrings.PAYMENT_TRANSFER,
-                SalePaymentType.CARD to SaleStrings.PAYMENT_CARD,
-                SalePaymentType.CREDIT to SaleStrings.PAYMENT_CREDIT,
-            ),
-            selected = state.paymentType,
-            onSelect = viewModel::selectPaymentType,
-            enabled = amountEnabled && !state.credit.isAbonoInFlight,
-            height = 56.dp,
-            textStyle = MaterialTheme.typography.titleSmall,
-            modifier = Modifier.fillMaxWidth().focusProperties { canFocus = false },
-        )
+        val onlyOption = state.paymentOptions.singleOrNull()
+        if (onlyOption != null) {
+            SinglePaymentOption(onlyOption)
+        } else {
+            PosChoiceRow(
+                options = state.paymentOptions.map { it to SaleStrings.paymentOptionLabel(it) },
+                selected = state.paymentType,
+                onSelect = viewModel::selectPaymentType,
+                enabled = amountEnabled && !state.credit.isAbonoInFlight,
+                height = 56.dp,
+                textStyle = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.fillMaxWidth().focusProperties { canFocus = false },
+            )
+        }
         if (state.isPaidLocked) {
             PaidLockedHint()
         }
@@ -1121,6 +1331,28 @@ private fun ChargeOverlay(
         state.errorMessage?.let { PosErrorBanner(error = it) }
         if (!newCustomerOpen) {
             ChargeFooter(state = state, viewModel = viewModel)
+        }
+    }
+}
+
+@Composable
+private fun SinglePaymentOption(type: SalePaymentType) {
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        modifier = Modifier.fillMaxWidth().height(56.dp),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(PosSpacing.sm, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.Payments, contentDescription = null)
+            Text(
+                SaleStrings.paymentOptionLabel(type),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
         }
     }
 }
@@ -1263,13 +1495,24 @@ private fun CashPaymentInput(
                 )
             }
         }
+        var paidValue by remember { mutableStateOf(TextFieldValue(state.paidInput)) }
+        val shownPaid = if (paidValue.text == state.paidInput) {
+            paidValue
+        } else {
+            TextFieldValue(state.paidInput, TextRange(state.paidInput.length))
+        }
         PosTextField(
-            value = state.paidInput,
-            onValueChange = viewModel::onPaidInputChange,
+            value = shownPaid,
+            onValueChange = { typed ->
+                paidValue = typed
+                if (typed.text != state.paidInput) viewModel.onPaidInputChange(typed.text)
+            },
             label = SaleStrings.PAID_LABEL,
             enabled = amountEnabled,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            modifier = paidModifier,
+            modifier = paidModifier.onFocusChanged { focus ->
+                if (focus.isFocused) paidValue = shownPaid.copy(selection = TextRange(0, shownPaid.text.length))
+            },
         )
         state.change?.let { change ->
             if (change >= 0.0) {
@@ -1320,4 +1563,6 @@ private fun KeyEvent.isEnterUp(): Boolean =
 private fun KeyEvent.isEscapeUp(): Boolean = type == KeyEventType.KeyUp && key == Key.Escape
 
 private const val DISABLED_ALPHA = 0.5f
+private const val ACTIVE_DELIVERY_ALPHA = 0.35f
+private const val READ_ONLY_BORDER_ALPHA = 0.6f
 private val CHARGE_OVERLAY_WIDTH = 600.dp
