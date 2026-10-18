@@ -488,7 +488,7 @@ class CatalogViewModelTest {
         vm.save()
         vm.confirmSave()
         advanceUntilIdle()
-        assertEquals("Escribe el precio en efectivo para llevar", vm.state.value.errorMessage)
+        assertEquals("Escribe el precio en efectivo normal", vm.state.value.errorMessage)
 
         vm.onCashTakeawayChange("20")
         vm.onListTakeawayChange("15")

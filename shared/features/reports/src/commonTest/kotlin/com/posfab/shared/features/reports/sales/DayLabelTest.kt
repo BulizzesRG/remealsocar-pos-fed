@@ -46,8 +46,8 @@ class DayLabelTest {
         val cash = detail(SalePayment.CASH, SaleChannel.TAKEAWAY, null)
         val credit = detail(SalePayment.CREDIT, SaleChannel.ONSITE, "Lupe Hernández (Doña Lupe)")
 
-        assertEquals("Hoy 7:15 pm · Caja 1 · Efectivo · Para llevar", detailSubtitle(cash, today, zone))
-        assertEquals("Hoy 7:15 pm · Caja 1 · Fiado a Lupe Hernández (Doña Lupe) · Aquí", detailSubtitle(credit, today, zone))
+        assertEquals("Hoy 7:15 pm · Caja 1 · Efectivo · Normal", detailSubtitle(cash, today, zone))
+        assertEquals("Hoy 7:15 pm · Caja 1 · Fiado a Lupe Hernández (Doña Lupe) · Corral", detailSubtitle(credit, today, zone))
     }
 
     @Test

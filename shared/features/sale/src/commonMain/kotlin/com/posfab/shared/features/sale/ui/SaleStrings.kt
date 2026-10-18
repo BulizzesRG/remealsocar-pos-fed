@@ -86,8 +86,8 @@ internal object SaleStrings {
     const val CUSTOMER_NOT_FOUND = "No se encontró el cliente"
     const val ABONO_CASH_CLOSED = "La caja está cerrada. Abre el día en Caja para registrar el abono"
     const val ABONO_LOCKED = "Abono en curso: vuelve a tocar Abonar para reintentar"
-    const val CHANNEL_TAKEAWAY = "Para llevar"
-    const val CHANNEL_ONSITE = "Aquí"
+    const val CHANNEL_TAKEAWAY = "Normal"
+    const val CHANNEL_ONSITE = "Corral"
     const val CASH_DISCOUNT = "Descuento por pago en efectivo"
     const val AMOUNT_DUE = "A pagar"
     const val IN_CASH = "En efectivo"
@@ -124,8 +124,8 @@ internal object SaleStrings {
     )
 
     fun channelNotice(channel: SaleChannel): String = when (channel) {
-        SaleChannel.ONSITE -> "Precios de aquí"
-        SaleChannel.TAKEAWAY -> "Precios para llevar"
+        SaleChannel.ONSITE -> "Precios de corral"
+        SaleChannel.TAKEAWAY -> "Precios normales"
     }
 
     fun paymentTypeLabel(type: SalePaymentType): String = when (type) {

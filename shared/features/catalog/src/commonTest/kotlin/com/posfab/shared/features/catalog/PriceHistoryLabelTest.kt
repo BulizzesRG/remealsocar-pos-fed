@@ -69,7 +69,7 @@ class PriceHistoryLabelTest {
     @Test
     fun line_with_onsite_prices() {
         assertEquals(
-            "Hasta 15 oct, 6:40 pm · $17.00 (con tarjeta $18.00) · aquí $20.00 ($21.00) · lo cambió gerente",
+            "Hasta 15 oct, 6:40 pm · $17.00 (con tarjeta $18.00) · corral $20.00 ($21.00) · lo cambió gerente",
             priceHistoryLine(entry(cashOnsite = 20.0, listOnsite = 21.0), utc),
         )
     }
@@ -85,7 +85,7 @@ class PriceHistoryLabelTest {
     @Test
     fun suggested_price_line_drops_card_prices() {
         assertEquals(
-            "Hasta 15 oct, 6:40 pm · $17.00 (precio sugerido) · aquí $20.00 · lo cambió gerente",
+            "Hasta 15 oct, 6:40 pm · $17.00 (precio sugerido) · corral $20.00 · lo cambió gerente",
             priceHistoryLine(entry(list = 17.0, cashOnsite = 20.0, listOnsite = 20.0, suggested = true), utc),
         )
     }
@@ -136,7 +136,7 @@ class PriceHistoryLabelTest {
     @Test
     fun line_with_onsite_cash_but_no_onsite_list_omits_the_parentheses() {
         assertEquals(
-            "Hasta 15 oct, 6:40 pm · $17.00 (con tarjeta $18.00) · aquí $20.00 · lo cambió gerente",
+            "Hasta 15 oct, 6:40 pm · $17.00 (con tarjeta $18.00) · corral $20.00 · lo cambió gerente",
             priceHistoryLine(entry(cashOnsite = 20.0, listOnsite = null), utc),
         )
     }
