@@ -38,6 +38,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -162,6 +163,7 @@ fun PosPrimaryButton(
     enabled: Boolean = true,
     icon: ImageVector? = null,
     isLoading: Boolean = false,
+    shortcut: String? = null,
 ) {
     Button(
         onClick = onClick,
@@ -181,6 +183,10 @@ fun PosPrimaryButton(
                 Spacer(Modifier.width(PosSpacing.xs))
             }
             Text(text, style = MaterialTheme.typography.labelLarge, maxLines = 1, softWrap = false)
+            if (shortcut != null) {
+                Spacer(Modifier.width(PosSpacing.sm))
+                PosKeyHint(shortcut)
+            }
         }
     }
 }
@@ -192,6 +198,7 @@ fun PosSecondaryButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     icon: ImageVector? = null,
+    shortcut: String? = null,
 ) {
     OutlinedButton(
         onClick = onClick,
@@ -203,8 +210,34 @@ fun PosSecondaryButton(
             Spacer(Modifier.width(PosSpacing.xs))
         }
         Text(text, style = MaterialTheme.typography.labelLarge, maxLines = 1, softWrap = false)
+        if (shortcut != null) {
+            Spacer(Modifier.width(PosSpacing.sm))
+            PosKeyHint(shortcut)
+        }
     }
 }
+
+@Composable
+fun PosKeyHint(text: String, modifier: Modifier = Modifier) {
+    val contentColor = LocalContentColor.current
+    Surface(
+        shape = MaterialTheme.shapes.extraSmall,
+        color = contentColor.copy(alpha = KEY_HINT_BACKGROUND_ALPHA),
+        contentColor = contentColor,
+        modifier = modifier,
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier.padding(horizontal = PosSpacing.xs + PosSpacing.xxs, vertical = PosSpacing.xxs),
+        )
+    }
+}
+
+private const val KEY_HINT_BACKGROUND_ALPHA = 0.18f
 
 @Composable
 fun PosDestructiveButton(
@@ -632,6 +665,7 @@ fun <T> PosChoiceRow(
     enabled: Boolean = true,
     height: Dp? = null,
     textStyle: TextStyle? = null,
+    shortcuts: List<String>? = null,
 ) {
     SingleChoiceSegmentedButtonRow(modifier = modifier) {
         options.forEachIndexed { index, (value, label) ->
@@ -642,7 +676,13 @@ fun <T> PosChoiceRow(
                 enabled = enabled,
                 modifier = if (height != null) Modifier.height(height) else Modifier,
             ) {
-                Text(label, style = textStyle ?: LocalTextStyle.current)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(label, style = textStyle ?: LocalTextStyle.current)
+                    shortcuts?.getOrNull(index)?.let { shortcut ->
+                        Spacer(Modifier.width(PosSpacing.xs))
+                        PosKeyHint(shortcut)
+                    }
+                }
             }
         }
     }

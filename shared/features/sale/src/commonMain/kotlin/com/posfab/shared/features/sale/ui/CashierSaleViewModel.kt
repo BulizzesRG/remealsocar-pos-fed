@@ -749,6 +749,27 @@ class CashierSaleViewModel(
         }
     }
 
+    fun onFunctionKey(key: SaleFunctionKey) {
+        val snapshot = _state.value
+        if (snapshot.confirm != null || snapshot.prompt != null || snapshot.abonoOverlayOpen) return
+        when (snapshot.phase) {
+            SalePhase.Selling -> when (key) {
+                SaleFunctionKey.F1 -> setChannel(snapshot.channel.other())
+                SaleFunctionKey.F2 -> startCharge()
+                SaleFunctionKey.F3 -> openAbono()
+                SaleFunctionKey.F4 -> openAccount()
+                SaleFunctionKey.F5 -> refreshDeliveries()
+            }
+            SalePhase.Charging -> SaleShortcuts.paymentTypeFor(key)
+                ?.takeIf { it in snapshot.paymentOptions }
+                ?.let(::selectPaymentType)
+            else -> Unit
+        }
+    }
+
+    private fun SaleChannel.other(): SaleChannel =
+        if (this == SaleChannel.TAKEAWAY) SaleChannel.ONSITE else SaleChannel.TAKEAWAY
+
     fun setChannel(channel: SaleChannel) {
         if (blockedByDelivery()) return
         val snapshot = _state.value

@@ -26,6 +26,7 @@ import com.posfab.shared.features.sale.ui.SaleConfirm
 import com.posfab.shared.features.sale.ui.SaleErrorText
 import com.posfab.shared.features.sale.ui.SalePhase
 import com.posfab.shared.features.sale.ui.SalePrompt
+import com.posfab.shared.features.sale.ui.SaleFunctionKey
 import com.posfab.shared.features.sale.ui.SaleStrings
 import com.posfab.shared.features.sale.ui.WeightMode
 import com.posfab.shared.features.sale.usecase.SaleUseCases
@@ -3342,6 +3343,71 @@ class CashierSaleViewModelTest {
         val state = vm.state.value
         assertTrue(state.abonoOverlayOpen)
         assertEquals(listOf(repo.torta.id), state.draft!!.lines.map { it.productId })
+    }
+
+    @Test
+    fun function_keys_drive_the_selling_actions() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.torta)
+        advanceUntilIdle()
+
+        vm.onFunctionKey(SaleFunctionKey.F1)
+        advanceUntilIdle()
+        assertEquals(SaleChannel.ONSITE, vm.state.value.channel)
+
+        vm.onFunctionKey(SaleFunctionKey.F4)
+        advanceUntilIdle()
+        assertEquals(2, vm.state.value.saleAccounts.size)
+        assertTrue(vm.state.value.draft!!.lines.isEmpty())
+
+        vm.onFunctionKey(SaleFunctionKey.F3)
+        assertTrue(vm.state.value.abonoOverlayOpen)
+        vm.onFunctionKey(SaleFunctionKey.F2)
+        assertEquals(SalePhase.Selling, vm.state.value.phase)
+        vm.closeAbono()
+
+        vm.selectAccount(vm.state.value.saleAccounts.first().id)
+        vm.onFunctionKey(SaleFunctionKey.F2)
+        assertEquals(SalePhase.Charging, vm.state.value.phase)
+        assertEquals(SalePaymentType.CASH, vm.state.value.paymentType)
+    }
+
+    @Test
+    fun function_keys_pick_the_payment_type_in_the_charge_window() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.torta)
+        advanceUntilIdle()
+        vm.startCharge()
+
+        vm.onFunctionKey(SaleFunctionKey.F4)
+        assertEquals(SalePaymentType.CREDIT, vm.state.value.paymentType)
+        vm.onFunctionKey(SaleFunctionKey.F3)
+        assertEquals(SalePaymentType.CARD, vm.state.value.paymentType)
+        vm.onFunctionKey(SaleFunctionKey.F2)
+        assertEquals(SalePaymentType.TRANSFER, vm.state.value.paymentType)
+        vm.onFunctionKey(SaleFunctionKey.F5)
+        assertEquals(SalePaymentType.TRANSFER, vm.state.value.paymentType)
+        vm.onFunctionKey(SaleFunctionKey.F1)
+        assertEquals(SalePaymentType.CASH, vm.state.value.paymentType)
+        assertEquals(SalePhase.Charging, vm.state.value.phase)
+    }
+
+    @Test
+    fun function_keys_are_ignored_while_a_prompt_is_open() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.jamon)
+        assertNotNull(vm.state.value.prompt)
+
+        vm.onFunctionKey(SaleFunctionKey.F2)
+        vm.onFunctionKey(SaleFunctionKey.F3)
+        advanceUntilIdle()
+
+        assertEquals(SalePhase.Selling, vm.state.value.phase)
+        assertFalse(vm.state.value.abonoOverlayOpen)
+        assertNotNull(vm.state.value.prompt)
     }
 
     @Test

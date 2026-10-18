@@ -110,6 +110,7 @@ import com.posfab.shared.ui.components.PosDestructiveButton
 import com.posfab.shared.ui.components.PosErrorBanner
 import com.posfab.shared.ui.components.PosLazyColumn
 import com.posfab.shared.ui.components.PosMoneyText
+import com.posfab.shared.ui.components.PosKeyHint
 import com.posfab.shared.ui.components.PosNoticeRow
 import com.posfab.shared.ui.components.PosPrimaryButton
 import com.posfab.shared.ui.components.PosScrollableColumn
@@ -242,6 +243,10 @@ private fun SellingView(state: CashierSaleState, viewModel: CashierSaleViewModel
         modifier = Modifier
             .fillMaxSize()
             .onPreviewKeyEvent { event ->
+                event.functionKey()?.let { key ->
+                    viewModel.onFunctionKey(key)
+                    return@onPreviewKeyEvent true
+                }
                 if (event.isEscapeUp()) {
                     if (state.prompt != null) {
                         viewModel.dismissPrompt()
@@ -329,17 +334,23 @@ private fun SellingView(state: CashierSaleState, viewModel: CashierSaleViewModel
                             )
                         }
                     } else {
-                        PosChoiceRow(
-                            options = listOf(
-                                SaleChannel.TAKEAWAY to SaleStrings.CHANNEL_TAKEAWAY,
-                                SaleChannel.ONSITE to SaleStrings.CHANNEL_ONSITE,
-                            ),
-                            selected = state.channel,
-                            onSelect = viewModel::setChannel,
-                            enabled = state.canSetChannel,
-                            height = 48.dp,
-                            modifier = Modifier.width(240.dp).focusProperties { canFocus = false },
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(PosSpacing.sm),
+                        ) {
+                            PosChoiceRow(
+                                options = listOf(
+                                    SaleChannel.TAKEAWAY to SaleStrings.CHANNEL_TAKEAWAY,
+                                    SaleChannel.ONSITE to SaleStrings.CHANNEL_ONSITE,
+                                ),
+                                selected = state.channel,
+                                onSelect = viewModel::setChannel,
+                                enabled = state.canSetChannel,
+                                height = 48.dp,
+                                modifier = Modifier.width(240.dp).focusProperties { canFocus = false },
+                            )
+                            PosKeyHint(SaleShortcuts.CHANNEL)
+                        }
                     }
                 }
                 PosNoticeRow(
@@ -450,6 +461,7 @@ private fun AccountStrip(
                     onClick = onNew,
                     enabled = enabled && canOpen,
                     icon = Icons.Filled.Add,
+                    shortcut = SaleShortcuts.NEW_ACCOUNT,
                     modifier = Modifier.focusProperties { canFocus = false },
                 )
             }
@@ -524,12 +536,15 @@ private fun ChipRow(
 
 @Composable
 private fun RefreshDeliveriesButton(enabled: Boolean, onClick: () -> Unit) {
-    IconButton(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = Modifier.size(PosLayout.touchTarget).focusProperties { canFocus = false },
-    ) {
-        Icon(Icons.Filled.Refresh, contentDescription = SaleStrings.REFRESH_DELIVERIES)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        IconButton(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = Modifier.size(PosLayout.touchTarget).focusProperties { canFocus = false },
+        ) {
+            Icon(Icons.Filled.Refresh, contentDescription = SaleStrings.REFRESH_DELIVERIES)
+        }
+        PosKeyHint(SaleShortcuts.REFRESH_DELIVERIES)
     }
 }
 
@@ -703,6 +718,7 @@ private fun CartPanel(state: CashierSaleState, viewModel: CashierSaleViewModel, 
                     onClick = viewModel::openAbono,
                     enabled = state.canOpenAbono,
                     icon = Icons.Filled.AccountBalanceWallet,
+                    shortcut = SaleShortcuts.ABONO,
                     modifier = Modifier.height(64.dp).focusProperties { canFocus = false },
                 )
             }
@@ -711,6 +727,7 @@ private fun CartPanel(state: CashierSaleState, viewModel: CashierSaleViewModel, 
                 onClick = viewModel::startCharge,
                 enabled = state.canCharge,
                 icon = Icons.Filled.Payments,
+                shortcut = SaleShortcuts.CHARGE,
                 modifier = Modifier.weight(1f).height(64.dp).focusProperties { canFocus = false },
             )
         }
@@ -1304,6 +1321,7 @@ private fun ChargeOverlay(
                 enabled = amountEnabled && !state.credit.isAbonoInFlight,
                 height = 56.dp,
                 textStyle = MaterialTheme.typography.titleSmall,
+                shortcuts = state.paymentOptions.map(SaleShortcuts::forPaymentType),
                 modifier = Modifier.fillMaxWidth().focusProperties { canFocus = false },
             )
         }
@@ -1568,6 +1586,18 @@ private fun KeyEvent.isEnterUp(): Boolean =
     type == KeyEventType.KeyUp && (key == Key.Enter || key == Key.NumPadEnter)
 
 private fun KeyEvent.isEscapeUp(): Boolean = type == KeyEventType.KeyUp && key == Key.Escape
+
+private fun KeyEvent.functionKey(): SaleFunctionKey? {
+    if (type != KeyEventType.KeyDown) return null
+    return when (key) {
+        Key.F1 -> SaleFunctionKey.F1
+        Key.F2 -> SaleFunctionKey.F2
+        Key.F3 -> SaleFunctionKey.F3
+        Key.F4 -> SaleFunctionKey.F4
+        Key.F5 -> SaleFunctionKey.F5
+        else -> null
+    }
+}
 
 private const val DISABLED_ALPHA = 0.5f
 private const val ACTIVE_DELIVERY_ALPHA = 0.35f
