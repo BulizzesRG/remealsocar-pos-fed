@@ -4,7 +4,9 @@ import com.posfab.shared.auth.domain.UserSession
 import com.posfab.shared.config.PosConfig
 import com.posfab.shared.core.BaseViewModel
 import com.posfab.shared.core.diagnostics.AppBuildInfo
+import com.posfab.shared.core.diagnostics.CrashReporter
 import com.posfab.shared.core.diagnostics.NetworkHealthTracker
+import com.posfab.shared.core.diagnostics.SupportBundle
 import com.posfab.shared.core.logging.AppLogger
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -36,33 +38,48 @@ class DiagnosticsViewModel(
     init {
         scope.launch {
             NetworkHealthTracker.state.collect { network ->
-                _state.value = _state.value.copy(
-                    lastSyncAt = network.lastSuccessfulRequestAt,
-                    lastFailureAt = network.lastFailureAt,
-                    offline = network.isOffline,
-                )
+                _state.update {
+                    it.copy(
+                        lastSyncAt = network.lastSuccessfulRequestAt,
+                        lastFailureAt = network.lastFailureAt,
+                        offline = network.isOffline,
+                    )
+                }
+            }
+        }
+        scope.launch {
+            val previous = CrashReporter.recent(1).lastOrNull()?.at
+            if (previous != null) _state.update { if (it.lastCrashAt == null) it.copy(lastCrashAt = previous) else it }
+            CrashReporter.lastCrash.collect { record ->
+                if (record != null) _state.update { it.copy(lastCrashAt = record.at) }
             }
         }
     }
 
     fun buildSupportBundle(): String {
         val snapshot = _state.value
-        val logs = AppLogger.recentSupportEntries(limit = 200).joinToString("\n")
-        val bundle = buildString {
-            appendLine("version=${snapshot.appVersion}")
-            appendLine("build=${snapshot.appBuild}")
-            appendLine("env=${snapshot.environment}")
-            appendLine("api_base_url=${snapshot.apiBaseUrl}")
-            appendLine("terminal=${snapshot.terminal}")
-            appendLine("user=${snapshot.username}")
-            appendLine("roles=${snapshot.roles}")
-            appendLine("last_sync=${snapshot.lastSyncAt ?: "-"}")
-            appendLine("last_failure=${snapshot.lastFailureAt ?: "-"}")
-            appendLine("offline=${snapshot.offline}")
-            appendLine("--- recent_logs ---")
-            append(logs)
-        }
+        val bundle = SupportBundle.build(
+            header = listOf(
+                "version" to snapshot.appVersion,
+                "build" to snapshot.appBuild,
+                "env" to snapshot.environment,
+                "api_base_url" to snapshot.apiBaseUrl,
+                "terminal" to snapshot.terminal,
+                "user" to snapshot.username,
+                "roles" to snapshot.roles,
+                "last_sync" to (snapshot.lastSyncAt ?: "-"),
+                "last_failure" to (snapshot.lastFailureAt ?: "-"),
+                "offline" to snapshot.offline.toString(),
+            ),
+            logs = AppLogger.recentSupportEntries(limit = SUPPORT_LOG_LIMIT),
+            crashes = CrashReporter.recent(SUPPORT_CRASH_LIMIT),
+        )
         _state.update { it.copy(notice = DiagnosticsStrings.COPIED) }
         return bundle
+    }
+
+    private companion object {
+        const val SUPPORT_LOG_LIMIT = 200
+        const val SUPPORT_CRASH_LIMIT = 5
     }
 }

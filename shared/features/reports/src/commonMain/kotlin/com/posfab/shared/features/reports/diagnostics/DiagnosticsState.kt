@@ -11,5 +11,6 @@ data class DiagnosticsState(
     val lastSyncAt: String? = null,
     val lastFailureAt: String? = null,
     val offline: Boolean = false,
+    val lastCrashAt: String? = null,
     val notice: String? = null,
 )

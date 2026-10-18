@@ -19,6 +19,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import com.posfab.shared.core.model.terminalDisplayName
+import com.posfab.shared.features.reports.sales.SalesStrings
 import com.posfab.shared.ui.components.PosNoticeRow
 import com.posfab.shared.ui.components.PosPrimaryButton
 import com.posfab.shared.ui.components.PosSectionCard
@@ -57,6 +58,11 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
                 highlight = state.offline,
             )
             DiagnosticRow(DiagnosticsStrings.ROW_LAST_CONNECTION, lastConnectionLabel(state.lastSyncAt))
+            DiagnosticRow(
+                DiagnosticsStrings.ROW_LAST_ERROR,
+                lastErrorLabel(state.lastCrashAt),
+                highlight = state.lastCrashAt != null,
+            )
         }
 
         PosSectionCard(
@@ -107,3 +113,12 @@ internal fun lastConnectionLabel(iso: String?): String = iso?.let { raw ->
         "${local.hour}:${local.minute.toString().padStart(2, '0')}"
     }.getOrNull()
 } ?: DiagnosticsStrings.EMPTY_VALUE
+
+internal fun lastErrorLabel(iso: String?, timeZone: TimeZone = TimeZone.currentSystemDefault()): String =
+    iso?.let { raw ->
+        runCatching {
+            val local = Instant.parse(raw).toLocalDateTime(timeZone)
+            val month = SalesStrings.MONTHS[local.month.ordinal]
+            "${local.day} $month, ${local.hour}:${local.minute.toString().padStart(2, '0')}"
+        }.getOrNull()
+    } ?: DiagnosticsStrings.NO_ERRORS

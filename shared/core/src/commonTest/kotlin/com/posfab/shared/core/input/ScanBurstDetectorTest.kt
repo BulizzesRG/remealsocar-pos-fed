@@ -1,6 +1,5 @@
-package com.posfab.shared.features.sale
+package com.posfab.shared.core.input
 
-import com.posfab.shared.features.sale.ui.ScanBurstDetector
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull

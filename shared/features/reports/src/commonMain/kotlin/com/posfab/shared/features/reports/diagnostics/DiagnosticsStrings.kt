@@ -8,6 +8,8 @@ internal object DiagnosticsStrings {
     const val ROW_USER = "Usuario"
     const val ROW_CONNECTION = "Conexión"
     const val ROW_LAST_CONNECTION = "Última conexión"
+    const val ROW_LAST_ERROR = "Último error"
+    const val NO_ERRORS = "Ninguno"
     const val CONNECTED = "Conectado"
     const val DISCONNECTED = "Sin conexión"
     const val SUPPORT_CARD = "Soporte"

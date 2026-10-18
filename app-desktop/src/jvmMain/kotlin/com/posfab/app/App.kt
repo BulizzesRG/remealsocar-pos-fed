@@ -10,6 +10,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -18,6 +19,7 @@ import androidx.compose.ui.Modifier
 import com.posfab.shared.auth.usecase.LoginUseCase
 import com.posfab.shared.auth.usecase.LogoutUseCase
 import com.posfab.shared.core.device.DeviceStorage
+import com.posfab.shared.core.diagnostics.ScreenTracker
 import com.posfab.shared.features.catalog.common.CatalogUseCases
 import com.posfab.shared.features.catalog.ui.CatalogScreen
 import com.posfab.shared.features.catalog.ui.CatalogViewModel
@@ -60,6 +62,7 @@ fun PosApp(controller: AppStateController) {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             when (val screen = current) {
                 AppScreen.Loading -> {
+                    SideEffect { ScreenTracker.current = AppScreenNames.LOADING }
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
@@ -75,6 +78,7 @@ fun PosApp(controller: AppStateController) {
                     }
                 }
                 AppScreen.DeviceSetup -> {
+                    SideEffect { ScreenTracker.current = AppScreenNames.DEVICE_SETUP }
                     val koin = GlobalContext.get()
                     val setupViewModel = remember {
                         DeviceSetupViewModel(koin.get<DeviceApi>(), koin.get<DeviceStorage>())
@@ -87,6 +91,7 @@ fun PosApp(controller: AppStateController) {
                     DeviceSetupScreen(setupViewModel)
                 }
                 AppScreen.Login -> {
+                    SideEffect { ScreenTracker.current = AppScreenNames.LOGIN }
                     val koin = GlobalContext.get()
                     val device = controller.deviceRegistration.value
                         ?: error("Login screen reached before device registration")
@@ -154,4 +159,10 @@ fun PosApp(controller: AppStateController) {
             }
         }
     }
+}
+
+object AppScreenNames {
+    const val LOADING = "Carga"
+    const val DEVICE_SETUP = "Registro del equipo"
+    const val LOGIN = "Entrar"
 }

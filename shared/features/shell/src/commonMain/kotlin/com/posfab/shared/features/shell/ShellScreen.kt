@@ -29,6 +29,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -37,6 +38,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.posfab.shared.core.diagnostics.NetworkHealthTracker
+import com.posfab.shared.core.diagnostics.ScreenTracker
 import com.posfab.shared.core.model.terminalDisplayName
 import com.posfab.shared.ui.components.PosOfflineBanner
 import com.posfab.shared.ui.theme.PosSpacing
@@ -55,6 +57,7 @@ fun ShellScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val network by NetworkHealthTracker.state.collectAsState()
+    SideEffect { ScreenTracker.current = state.selectedRoute.title }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Surface(

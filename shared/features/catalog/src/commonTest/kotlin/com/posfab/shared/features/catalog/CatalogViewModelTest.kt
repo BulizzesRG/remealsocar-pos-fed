@@ -165,7 +165,16 @@ class CatalogViewModelTest {
         override suspend fun cashDiscountPct(): AppResult<Double> = AppResult.Success(cashDiscountPct)
     }
 
-    private fun newVm(repo: FakeRepo) = CatalogViewModel(CatalogUseCases(repo), dispatcher)
+    private var clock = 0L
+
+    private fun newVm(repo: FakeRepo) = CatalogViewModel(CatalogUseCases(repo), dispatcher, now = { clock })
+
+    private fun typeQuery(vm: CatalogViewModel, text: String, stepMs: Long) {
+        text.forEach { char ->
+            clock += stepMs
+            vm.onQueryChange(vm.state.value.query + char)
+        }
+    }
 
     @Test
     fun search_debounce_sends_query_and_active_filter() = runTest(dispatcher) {
@@ -191,6 +200,26 @@ class CatalogViewModelTest {
         advanceUntilIdle()
 
         vm.onQueryChange("7501055300000")
+        vm.onSearchSubmit()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(CatalogFormMode.EDITING, state.mode)
+        assertEquals("1", state.selected?.id)
+        assertEquals("", state.query)
+    }
+
+    @Test
+    fun scan_burst_after_leftover_filter_opens_the_product() = runTest(dispatcher) {
+        val repo = FakeRepo()
+        repo.products["1"] = detail("1", "Coca", barcode = "7501055300000")
+        val vm = newVm(repo)
+        advanceUntilIdle()
+
+        typeQuery(vm, "pan", HUMAN_MS)
+        clock += PAUSE_MS
+        typeQuery(vm, "7501055300000", SCANNER_MS)
+        clock += SCANNER_MS
         vm.onSearchSubmit()
         advanceUntilIdle()
 
@@ -1116,5 +1145,11 @@ class CatalogViewModelTest {
         assertEquals(listOf("1"), repo.priceHistoryCalls)
         assertTrue(vm.state.value.showPriceHistory)
         assertNotNull(vm.state.value.priceHistory)
+    }
+
+    private companion object {
+        const val HUMAN_MS = 120L
+        const val SCANNER_MS = 5L
+        const val PAUSE_MS = 1_000L
     }
 }

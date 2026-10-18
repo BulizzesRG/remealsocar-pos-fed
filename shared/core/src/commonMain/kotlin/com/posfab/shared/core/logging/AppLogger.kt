@@ -38,11 +38,7 @@ object AppLogger {
     }
 
     private fun addSupportEntry(level: String, message: String) {
-        val sanitized = message
-            .replace(Regex("Bearer\\s+[A-Za-z0-9._-]+"), "Bearer <redacted>")
-            .replace(Regex("(?i)password=[^\\s]+"), "password=<redacted>")
-            .replace(Regex("(?i)refreshToken=[^\\s]+"), "refreshToken=<redacted>")
-            .replace(Regex("(?i)accessToken=[^\\s]+"), "accessToken=<redacted>")
+        val sanitized = sanitizeForSupport(message)
         synchronized(supportLogBuffer) {
             supportLogBuffer += "[$level] $sanitized"
             if (supportLogBuffer.size > MAX_BUFFER_SIZE) {
@@ -51,3 +47,11 @@ object AppLogger {
         }
     }
 }
+
+private val BEARER_PATTERN = Regex("Bearer\\s+[A-Za-z0-9._-]+")
+private val SECRET_VALUE_PATTERN =
+    Regex("(?i)(\"?(password|refresh_?token|access_?token|token|secret)\"?\\s*[:=]\\s*\"?)[^\"\\s,}&]+")
+
+fun sanitizeForSupport(text: String): String = text
+    .replace(BEARER_PATTERN, "Bearer <redacted>")
+    .replace(SECRET_VALUE_PATTERN, "\$1<redacted>")

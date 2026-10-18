@@ -1,6 +1,6 @@
-package com.posfab.shared.features.sale.ui
+package com.posfab.shared.core.input
 
-internal class ScanBurstDetector(
+class ScanBurstDetector(
     private val gapMs: Long = 60,
     private val enterGapMs: Long = 150,
     private val minLength: Int = 6,

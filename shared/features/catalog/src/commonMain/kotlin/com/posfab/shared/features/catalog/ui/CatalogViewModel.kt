@@ -1,6 +1,7 @@
 package com.posfab.shared.features.catalog.ui
 
 import com.posfab.shared.core.BaseViewModel
+import com.posfab.shared.core.input.ScanBurstDetector
 import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
 import com.posfab.shared.features.catalog.common.CatalogErrorText
@@ -22,13 +23,17 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlin.time.Clock
 
 class CatalogViewModel(
     private val useCases: CatalogUseCases,
     dispatcher: CoroutineDispatcher = Dispatchers.Default,
+    private val now: () -> Long = { Clock.System.now().toEpochMilliseconds() },
 ) : BaseViewModel(dispatcher) {
     private val _state = MutableStateFlow(CatalogState())
     val state: StateFlow<CatalogState> = _state.asStateFlow()
+
+    private val searchScans = ScanBurstDetector()
 
     private val repository get() = useCases.repository
     private var listDebounceJob: Job? = null
@@ -44,6 +49,7 @@ class CatalogViewModel(
     }
 
     fun onQueryChange(value: String) {
+        searchScans.onChange(_state.value.query, value, now())
         _state.update { it.copy(query = value) }
         listDebounceJob?.cancel()
         listDebounceJob = scope.launch {
@@ -101,7 +107,9 @@ class CatalogViewModel(
     }
 
     fun onSearchSubmit() {
-        val query = _state.value.query.trim()
+        val scanned = searchScans.scanOnConfirm(now())?.code
+        val typed = _state.value.query.trim()
+        val query = scanned ?: typed
         if (!query.isScanCode()) {
             refreshList()
             return

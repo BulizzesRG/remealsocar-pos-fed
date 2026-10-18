@@ -2,6 +2,7 @@ package com.posfab.shared.features.sale.ui
 
 import com.posfab.shared.core.BaseViewModel
 import com.posfab.shared.core.input.PhoneInput
+import com.posfab.shared.core.input.ScanBurstDetector
 import com.posfab.shared.core.logging.AppLogger
 import com.posfab.shared.core.result.AppError
 import com.posfab.shared.core.result.AppResult
@@ -52,6 +53,7 @@ class CashierSaleViewModel(
     private var loadJob: Job? = null
     private var searchJob: Job? = null
     private var customerSearchJob: Job? = null
+    private val searchScans = ScanBurstDetector()
     private val promptScans = ScanBurstDetector()
     private val paidScans = ScanBurstDetector()
 
@@ -154,6 +156,7 @@ class CashierSaleViewModel(
     }
 
     fun onQueryChange(value: String) {
+        searchScans.onChange(_state.value.query, value, now())
         _state.update { it.copy(query = value, errorMessage = null) }
         searchJob?.cancel()
         val query = value.trim()
@@ -168,17 +171,19 @@ class CashierSaleViewModel(
     }
 
     fun onSubmit() {
+        val scanned = searchScans.scanOnConfirm(now())?.code
         val query = _state.value.query.trim()
         if (query.isEmpty()) return
         searchJob?.cancel()
-        if (query.isBarcode()) {
+        val code = scanned ?: query.takeIf { it.isBarcode() }
+        if (code != null) {
             if (blockedByDelivery()) {
                 _state.update { it.copy(query = "", searchResults = emptyList()) }
                 return
             }
             _state.update { it.copy(query = "", searchResults = emptyList(), errorMessage = null, notice = null) }
             val scannedOn = scannedAccount()
-            scope.launch { lookupBarcode(query, scannedOn) }
+            scope.launch { lookupBarcode(code, scannedOn) }
         } else {
             searchJob = scope.launch { search(query) }
         }
@@ -191,6 +196,7 @@ class CashierSaleViewModel(
             _state.update { it.copy(errorMessage = SaleStrings.NO_PRICE) }
             return
         }
+        clearSearch()
         if (product.priceType != SalePriceType.PIECE) {
             promptForProduct(product)
             return
@@ -1113,6 +1119,12 @@ class CashierSaleViewModel(
                 errorMessage = SaleErrorText.from(error),
             )
         }
+    }
+
+    private fun clearSearch() {
+        searchJob?.cancel()
+        searchScans.reset()
+        _state.update { it.copy(query = "", searchResults = emptyList()) }
     }
 
     private suspend fun search(query: String) {

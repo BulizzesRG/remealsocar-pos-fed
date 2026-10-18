@@ -73,6 +73,13 @@ class CashierSaleViewModelTest {
         }
     }
 
+    private fun typeQuery(vm: CashierSaleViewModel, text: String, stepMs: Long) {
+        text.forEach { char ->
+            clock += stepMs
+            vm.onQueryChange(vm.state.value.query + char)
+        }
+    }
+
     @Test
     fun scan_burst_in_the_weight_prompt_closes_it_and_scans_the_code() = runTest(dispatcher) {
         val repo = FakeSaleRepository()
@@ -321,6 +328,53 @@ class CashierSaleViewModelTest {
         vm.addProduct(vm.state.value.searchResults.first())
         advanceUntilIdle()
         assertEquals("Cafe de olla", vm.state.value.draft!!.lines.single().productName)
+    }
+
+    @Test
+    fun adding_a_product_clears_the_query_and_the_results() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+
+        vm.onQueryChange("caf")
+        vm.onSubmit()
+        runCurrent()
+        vm.addProduct(vm.state.value.searchResults.first())
+        advanceUntilIdle()
+
+        assertEquals("", vm.state.value.query)
+        assertTrue(vm.state.value.searchResults.isEmpty())
+        assertEquals("Cafe de olla", vm.state.value.draft!!.lines.single().productName)
+    }
+
+    @Test
+    fun scan_burst_after_leftover_text_looks_up_the_code_and_adds() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+
+        typeQuery(vm, "coca", HUMAN_MS)
+        clock += PAUSE_MS
+        typeQuery(vm, repo.cigarro.barcode!!, SCANNER_MS)
+        clock += SCANNER_MS
+        vm.onSubmit()
+        advanceUntilIdle()
+
+        assertEquals("", vm.state.value.query)
+        assertEquals(0, repo.searchCalls)
+        assertEquals(repo.cigarro.name, vm.state.value.draft!!.lines.single().productName)
+    }
+
+    @Test
+    fun digits_typed_slowly_after_text_search_by_name() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+
+        typeQuery(vm, "coca", HUMAN_MS)
+        typeQuery(vm, repo.cigarro.barcode!!, HUMAN_MS)
+        vm.onSubmit()
+        advanceUntilIdle()
+
+        assertEquals(1, repo.searchCalls)
+        assertTrue(vm.state.value.draft!!.lines.isEmpty())
     }
 
     @Test
