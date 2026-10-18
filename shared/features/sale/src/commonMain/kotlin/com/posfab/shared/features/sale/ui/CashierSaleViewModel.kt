@@ -429,6 +429,14 @@ class CashierSaleViewModel(
 
     fun startCharge() {
         paidScans.reset()
+        if (_state.value.isBusy) {
+            enqueue { openCharge() }
+            return
+        }
+        openCharge()
+    }
+
+    private fun openCharge() {
         _state.update {
             if (it.canCharge) {
                 val paysWith = it.draft?.takeIf { draft -> draft.isDelivery }?.paysWith
@@ -687,6 +695,14 @@ class CashierSaleViewModel(
     fun openAbono() {
         if (blockedByDelivery()) return
         customerSearchJob?.cancel()
+        if (_state.value.isBusy) {
+            enqueue { showAbono() }
+            return
+        }
+        showAbono()
+    }
+
+    private fun showAbono() {
         _state.update {
             if (it.canOpenAbono) {
                 it.copy(abonoOverlayOpen = true, credit = CreditState(), errorMessage = null, notice = null)

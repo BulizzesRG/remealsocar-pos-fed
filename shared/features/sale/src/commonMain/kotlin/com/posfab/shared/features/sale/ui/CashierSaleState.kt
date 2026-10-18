@@ -134,13 +134,13 @@ data class CashierSaleState(
     private val paidCoversAmountDue: Boolean
         get() = paidAmount?.let { roundMoney(it) >= roundMoney(amountDue) } == true
     val canCharge: Boolean
-        get() = phase == SalePhase.Selling && draft?.lines?.isNotEmpty() == true && listTotal > 0 && !isBusy && prompt == null &&
+        get() = phase == SalePhase.Selling && draft?.lines?.isNotEmpty() == true && listTotal > 0 && prompt == null &&
             !abonoOverlayOpen
     val canSetChannel: Boolean
-        get() = phase == SalePhase.Selling && !isDeliveryAccount && !isBusy && !isCheckoutInFlight && confirm == null && prompt == null &&
+        get() = phase == SalePhase.Selling && !isDeliveryAccount && !isCheckoutInFlight && confirm == null && prompt == null &&
             !abonoOverlayOpen
     val canOpenAbono: Boolean
-        get() = phase == SalePhase.Selling && !isDeliveryAccount && !isBusy && prompt == null && confirm == null && !isCheckoutInFlight &&
+        get() = phase == SalePhase.Selling && !isDeliveryAccount && prompt == null && confirm == null && !isCheckoutInFlight &&
             !abonoOverlayOpen
     val selectedLine: SaleLine? get() = selectedLineId?.let { id -> draft?.lines?.firstOrNull { it.id == id } }
     val canOpenAccount: Boolean

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -340,7 +341,11 @@ private fun SellingView(state: CashierSaleState, viewModel: CashierSaleViewModel
                         )
                     }
                 }
-                PosNoticeRow(notice = state.notice, errorMessage = null)
+                PosNoticeRow(
+                    notice = state.notice,
+                    errorMessage = null,
+                    modifier = Modifier.defaultMinSize(minHeight = NOTICE_MIN_HEIGHT),
+                )
                 if (state.phase != SalePhase.Charging && state.prompt == null && !state.abonoOverlayOpen) {
                     state.errorMessage?.let { PosErrorBanner(error = it) }
                 }
@@ -685,7 +690,7 @@ private fun CartPanel(state: CashierSaleState, viewModel: CashierSaleViewModel, 
             if (footerLabel != null) {
                 TextButton(
                     onClick = viewModel::requestClear,
-                    enabled = !state.isBusy && !state.abonoOverlayOpen,
+                    enabled = !state.abonoOverlayOpen,
                     modifier = Modifier.focusProperties { canFocus = false },
                 ) {
                     Text(footerLabel)
@@ -1267,6 +1272,7 @@ private fun promptPreview(state: CashierSaleState, mode: WeightMode?, price: Dou
 
 private const val PLACEHOLDER_ALPHA = 0.6f
 private val MODAL_VERTICAL_MARGIN = 32.dp
+private val NOTICE_MIN_HEIGHT = 24.dp
 
 @Composable
 private fun ChargeOverlay(

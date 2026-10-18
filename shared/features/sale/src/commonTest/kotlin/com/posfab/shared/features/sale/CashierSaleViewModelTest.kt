@@ -3283,6 +3283,68 @@ class CashierSaleViewModelTest {
     }
 
     @Test
+    fun controls_stay_enabled_while_a_line_is_still_being_added() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.torta)
+        advanceUntilIdle()
+        repo.addLineDelayMs = 500
+
+        vm.addProduct(repo.cigarro)
+        advanceTimeBy(100)
+        runCurrent()
+
+        val state = vm.state.value
+        assertTrue(state.isBusy)
+        assertTrue(state.canCharge)
+        assertTrue(state.canSetChannel)
+        assertTrue(state.canOpenAbono)
+    }
+
+    @Test
+    fun charge_requested_during_a_slow_add_opens_once_the_cart_is_complete() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.torta)
+        advanceUntilIdle()
+        repo.addLineDelayMs = 500
+
+        vm.addProduct(repo.cigarro)
+        vm.startCharge()
+        advanceTimeBy(100)
+        runCurrent()
+        assertEquals(SalePhase.Selling, vm.state.value.phase)
+
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SalePhase.Charging, state.phase)
+        assertEquals(SalePaymentType.CASH, state.paymentType)
+        assertEquals(listOf(repo.torta.id, repo.cigarro.id), state.draft!!.lines.map { it.productId })
+        assertEquals(repo.torta.listPrice!! + repo.cigarro.listPrice!!, state.listTotal, 0.001)
+        assertEquals(0, state.pendingMutations)
+    }
+
+    @Test
+    fun abono_requested_during_a_slow_add_opens_once_the_cart_is_complete() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        repo.addLineDelayMs = 500
+
+        vm.addProduct(repo.torta)
+        vm.openAbono()
+        advanceTimeBy(100)
+        runCurrent()
+        assertFalse(vm.state.value.abonoOverlayOpen)
+
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertTrue(state.abonoOverlayOpen)
+        assertEquals(listOf(repo.torta.id), state.draft!!.lines.map { it.productId })
+    }
+
+    @Test
     fun customer_card_is_dropped_when_the_cashier_switches_account_during_the_lookup() = runTest(dispatcher) {
         val repo = FakeSaleRepository(openDraftsSeed = listOf(1L, 2L))
         val vm = start(repo)
