@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import com.posfab.shared.core.diagnostics.NetworkHealthTracker
 import com.posfab.shared.core.diagnostics.ScreenTracker
 import com.posfab.shared.core.model.terminalDisplayName
+import com.posfab.shared.ui.components.PosConfirmDialog
 import com.posfab.shared.ui.components.PosOfflineBanner
 import com.posfab.shared.ui.theme.PosSpacing
 
@@ -59,6 +60,17 @@ fun ShellScreen(
     val network by NetworkHealthTracker.state.collectAsState()
     SideEffect { ScreenTracker.current = state.selectedRoute.title }
 
+    if (state.confirmLogout) {
+        PosConfirmDialog(
+            title = ShellStrings.LOGOUT_CONFIRM_TITLE,
+            message = ShellStrings.LOGOUT_CONFIRM_MESSAGE,
+            confirmLabel = ShellStrings.LOGOUT,
+            cancelLabel = ShellStrings.LOGOUT_CONFIRM_STAY,
+            onConfirm = { viewModel.logout(onLoggedOut) },
+            onDismiss = viewModel::dismissLogout,
+        )
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         Surface(
             color = MaterialTheme.colorScheme.surface,
@@ -70,7 +82,7 @@ fun ShellScreen(
                     terminalName = terminalDisplayName(state.session.terminalCode),
                     firstName = firstNameOf(state.session.user.username),
                     onBackHome = { viewModel.select(ShellRoute.HOME) },
-                    onLogout = { viewModel.logout(onLoggedOut) },
+                    onLogout = viewModel::requestLogout,
                 )
                 if (network.isOffline) {
                     PosOfflineBanner(lastFailureAt = network.lastFailureAt?.toString())

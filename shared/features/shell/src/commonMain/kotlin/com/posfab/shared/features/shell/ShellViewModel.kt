@@ -23,6 +23,7 @@ data class ShellState(
     val selectedRoute: ShellRoute,
     val modules: List<ShellRoute>,
     val cashStatus: HomeCashStatus,
+    val confirmLogout: Boolean = false,
 )
 
 class ShellViewModel(
@@ -78,7 +79,16 @@ class ShellViewModel(
             ShellRoute.HOME
         }
 
+    fun requestLogout() {
+        _state.update { it.copy(confirmLogout = true) }
+    }
+
+    fun dismissLogout() {
+        _state.update { it.copy(confirmLogout = false) }
+    }
+
     fun logout(onDone: () -> Unit) {
+        _state.update { it.copy(confirmLogout = false) }
         scope.launch {
             logoutUseCase()
             onDone()

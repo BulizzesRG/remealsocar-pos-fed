@@ -19,6 +19,7 @@ import androidx.compose.ui.window.LocalWindowExceptionHandlerFactory
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowExceptionHandler
 import androidx.compose.ui.window.WindowExceptionHandlerFactory
+import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.posfab.shared.config.PosConfig
@@ -57,7 +58,9 @@ fun main() {
     application {
         var crash by remember { mutableStateOf<CrashRecord?>(null) }
         var generation by remember { mutableStateOf(0) }
-        val windowState = rememberWindowState()
+        val windowState = rememberWindowState(
+            placement = if (config.fullscreen) WindowPlacement.Fullscreen else WindowPlacement.Maximized,
+        )
         val exit = ::exitApplication
         val factory = remember {
             WindowExceptionHandlerFactory { _ ->

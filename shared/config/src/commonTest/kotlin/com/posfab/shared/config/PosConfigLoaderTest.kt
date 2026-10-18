@@ -19,6 +19,13 @@ class PosConfigLoaderTest {
         assertEquals("http://localhost:9090", config.apiBaseUrl)
         assertEquals(LogLevel.DEBUG, config.logLevel)
         assertTrue(config.enableVerboseLogs)
+        assertEquals(false, config.fullscreen)
+    }
+
+    @Test
+    fun fullscreen_is_opt_in() {
+        assertTrue(PosConfigLoader.fromMap(mapOf("POS_FULLSCREEN" to "true")).fullscreen)
+        assertEquals(false, PosConfigLoader.fromMap(mapOf("POS_FULLSCREEN" to "yes")).fullscreen)
     }
 
     @Test

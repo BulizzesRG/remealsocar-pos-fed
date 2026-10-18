@@ -10,6 +10,7 @@ data class PosConfig(
     val logLevel: LogLevel,
     val requestTimeoutMs: Long,
     val enableVerboseLogs: Boolean,
+    val fullscreen: Boolean = false,
 )
 
 object PosConfigLoader {
@@ -34,6 +35,7 @@ object PosConfigLoader {
             logLevel = logLevel,
             requestTimeoutMs = source["POS_REQUEST_TIMEOUT_MS"]?.toLongOrNull() ?: 15_000L,
             enableVerboseLogs = source["POS_ENABLE_VERBOSE_LOGS"]?.toBooleanStrictOrNull() ?: (env == PosEnv.DEV),
+            fullscreen = source["POS_FULLSCREEN"]?.trim()?.toBooleanStrictOrNull() ?: false,
         )
     }
 }

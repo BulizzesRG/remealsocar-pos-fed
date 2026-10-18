@@ -53,6 +53,26 @@ class ShellViewModelTest {
     }
 
     @Test
+    fun logout_asks_for_confirmation_first() = runTest(dispatcher) {
+        val repo = FakeCashRepository(AppResult.Success(null))
+        val vm = makeViewModel(repo, cashierPermissions)
+        var loggedOut = 0
+
+        vm.requestLogout()
+        assertTrue(vm.state.value.confirmLogout)
+        vm.dismissLogout()
+        advanceUntilIdle()
+        assertEquals(false, vm.state.value.confirmLogout)
+        assertEquals(0, loggedOut)
+
+        vm.requestLogout()
+        vm.logout { loggedOut += 1 }
+        advanceUntilIdle()
+        assertEquals(false, vm.state.value.confirmLogout)
+        assertEquals(1, loggedOut)
+    }
+
+    @Test
     fun no_session_maps_to_closed() = runTest(dispatcher) {
         val repo = FakeCashRepository(AppResult.Success(null))
         val vm = makeViewModel(repo, cashierPermissions)
