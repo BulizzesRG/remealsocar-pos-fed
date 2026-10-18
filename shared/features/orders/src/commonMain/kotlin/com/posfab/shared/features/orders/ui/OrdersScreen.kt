@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -21,9 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -83,6 +82,7 @@ import com.posfab.shared.ui.components.PosConfirmDialog
 import com.posfab.shared.ui.components.PosDestructiveButton
 import com.posfab.shared.ui.components.PosErrorBanner
 import com.posfab.shared.ui.components.PosPrimaryButton
+import com.posfab.shared.ui.components.PosScrollableColumn
 import com.posfab.shared.ui.components.PosSecondaryButton
 import com.posfab.shared.ui.components.PosSectionCard
 import com.posfab.shared.ui.components.PosTextField
@@ -195,8 +195,8 @@ private fun ListView(state: OrdersState, viewModel: OrdersViewModel) {
                 )
             }
         }
-        Column(
-            modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
+        PosScrollableColumn(
+            modifier = Modifier.weight(1f).fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(PosSpacing.md),
         ) {
             Text(
@@ -496,8 +496,8 @@ private fun EditorView(state: OrdersState, form: OrderForm, viewModel: OrdersVie
                         modifier = Modifier.fillMaxSize(),
                         horizontalArrangement = Arrangement.spacedBy(PosSpacing.lg),
                     ) {
-                        Column(
-                            modifier = Modifier.weight(LEFT_WEIGHT).fillMaxHeight().verticalScroll(rememberScrollState()),
+                        PosScrollableColumn(
+                            modifier = Modifier.weight(LEFT_WEIGHT).fillMaxHeight(),
                             verticalArrangement = Arrangement.spacedBy(PosSpacing.md),
                         ) {
                             CustomerSection(form, enabled, viewModel, focus)
@@ -507,19 +507,18 @@ private fun EditorView(state: OrdersState, form: OrderForm, viewModel: OrdersVie
                             verticalArrangement = Arrangement.spacedBy(PosSpacing.md),
                         ) {
                             ProductSearchField(form, enabled, viewModel, focus)
-                            Column(
-                                modifier = Modifier.weight(PRODUCTS_WEIGHT).fillMaxWidth().verticalScroll(rememberScrollState()),
+                            PosScrollableColumn(
+                                modifier = Modifier.weight(PRODUCTS_WEIGHT).fillMaxWidth(),
                                 verticalArrangement = Arrangement.spacedBy(PosSpacing.sm),
                             ) {
                                 ProductPanel(state, form, enabled, viewModel)
                             }
                             HorizontalDivider()
-                            Column(
+                            PosScrollableColumn(
                                 modifier = Modifier
                                     .weight(1f)
                                     .heightIn(min = LINES_MIN_HEIGHT)
-                                    .fillMaxWidth()
-                                    .verticalScroll(rememberScrollState()),
+                                    .fillMaxWidth(),
                                 verticalArrangement = Arrangement.spacedBy(PosSpacing.sm),
                             ) {
                                 LinesSection(form, enabled, viewModel)
@@ -527,8 +526,8 @@ private fun EditorView(state: OrdersState, form: OrderForm, viewModel: OrdersVie
                         }
                     }
                 } else {
-                    Column(
-                        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                    PosScrollableColumn(
+                        modifier = Modifier.fillMaxSize(),
                         verticalArrangement = Arrangement.spacedBy(PosSpacing.md),
                     ) {
                         CustomerSection(form, enabled, viewModel, focus)
@@ -1282,8 +1281,8 @@ private fun ModalScrim(width: Dp = OVERLAY_WIDTH, content: @Composable ColumnSco
                 .width(if (width < maxWidth - MODAL_MARGIN) width else maxWidth - MODAL_MARGIN)
                 .heightIn(max = maxHeight - MODAL_MARGIN),
         ) {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()).padding(PosSpacing.xl),
+            PosScrollableColumn(
+                contentPadding = PaddingValues(PosSpacing.xl),
                 verticalArrangement = Arrangement.spacedBy(PosSpacing.lg),
                 content = content,
             )

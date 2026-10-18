@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
@@ -23,11 +24,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Add
@@ -109,9 +108,11 @@ import com.posfab.shared.ui.components.PosChoiceRow
 import com.posfab.shared.ui.components.PosConfirmDialog
 import com.posfab.shared.ui.components.PosDestructiveButton
 import com.posfab.shared.ui.components.PosErrorBanner
+import com.posfab.shared.ui.components.PosLazyColumn
 import com.posfab.shared.ui.components.PosMoneyText
 import com.posfab.shared.ui.components.PosNoticeRow
 import com.posfab.shared.ui.components.PosPrimaryButton
+import com.posfab.shared.ui.components.PosScrollableColumn
 import com.posfab.shared.ui.components.PosSecondaryButton
 import com.posfab.shared.ui.components.PosTextField
 import com.posfab.shared.ui.theme.PosLayout
@@ -628,7 +629,7 @@ private fun CartPanel(state: CashierSaleState, viewModel: CashierSaleViewModel, 
                 )
             }
         } else {
-            LazyColumn(
+            PosLazyColumn(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(PosSpacing.xs),
             ) {
@@ -997,8 +998,8 @@ private fun ProductPanel(
                 modifier = Modifier.fillMaxWidth().height(48.dp).focusProperties { canFocus = false },
             )
         }
-        Column(
-            modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
+        PosScrollableColumn(
+            modifier = Modifier.weight(1f).fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(PosSpacing.sm),
         ) {
             state.searchResults.forEach { product ->
@@ -1117,8 +1118,8 @@ private fun ModalScrim(width: Dp = 520.dp, content: @Composable () -> Unit) {
             tonalElevation = 6.dp,
             modifier = Modifier.width(width).heightIn(max = maxHeight - MODAL_VERTICAL_MARGIN),
         ) {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()).padding(PosSpacing.xl),
+            PosScrollableColumn(
+                contentPadding = PaddingValues(PosSpacing.xl),
                 verticalArrangement = Arrangement.spacedBy(PosSpacing.lg),
             ) {
                 content()

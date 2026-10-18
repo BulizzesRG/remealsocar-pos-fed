@@ -2,11 +2,11 @@ package com.posfab.shared.features.reports.sales
 
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -62,6 +61,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.posfab.shared.ui.components.PosErrorBanner
+import com.posfab.shared.ui.components.PosLazyColumn
 import com.posfab.shared.ui.components.PosSecondaryButton
 import com.posfab.shared.ui.components.PosSectionCard
 import com.posfab.shared.ui.components.PosTextField
@@ -150,7 +150,7 @@ private fun ColumnScope.DayView(
         ) {
             DayHeader(state, wideHeader, viewModel, onDateFocus, onGo)
             state.dayError?.let { PosErrorBanner(it) }
-            LazyColumn(
+            PosLazyColumn(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(PosSpacing.xs),
             ) {
@@ -498,7 +498,7 @@ private fun ColumnScope.DetailView(
     HorizontalDivider()
     LineHeader()
 
-    LazyColumn(
+    PosLazyColumn(
         modifier = Modifier.weight(1f).fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(PosSpacing.xs),
     ) {

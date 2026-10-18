@@ -11,9 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -53,6 +51,7 @@ import com.posfab.shared.features.credit.domain.LoadedCustomer
 import com.posfab.shared.ui.components.PosErrorBanner
 import com.posfab.shared.ui.components.PosNoticeRow
 import com.posfab.shared.ui.components.PosPrimaryButton
+import com.posfab.shared.ui.components.PosScrollableColumn
 import com.posfab.shared.ui.components.PosSecondaryButton
 import com.posfab.shared.ui.components.PosSectionCard
 import com.posfab.shared.ui.components.PosTextField
@@ -109,22 +108,22 @@ internal fun LibretaView(libreta: LibretaState, viewModel: CreditViewModel) {
                 modifier = Modifier.fillMaxSize(),
                 horizontalArrangement = Arrangement.spacedBy(PosSpacing.xl),
             ) {
-                Column(
-                    modifier = Modifier.weight(FORM_WEIGHT).fillMaxHeight().verticalScroll(rememberScrollState()),
+                PosScrollableColumn(
+                    modifier = Modifier.weight(FORM_WEIGHT).fillMaxHeight(),
                     verticalArrangement = Arrangement.spacedBy(PosSpacing.lg),
                 ) {
                     LibretaForm(libreta, viewModel, nameFocus, amountFocus, trackFocus)
                 }
-                Column(
-                    modifier = Modifier.weight(LOADED_WEIGHT).fillMaxHeight().verticalScroll(rememberScrollState()),
+                PosScrollableColumn(
+                    modifier = Modifier.weight(LOADED_WEIGHT).fillMaxHeight(),
                     verticalArrangement = Arrangement.spacedBy(PosSpacing.xs),
                 ) {
                     LoadedToday(libreta, viewModel)
                 }
             }
         } else {
-            Column(
-                modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+            PosScrollableColumn(
+                modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(PosSpacing.lg),
             ) {
                 LibretaForm(libreta, viewModel, nameFocus, amountFocus, trackFocus)

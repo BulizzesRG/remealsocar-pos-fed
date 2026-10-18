@@ -5,8 +5,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.MaterialTheme
@@ -22,21 +20,20 @@ import com.posfab.shared.core.model.terminalDisplayName
 import com.posfab.shared.features.reports.sales.SalesStrings
 import com.posfab.shared.ui.components.PosNoticeRow
 import com.posfab.shared.ui.components.PosPrimaryButton
+import com.posfab.shared.ui.components.PosScrollableColumn
 import com.posfab.shared.ui.components.PosSectionCard
 import com.posfab.shared.ui.theme.PosSpacing
+import kotlin.time.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
-import kotlin.time.Instant
 
 @Composable
 fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
     val state by viewModel.state.collectAsState()
     val clipboardManager = LocalClipboardManager.current
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState()),
+    PosScrollableColumn(
+        modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(PosSpacing.md),
     ) {
         Text(

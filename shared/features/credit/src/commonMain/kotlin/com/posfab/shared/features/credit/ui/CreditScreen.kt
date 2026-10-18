@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -51,6 +50,7 @@ import com.posfab.shared.features.credit.domain.Debtor
 import com.posfab.shared.features.credit.domain.LedgerEntry
 import com.posfab.shared.features.credit.domain.LedgerEntryType
 import com.posfab.shared.ui.components.PosErrorBanner
+import com.posfab.shared.ui.components.PosLazyColumn
 import com.posfab.shared.ui.components.PosNoticeRow
 import com.posfab.shared.ui.components.PosSecondaryButton
 import com.posfab.shared.ui.components.PosTextField
@@ -152,7 +152,7 @@ private fun DebtorList(
             text = CreditStrings.NO_MATCHES,
             style = MaterialTheme.typography.titleMedium,
         )
-        else -> LazyColumn(
+        else -> PosLazyColumn(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(PosSpacing.xs),
         ) {
@@ -345,7 +345,7 @@ private fun StatementView(
 
     if (edit != null) CustomerEditConfirmDialog(edit, statement.displayName, viewModel)
 
-    LazyColumn(
+    PosLazyColumn(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(PosSpacing.xs),
     ) {

@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,9 +18,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
@@ -60,6 +59,7 @@ import com.posfab.shared.features.cash.domain.PayoutReason
 import com.posfab.shared.ui.components.PosChoiceRow
 import com.posfab.shared.ui.components.PosErrorBanner
 import com.posfab.shared.ui.components.PosPrimaryButton
+import com.posfab.shared.ui.components.PosScrollableColumn
 import com.posfab.shared.ui.components.PosSecondaryButton
 import com.posfab.shared.ui.components.PosSectionCard
 import com.posfab.shared.ui.components.PosTextField
@@ -128,8 +128,8 @@ private fun handleEscape(event: KeyEvent, state: CashState, viewModel: CashViewM
 
 @Composable
 private fun ColumnScope.ScrollingBody(content: @Composable ColumnScope.() -> Unit) {
-    Column(
-        modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
+    PosScrollableColumn(
+        modifier = Modifier.weight(1f).fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(PosSpacing.lg),
         content = content,
     )
@@ -638,8 +638,8 @@ private fun ModalScrim(content: @Composable ColumnScope.() -> Unit) {
             tonalElevation = 6.dp,
             modifier = Modifier.width(OVERLAY_WIDTH).heightIn(max = maxHeight - MODAL_VERTICAL_MARGIN),
         ) {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()).padding(PosSpacing.xl),
+            PosScrollableColumn(
+                contentPadding = PaddingValues(PosSpacing.xl),
                 verticalArrangement = Arrangement.spacedBy(PosSpacing.lg),
                 content = content,
             )

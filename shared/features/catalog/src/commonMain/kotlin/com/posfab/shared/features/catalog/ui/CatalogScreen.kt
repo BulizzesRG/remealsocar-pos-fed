@@ -4,17 +4,15 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ExpandLess
@@ -62,9 +60,11 @@ import com.posfab.shared.ui.components.PosChoiceRow
 import com.posfab.shared.ui.components.PosConfirmDialog
 import com.posfab.shared.ui.components.PosErrorBanner
 import com.posfab.shared.ui.components.PosLabeledSwitch
+import com.posfab.shared.ui.components.PosLazyColumn
 import com.posfab.shared.ui.components.PosMoneyText
 import com.posfab.shared.ui.components.PosNoticeRow
 import com.posfab.shared.ui.components.PosPrimaryButton
+import com.posfab.shared.ui.components.PosScrollableColumn
 import com.posfab.shared.ui.components.PosSecondaryButton
 import com.posfab.shared.ui.components.PosSectionCard
 import com.posfab.shared.ui.components.PosTextField
@@ -226,7 +226,7 @@ private fun ProductListPane(
                     modifier = Modifier.align(Alignment.TopCenter).padding(top = PosSpacing.lg),
                 )
             } else {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(PosSpacing.xs)) {
+                PosLazyColumn(verticalArrangement = Arrangement.spacedBy(PosSpacing.xs)) {
                     items(state.products, key = { it.id }) { product ->
                         ProductRow(
                             product = product,
@@ -352,12 +352,11 @@ private fun ProductFormPane(state: CatalogState, viewModel: CatalogViewModel) {
     val form = state.form
     val moneyKeyboard = KeyboardOptions(keyboardType = KeyboardType.Decimal)
     Column(modifier = Modifier.fillMaxSize()) {
-        Column(
+        PosScrollableColumn(
             modifier = Modifier
                 .weight(1f)
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(PosLayout.contentPadding),
+                .fillMaxWidth(),
+            contentPadding = PaddingValues(PosLayout.contentPadding),
             verticalArrangement = Arrangement.spacedBy(PosLayout.sectionSpacing),
         ) {
             Text(

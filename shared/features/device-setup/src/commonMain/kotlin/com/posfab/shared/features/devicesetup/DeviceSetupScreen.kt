@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -40,6 +41,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.posfab.shared.core.model.terminalDisplayName
 import com.posfab.shared.ui.components.PosBrandMark
+import com.posfab.shared.ui.components.PosScrollbarReserve
+import com.posfab.shared.ui.components.PosVerticalScrollbar
 import com.posfab.shared.ui.components.PosBrandPanel
 import com.posfab.shared.ui.components.PosErrorBanner
 import com.posfab.shared.ui.components.PosPrimaryButton
@@ -114,31 +117,36 @@ fun DeviceSetupScreenContent(
                     .fillMaxHeight(),
                 color = PosNeutral900,
             ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
-                        .padding(vertical = PosSpacing.xl),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    when {
-                        state.registeredDevice != null -> DeviceSetupSuccess(
-                            state = state,
-                            onContinue = onConfirmAndContinue,
-                        )
-                        state.isConfirmingRegistration -> DeviceSetupConfirmation(
-                            state = state,
-                            onBack = onEditRegistration,
-                            onConfirm = onConfirmAndRegister,
-                        )
-                        else -> DeviceSetupForm(
-                            state = state,
-                            onAdminUsernameChange = onAdminUsernameChange,
-                            onAdminPasswordChange = onAdminPasswordChange,
-                            onTerminalSelect = onTerminalSelect,
-                            onSubmit = onSubmit,
-                        )
+                val scrollState = rememberScrollState()
+                Box(modifier = Modifier.fillMaxSize()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(end = PosScrollbarReserve)
+                            .verticalScroll(scrollState)
+                            .padding(vertical = PosSpacing.xl),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        when {
+                            state.registeredDevice != null -> DeviceSetupSuccess(
+                                state = state,
+                                onContinue = onConfirmAndContinue,
+                            )
+                            state.isConfirmingRegistration -> DeviceSetupConfirmation(
+                                state = state,
+                                onBack = onEditRegistration,
+                                onConfirm = onConfirmAndRegister,
+                            )
+                            else -> DeviceSetupForm(
+                                state = state,
+                                onAdminUsernameChange = onAdminUsernameChange,
+                                onAdminPasswordChange = onAdminPasswordChange,
+                                onTerminalSelect = onTerminalSelect,
+                                onSubmit = onSubmit,
+                            )
+                        }
                     }
+                    PosVerticalScrollbar(rememberScrollbarAdapter(scrollState))
                 }
             }
         }
