@@ -259,6 +259,12 @@ class SaleRepositoryImpl(
     override suspend fun customer(customerId: Long): AppResult<SaleCustomer> =
         authorized { customersApi.get(it, customerId) }.mapCustomer()
 
+    override suspend fun findCustomerByCode(code: String): AppResult<SaleCustomer?> =
+        when (val result = authorized { customersApi.findByCode(it, code) }) {
+            is AppResult.Success -> AppResult.Success(result.value.toDomain())
+            is AppResult.Failure -> if (result.error.isCustomerNotFound()) AppResult.Success(null) else result
+        }
+
     override suspend fun createCustomer(name: String, nickname: String?, phone: String?): AppResult<SaleCustomer> {
         val request = CreateCustomerRequestDto(
             name = name.trim(),
@@ -339,6 +345,7 @@ class SaleRepositoryImpl(
         nickname = nickname?.trim()?.takeIf { it.isNotEmpty() },
         phone = phone?.takeIf { it.isNotBlank() },
         balance = balance.toDoubleOrNull() ?: 0.0,
+        active = active,
     )
 
     private fun AppResult<DraftDto>.mapDraft(): AppResult<SaleDraft> = when (this) {
@@ -410,6 +417,9 @@ class SaleRepositoryImpl(
     private fun AppError.isBarcodeNotFound(): Boolean =
         this is AppError.Validation && message.contains(BARCODE_NOT_FOUND, ignoreCase = true)
 
+    private fun AppError.isCustomerNotFound(): Boolean =
+        this is AppError.Validation && message.contains(CUSTOMER_NOT_FOUND, ignoreCase = true)
+
     private fun SaleLineInput.toFields(): LineFields = when (this) {
         is SaleLineInput.Qty -> LineFields(qty = formatQty(qty))
         is SaleLineInput.Amount -> LineFields(amount = formatMoney(amount))
@@ -441,6 +451,7 @@ class SaleRepositoryImpl(
         const val PAYMENT_STATUS_PAID = "PAID"
         const val PAYMENT_STATUS_ON_CREDIT = "ON_CREDIT"
         const val BARCODE_NOT_FOUND = "Barcode not found"
+        const val CUSTOMER_NOT_FOUND = "Customer not found"
         const val INSUFFICIENT_STOCK = "Insufficient stock"
         const val KITCHEN_LIMIT = 200
         const val SEARCH_FETCH_LIMIT = 50

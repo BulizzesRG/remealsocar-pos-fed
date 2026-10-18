@@ -72,6 +72,8 @@ class SaleUseCases(private val repository: SaleRepository) {
 
     suspend fun customer(customerId: Long): AppResult<SaleCustomer> = repository.customer(customerId)
 
+    suspend fun findCustomerByCode(code: String): AppResult<SaleCustomer?> = repository.findCustomerByCode(code)
+
     suspend fun createCustomer(name: String, nickname: String?, phone: String?): AppResult<SaleCustomer> =
         repository.createCustomer(name, nickname, phone)
 

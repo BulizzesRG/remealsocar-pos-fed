@@ -144,7 +144,7 @@ internal object SaleStrings {
 
     fun discount(amount: Double): String = "\u2212${money(amount)}"
 
-    fun notFoundWithCode(code: String): String = "No hay ningún producto con el código $code"
+    fun notFoundWithCode(code: String): String = "No hay ningún producto ni cliente con el código $code"
 
     fun accountChip(total: Double, count: Int): String = "${money(total)} · $count"
 

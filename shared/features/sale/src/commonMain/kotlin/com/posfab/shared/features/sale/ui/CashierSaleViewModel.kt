@@ -177,7 +177,8 @@ class CashierSaleViewModel(
                 return
             }
             _state.update { it.copy(query = "", searchResults = emptyList(), errorMessage = null, notice = null) }
-            scope.launch { lookupBarcode(query) }
+            val scannedOn = scannedAccount()
+            scope.launch { lookupBarcode(query, scannedOn) }
         } else {
             searchJob = scope.launch { search(query) }
         }
@@ -274,7 +275,8 @@ class CashierSaleViewModel(
     fun confirmPrompt() {
         promptScans.scanOnConfirm(now())?.let { scan ->
             dismissPrompt()
-            scope.launch { lookupBarcode(scan.code) }
+            val scannedOn = scannedAccount()
+            scope.launch { lookupBarcode(scan.code, scannedOn) }
             return
         }
         if (_state.value.promptInputRejected) {
@@ -791,13 +793,8 @@ class CashierSaleViewModel(
 
     fun confirmCharge() {
         paidScans.scanOnConfirm(now())?.let { scan ->
-            _state.update {
-                it.copy(
-                    paidInput = scan.valueBeforeBurst,
-                    paidInputRejected = false,
-                    notice = SaleStrings.FINISH_CHARGE_FIRST,
-                )
-            }
+            _state.update { it.copy(paidInput = scan.valueBeforeBurst, paidInputRejected = false) }
+            scope.launch { lookupScanWhileCharging(scan.code) }
             return
         }
         if (_state.value.paidInputRejected) {
@@ -1125,19 +1122,117 @@ class CashierSaleViewModel(
         }
     }
 
-    private suspend fun lookupBarcode(code: String) {
+    private fun scannedAccount(): Long? = _state.value.takeIf { it.phase == SalePhase.Selling }?.activeDraftId
+
+    private suspend fun lookupBarcode(code: String, scannedOn: Long?) {
         when (val lookup = saleUseCases.findProductByBarcode(code)) {
             is AppResult.Failure -> _state.update { it.copy(errorMessage = SaleErrorText.from(lookup.error)) }
             is AppResult.Success -> {
                 val product = lookup.value
                 when {
-                    product == null -> _state.update { it.copy(errorMessage = SaleStrings.notFoundWithCode(code)) }
+                    product == null -> lookupCustomerByCode(code) { applyScannedCustomer(it, scannedOn) }
                     !product.isSellable -> _state.update { it.copy(errorMessage = SaleStrings.NO_PRICE) }
                     else -> addProduct(product)
                 }
             }
         }
     }
+
+    private suspend fun lookupScanWhileCharging(code: String) {
+        when (val lookup = saleUseCases.findProductByBarcode(code)) {
+            is AppResult.Failure -> _state.update { it.copy(errorMessage = SaleErrorText.from(lookup.error)) }
+            is AppResult.Success ->
+                if (lookup.value == null) {
+                    lookupCustomerByCode(code, ::switchChargeToCredit)
+                } else {
+                    _state.update { it.copy(notice = SaleStrings.FINISH_CHARGE_FIRST) }
+                }
+        }
+    }
+
+    private suspend fun lookupCustomerByCode(
+        code: String,
+        onFound: (SaleCustomer) -> Unit,
+    ) {
+        when (val lookup = saleUseCases.findCustomerByCode(code)) {
+            is AppResult.Failure -> _state.update { it.copy(errorMessage = SaleErrorText.from(lookup.error)) }
+            is AppResult.Success -> {
+                val customer = lookup.value
+                when {
+                    customer == null -> _state.update { it.copy(errorMessage = SaleStrings.notFoundWithCode(code)) }
+                    !customer.active -> _state.update { it.copy(errorMessage = SaleStrings.CUSTOMER_INACTIVE) }
+                    else -> onFound(customer)
+                }
+            }
+        }
+    }
+
+    private fun applyScannedCustomer(customer: SaleCustomer, scannedOn: Long?) {
+        if (_state.value.phase == SalePhase.Charging) {
+            switchChargeToCredit(customer)
+            return
+        }
+        enqueue {
+            val wasDone = _state.value.phase == SalePhase.Done
+            resumeSelling()
+            val stillOnScannedAccount = wasDone || scannedOn == null || _state.value.activeDraftId == scannedOn
+            if (stillOnScannedAccount) openForScannedCustomer(customer)
+        }
+    }
+
+    private fun switchChargeToCredit(customer: SaleCustomer) {
+        var switched = false
+        _state.update { current ->
+            switched = false
+            when {
+                current.phase != SalePhase.Charging -> current
+                current.isPaidLocked || current.isCheckoutInFlight || current.credit.isAbonoBusy ->
+                    current.copy(notice = SaleStrings.FINISH_CHARGE_FIRST)
+                current.isDeliveryAccount -> current.copy(notice = SaleStrings.DELIVERY_READ_ONLY, errorMessage = null)
+                else -> {
+                    switched = true
+                    current.chargingOnCredit(customer)
+                }
+            }
+        }
+        if (switched) {
+            paidScans.reset()
+            customerSearchJob?.cancel()
+        }
+    }
+
+    private fun openForScannedCustomer(customer: SaleCustomer) {
+        val snapshot = _state.value
+        if (snapshot.phase != SalePhase.Selling) return
+        if (snapshot.confirm != null || snapshot.prompt != null || snapshot.isDeliveryAccount) return
+        if (snapshot.abonoOverlayOpen && snapshot.credit.isAbonoBusy) return
+        customerSearchJob?.cancel()
+        val hasLines = snapshot.draft?.lines?.isNotEmpty() == true && snapshot.listTotal > 0
+        when {
+            hasLines && !snapshot.abonoOverlayOpen -> {
+                paidScans.reset()
+                _state.update { it.chargingOnCredit(customer).copy(phase = SalePhase.Charging) }
+            }
+            customer.hasDebt -> _state.update {
+                it.copy(
+                    abonoOverlayOpen = true,
+                    credit = CreditState().selecting(customer),
+                    errorMessage = null,
+                    notice = null,
+                )
+            }
+            else -> _state.update { it.copy(notice = SaleStrings.noDebt(customer.displayName), errorMessage = null) }
+        }
+    }
+
+    private fun CashierSaleState.chargingOnCredit(customer: SaleCustomer): CashierSaleState = copy(
+        paymentType = SalePaymentType.CREDIT,
+        paidInput = "",
+        paidInputRejected = false,
+        credit = CreditState().selecting(customer),
+        errorMessage = null,
+        notice = null,
+    )
 
     private fun promptForProduct(product: SaleProduct) {
         if (_state.value.confirm != null) return

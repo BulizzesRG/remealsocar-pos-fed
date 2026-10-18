@@ -361,4 +361,46 @@ class CustomersContractTest {
         assertEquals("/customers", urls[1].encodedPath)
         assertFalse(assertIs<AppResult.Success<List<CustomerDto>>>(result).value.single().active)
     }
+
+    @Test
+    fun find_by_code_gets_the_customer_by_code() = runTest {
+        var path = ""
+        var method = HttpMethod.Post
+        var authorization: String? = null
+        val engine = MockEngine { request ->
+            path = request.url.encodedPath
+            method = request.method
+            authorization = request.headers["Authorization"]
+            respond(
+                """{"id":13,"code":"30000117","name":"Lupe Hernández","nickname":"Doña Lupe","active":false,"balance":"393.00"}""",
+                HttpStatusCode.OK,
+                jsonHeaders,
+            )
+        }
+        val api = CustomersApiClient(HttpClientFactory.create(config, engine), config)
+
+        val result = api.findByCode("tok", "30000117")
+
+        val customer = assertIs<AppResult.Success<CustomerDto>>(result).value
+        assertEquals("/customers/by-code/30000117", path)
+        assertEquals(HttpMethod.Get, method)
+        assertEquals("Bearer tok", authorization)
+        assertEquals(13L, customer.id)
+        assertEquals("393.00", customer.balance)
+        assertFalse(customer.active)
+    }
+
+    @Test
+    fun find_by_code_maps_not_found_to_a_validation_error() = runTest {
+        val engine = MockEngine {
+            respond("""{"error":"Customer not found"}""", HttpStatusCode.NotFound, jsonHeaders)
+        }
+        val api = CustomersApiClient(HttpClientFactory.create(config, engine), config)
+
+        val result = api.findByCode("tok", "39999999")
+
+        val error = assertIs<AppResult.Failure>(result).error
+        assertIs<AppError.Validation>(error)
+        assertEquals(true, error.message.contains("Customer not found"))
+    }
 }

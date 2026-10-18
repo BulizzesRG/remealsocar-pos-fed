@@ -23,6 +23,7 @@ import com.posfab.shared.features.sale.ui.CreditState
 import com.posfab.shared.features.sale.ui.LastAbono
 import com.posfab.shared.features.sale.ui.MAX_ACCOUNTS
 import com.posfab.shared.features.sale.ui.SaleConfirm
+import com.posfab.shared.features.sale.ui.SaleErrorText
 import com.posfab.shared.features.sale.ui.SalePhase
 import com.posfab.shared.features.sale.ui.SalePrompt
 import com.posfab.shared.features.sale.ui.SaleStrings
@@ -198,7 +199,7 @@ class CashierSaleViewModelTest {
 
         typePaid(vm, "50", HUMAN_MS)
         clock += PAUSE_MS
-        typePaid(vm, "1234567891234", SCANNER_MS)
+        typePaid(vm, repo.cigarro.barcode!!, SCANNER_MS)
         clock += SCANNER_MS
         vm.confirmCharge()
         advanceUntilIdle()
@@ -3170,6 +3171,288 @@ class CashierSaleViewModelTest {
         assertEquals(listOf(1L, 50L), state.accounts.map { it.id })
     }
 
+    private fun scanInSearch(vm: CashierSaleViewModel, code: String) {
+        vm.onQueryChange(code)
+        vm.onSubmit()
+    }
+
+    private fun TestScope.burstInPaidField(vm: CashierSaleViewModel, code: String) {
+        clock += PAUSE_MS
+        typePaid(vm, code, SCANNER_MS)
+        clock += SCANNER_MS
+        vm.confirmCharge()
+    }
+
+    @Test
+    fun customer_card_with_lines_opens_the_charge_in_fiar_with_the_customer() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.torta)
+        advanceUntilIdle()
+
+        scanInSearch(vm, JUAN_CODE)
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SalePhase.Charging, state.phase)
+        assertEquals(SalePaymentType.CREDIT, state.paymentType)
+        assertEquals(repo.juan, state.credit.customer)
+        assertEquals("", state.paidInput)
+        assertNull(state.errorMessage)
+        assertNull(state.notice)
+        assertEquals(0, repo.checkoutCalls)
+        assertEquals(1, repo.barcodeLookups)
+        assertEquals(1, repo.customerCodeLookups)
+    }
+
+    @Test
+    fun customer_card_after_a_slow_add_opens_the_charge_once_the_line_is_in() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        repo.addLineDelayMs = 500
+
+        vm.addProduct(repo.torta)
+        scanInSearch(vm, JUAN_CODE)
+        advanceTimeBy(100)
+        runCurrent()
+        assertEquals(SalePhase.Selling, vm.state.value.phase)
+
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SalePhase.Charging, state.phase)
+        assertEquals(SalePaymentType.CREDIT, state.paymentType)
+        assertEquals(repo.juan, state.credit.customer)
+        assertEquals(listOf(repo.torta.id), state.draft!!.lines.map { it.productId })
+        assertEquals(0, state.pendingMutations)
+        assertEquals(0, repo.checkoutCalls)
+    }
+
+    @Test
+    fun customer_card_is_dropped_when_the_cashier_switches_account_during_the_lookup() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(openDraftsSeed = listOf(1L, 2L))
+        val vm = start(repo)
+        vm.selectAccount(1L)
+        vm.addProduct(repo.torta)
+        advanceUntilIdle()
+        vm.selectAccount(2L)
+        vm.addProduct(repo.chicle)
+        advanceUntilIdle()
+        vm.selectAccount(1L)
+        repo.customerCodeLookupDelayMs = 500
+
+        scanInSearch(vm, JUAN_CODE)
+        advanceTimeBy(100)
+        runCurrent()
+        vm.selectAccount(2L)
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(1, repo.customerCodeLookups)
+        assertEquals(SalePhase.Selling, state.phase)
+        assertEquals(2L, state.activeDraftId)
+        assertEquals(SalePaymentType.CASH, state.paymentType)
+        assertNull(state.credit.customer)
+        assertFalse(state.abonoOverlayOpen)
+        assertEquals(0, repo.checkoutCalls)
+    }
+
+    @Test
+    fun customer_card_with_an_empty_cart_opens_abonar_with_the_customer() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+
+        scanInSearch(vm, JUAN_CODE)
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SalePhase.Selling, state.phase)
+        assertTrue(state.abonoOverlayOpen)
+        assertEquals(repo.juan, state.credit.customer)
+        assertNull(state.errorMessage)
+        assertEquals(0, repo.paymentCalls)
+    }
+
+    @Test
+    fun customer_card_without_debt_and_an_empty_cart_only_tells_so() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+
+        scanInSearch(vm, MARIA_CODE)
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SaleStrings.noDebt(repo.maria.displayName), state.notice)
+        assertFalse(state.abonoOverlayOpen)
+        assertEquals(SalePhase.Selling, state.phase)
+        assertNull(state.credit.customer)
+    }
+
+    @Test
+    fun inactive_customer_card_shows_the_message_and_opens_nothing() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.torta)
+        advanceUntilIdle()
+
+        scanInSearch(vm, INACTIVE_CODE)
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SaleStrings.CUSTOMER_INACTIVE, state.errorMessage)
+        assertEquals(SalePhase.Selling, state.phase)
+        assertFalse(state.abonoOverlayOpen)
+        assertNull(state.credit.customer)
+    }
+
+    @Test
+    fun unknown_code_looks_up_the_customer_once_and_shows_not_found() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+
+        scanInSearch(vm, "39999999")
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SaleStrings.notFoundWithCode("39999999"), state.errorMessage)
+        assertEquals("No hay ningún producto ni cliente con el código 39999999", state.errorMessage)
+        assertEquals(1, repo.customerCodeLookups)
+        assertFalse(state.abonoOverlayOpen)
+        assertEquals(SalePhase.Selling, state.phase)
+    }
+
+    @Test
+    fun customer_lookup_network_failure_shows_the_error_and_opens_nothing() = runTest(dispatcher) {
+        val repo = FakeSaleRepository().apply { failCustomerCodeLookupWithNetwork = true }
+        val vm = start(repo)
+
+        scanInSearch(vm, JUAN_CODE)
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SaleErrorText.from(AppError.Network("network down")), state.errorMessage)
+        assertFalse(state.abonoOverlayOpen)
+        assertEquals(SalePhase.Selling, state.phase)
+        assertNull(state.credit.customer)
+    }
+
+    @Test
+    fun customer_card_burst_in_the_cash_field_switches_to_fiar() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.torta)
+        advanceUntilIdle()
+        vm.startCharge()
+        typePaid(vm, "50", HUMAN_MS)
+
+        burstInPaidField(vm, JUAN_CODE)
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SalePhase.Charging, state.phase)
+        assertEquals(SalePaymentType.CREDIT, state.paymentType)
+        assertEquals(repo.juan, state.credit.customer)
+        assertEquals("", state.paidInput)
+        assertFalse(state.paidInputRejected)
+        assertNull(state.notice)
+        assertEquals(0, repo.checkoutCalls)
+    }
+
+    @Test
+    fun customer_card_burst_while_the_charge_is_in_flight_only_warns() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(checkoutDelayMs = 5_000)
+        val vm = start(repo)
+        vm.addProduct(repo.torta)
+        advanceUntilIdle()
+        vm.startCharge()
+        typePaid(vm, "50", HUMAN_MS)
+
+        burstInPaidField(vm, JUAN_CODE)
+        assertEquals("50", vm.state.value.paidInput)
+        vm.confirmCharge()
+        runCurrent()
+
+        val state = vm.state.value
+        assertTrue(state.isPaidLocked)
+        assertEquals(SaleStrings.FINISH_CHARGE_FIRST, state.notice)
+        assertEquals(SalePaymentType.CASH, state.paymentType)
+        assertNull(state.credit.customer)
+        assertEquals(1, repo.customerCodeLookups)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun product_burst_in_the_cash_field_still_warns_and_skips_the_customer_lookup() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.torta)
+        advanceUntilIdle()
+        vm.startCharge()
+
+        burstInPaidField(vm, repo.cigarro.barcode!!)
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SaleStrings.FINISH_CHARGE_FIRST, state.notice)
+        assertEquals(SalePaymentType.CASH, state.paymentType)
+        assertEquals(0, repo.customerCodeLookups)
+    }
+
+    @Test
+    fun customer_card_burst_while_charging_a_delivery_is_read_only() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(deliverySeed = listOf(deliveryDraft(50L, paysWith = null)))
+        val vm = start(repo)
+        vm.selectAccount(50L)
+        vm.startCharge()
+
+        burstInPaidField(vm, JUAN_CODE)
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SaleStrings.DELIVERY_READ_ONLY, state.notice)
+        assertEquals(SalePaymentType.CASH, state.paymentType)
+        assertNull(state.credit.customer)
+    }
+
+    @Test
+    fun customer_card_with_a_delivery_active_looks_nothing_up() = runTest(dispatcher) {
+        val repo = FakeSaleRepository(deliverySeed = listOf(deliveryDraft(50L)))
+        val vm = start(repo)
+        vm.selectAccount(50L)
+
+        scanInSearch(vm, JUAN_CODE)
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SaleStrings.DELIVERY_READ_ONLY, state.notice)
+        assertEquals(0, repo.customerCodeLookups)
+        assertEquals(0, repo.barcodeLookups)
+        assertFalse(state.abonoOverlayOpen)
+        assertEquals(SalePhase.Selling, state.phase)
+    }
+
+    @Test
+    fun customer_card_after_a_sale_opens_abonar_on_the_next_empty_account() = runTest(dispatcher) {
+        val repo = FakeSaleRepository()
+        val vm = start(repo)
+        vm.addProduct(repo.torta)
+        advanceUntilIdle()
+        vm.startCharge()
+        vm.payExact()
+        vm.confirmCharge()
+        advanceUntilIdle()
+        assertEquals(SalePhase.Done, vm.state.value.phase)
+
+        scanInSearch(vm, JUAN_CODE)
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SalePhase.Selling, state.phase)
+        assertTrue(state.draft!!.lines.isEmpty())
+        assertTrue(state.abonoOverlayOpen)
+        assertEquals(repo.juan, state.credit.customer)
+    }
+
     private companion object {
         const val HUMAN_MS = 120L
         const val SCANNER_MS = 5L
@@ -3178,6 +3461,8 @@ class CashierSaleViewModelTest {
 }
 
 private const val JUAN_CODE = "30000011"
+private const val MARIA_CODE = "30000028"
+private const val INACTIVE_CODE = "30000035"
 
 private class FakeSaleRepository(
     private val checkoutDelayMs: Long = 0,
@@ -3235,8 +3520,21 @@ private class FakeSaleRepository(
         phone = "5551234",
         balance = 350.0,
     )
-    val maria = SaleCustomer(id = 11L, code = "30000028", name = "María López", nickname = null, phone = null, balance = 0.0)
+    val maria = SaleCustomer(id = 11L, code = MARIA_CODE, name = "María López", nickname = null, phone = null, balance = 0.0)
     val customers: MutableMap<Long, SaleCustomer> = mutableMapOf(juan.id to juan, maria.id to maria)
+    val inactiveCustomer = SaleCustomer(
+        id = 12L,
+        code = INACTIVE_CODE,
+        name = "Juana Baja",
+        nickname = null,
+        phone = null,
+        balance = 20.0,
+        active = false,
+    )
+    var customerCodeLookups = 0
+    var failCustomerCodeLookupWithNetwork = false
+    var addLineDelayMs = 0L
+    var customerCodeLookupDelayMs = 0L
         val customerSearchQueries = mutableListOf<String>()
     var createCustomerCalls = 0
     var lastCreateNickname: String? = null
@@ -3396,6 +3694,7 @@ private class FakeSaleRepository(
     ): SaleMutationResult {
         addLineCalls += 1
         lastLineInput = input
+        if (addLineDelayMs > 0) delay(addLineDelayMs)
         if (forceConflictOnNextAdd) {
             forceConflictOnNextAdd = false
             val draft = drafts[draftId] ?: return SaleMutationResult.Failure(notFound())
@@ -3574,6 +3873,14 @@ private class FakeSaleRepository(
     override suspend fun customer(customerId: Long): AppResult<SaleCustomer> {
         if (failCustomerFetchWithNetwork) return AppResult.Failure(AppError.Network("network down"))
         return customers[customerId]?.let { AppResult.Success(it) } ?: AppResult.Failure(notFound())
+    }
+
+    override suspend fun findCustomerByCode(code: String): AppResult<SaleCustomer?> {
+        customerCodeLookups += 1
+        if (customerCodeLookupDelayMs > 0) delay(customerCodeLookupDelayMs)
+        if (failCustomerCodeLookupWithNetwork) return AppResult.Failure(AppError.Network("network down"))
+        val match = (customers.values + inactiveCustomer).firstOrNull { it.code == code }
+        return AppResult.Success(match)
     }
 
     override suspend fun createCustomer(name: String, nickname: String?, phone: String?): AppResult<SaleCustomer> {

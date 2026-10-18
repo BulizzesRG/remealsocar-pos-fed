@@ -658,6 +658,8 @@ private class FakeCustomersApi(private val searchResult: List<CustomerDto> = emp
 
     override suspend fun get(accessToken: String, customerId: Long): AppResult<CustomerDto> = error("unused")
 
+    override suspend fun findByCode(accessToken: String, code: String): AppResult<CustomerDto> = error("unused")
+
     override suspend fun create(accessToken: String, request: CreateCustomerRequestDto): AppResult<CustomerDto> {
         created += request
         return AppResult.Success(

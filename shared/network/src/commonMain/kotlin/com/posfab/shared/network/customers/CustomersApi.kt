@@ -14,6 +14,7 @@ import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
+import io.ktor.http.encodeURLPathPart
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -26,6 +27,7 @@ interface CustomersApi {
         includeInactive: Boolean = false,
     ): AppResult<List<CustomerDto>>
     suspend fun get(accessToken: String, customerId: Long): AppResult<CustomerDto>
+    suspend fun findByCode(accessToken: String, code: String): AppResult<CustomerDto>
     suspend fun create(accessToken: String, request: CreateCustomerRequestDto): AppResult<CustomerDto>
     suspend fun update(accessToken: String, customerId: Long, request: UpdateCustomerRequestDto): AppResult<CustomerDto>
     suspend fun updateAddress(accessToken: String, customerId: Long, address: String): AppResult<CustomerDto>
@@ -68,6 +70,15 @@ class CustomersApiClient(
         customerId: Long,
     ): AppResult<CustomerDto> = safeCall {
         httpClient.get("${config.apiBaseUrl}/customers/$customerId") {
+            bearer(accessToken)
+        }
+    }
+
+    override suspend fun findByCode(
+        accessToken: String,
+        code: String,
+    ): AppResult<CustomerDto> = safeCall {
+        httpClient.get("${config.apiBaseUrl}/customers/by-code/${code.encodeURLPathPart()}") {
             bearer(accessToken)
         }
     }

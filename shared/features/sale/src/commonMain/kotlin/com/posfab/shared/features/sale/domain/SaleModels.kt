@@ -70,6 +70,7 @@ data class SaleCustomer(
     val nickname: String?,
     val phone: String?,
     val balance: Double,
+    val active: Boolean = true,
 ) {
     val displayName: String
         get() = nickname?.takeIf { it.isNotBlank() }?.let { "$name ($it)" } ?: name

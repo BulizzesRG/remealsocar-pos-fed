@@ -290,6 +290,9 @@ private class FakeCustomersApi(
     override suspend fun get(accessToken: String, customerId: Long): AppResult<CustomerDto> =
         AppResult.Failure(AppError.Validation("Customer not found"))
 
+    override suspend fun findByCode(accessToken: String, code: String): AppResult<CustomerDto> =
+        AppResult.Failure(AppError.Validation("Customer not found"))
+
     override suspend fun create(accessToken: String, request: CreateCustomerRequestDto): AppResult<CustomerDto> {
         created += request
         return AppResult.Success(

@@ -503,6 +503,47 @@ class SaleRepositoryImplTest {
     }
 
     @Test
+    fun find_customer_by_code_maps_the_customer_with_active() = runTest {
+        val customersApi = FakeCustomersApi()
+        val repository = repository(FakePosApi(), customersApi = customersApi)
+
+        val found = assertIs<AppResult.Success<SaleCustomer?>>(repository.findCustomerByCode("30000011")).value
+
+        assertEquals(SaleCustomer(10L, "30000011", "Juan Pérez", "el Wero", "5551234", 350.0, active = true), found)
+        assertEquals(listOf("30000011"), customersApi.codeLookups)
+    }
+
+    @Test
+    fun find_customer_by_code_keeps_inactive_customers() = runTest {
+        val repository = repository(FakePosApi())
+
+        val found = assertIs<AppResult.Success<SaleCustomer?>>(repository.findCustomerByCode("30000035")).value
+
+        assertEquals(12L, found?.id)
+        assertEquals(false, found?.active)
+        assertEquals(20.0, found?.balance)
+    }
+
+    @Test
+    fun find_customer_by_code_returns_null_when_not_found() = runTest {
+        val repository = repository(FakePosApi())
+
+        val result = repository.findCustomerByCode("39999999")
+
+        assertNull(assertIs<AppResult.Success<SaleCustomer?>>(result).value)
+    }
+
+    @Test
+    fun find_customer_by_code_propagates_other_failures() = runTest {
+        val customersApi = FakeCustomersApi().apply { findByCodeFailure = AppError.Network("offline") }
+        val repository = repository(FakePosApi(), customersApi = customersApi)
+
+        val result = repository.findCustomerByCode("30000011")
+
+        assertEquals(AppError.Network("offline"), assertIs<AppResult.Failure>(result).error)
+    }
+
+    @Test
     fun set_channel_posts_channel_and_version_and_maps_the_draft() = runTest {
         val posApi = FakePosApi()
         val result = repository(posApi).setChannel(7L, SaleChannel.ONSITE, expectedVersion = 1)
@@ -1069,7 +1110,9 @@ private class FakeCustomersApi : CustomersApi {
         phone = "5551234",
         balance = "350.00",
     )
-    private val inactive = CustomerDto(id = 12L, name = "Juana Baja", active = false, balance = "20.00")
+    private val inactive = CustomerDto(id = 12L, code = "30000035", name = "Juana Baja", active = false, balance = "20.00")
+    val codeLookups = mutableListOf<String>()
+    var findByCodeFailure: AppError? = null
 
     override suspend fun search(
         accessToken: String,
@@ -1085,6 +1128,13 @@ private class FakeCustomersApi : CustomersApi {
 
     override suspend fun get(accessToken: String, customerId: Long): AppResult<CustomerDto> =
         AppResult.Success(juan)
+
+    override suspend fun findByCode(accessToken: String, code: String): AppResult<CustomerDto> {
+        codeLookups += code
+        findByCodeFailure?.let { return AppResult.Failure(it) }
+        return listOf(juan, inactive).firstOrNull { it.code == code }?.let { AppResult.Success(it) }
+            ?: AppResult.Failure(AppError.Validation("Customer not found"))
+    }
 
     override suspend fun create(accessToken: String, request: CreateCustomerRequestDto): AppResult<CustomerDto> {
         createRequests += request
