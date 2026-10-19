@@ -61,16 +61,7 @@ fun HomeScreen(
         }
 
         if (modules.isNotEmpty()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(200.dp),
-                horizontalArrangement = Arrangement.spacedBy(PosSpacing.lg),
-            ) {
-                modules.forEach { route ->
-                    ModuleTile(route = route, onClick = { onNavigate(route) })
-                }
-            }
+            ModuleGrid(modules = modules, onNavigate = onNavigate)
         }
 
         Spacer(Modifier.weight(1f))
@@ -84,6 +75,40 @@ fun HomeScreen(
         }
     }
 }
+
+@Composable
+private fun ModuleGrid(modules: List<ShellRoute>, onNavigate: (ShellRoute) -> Unit) {
+    val rows = moduleRows(modules)
+    val fullWeight = rows.maxOf { row -> row.sumOf { tileWeight(it).toDouble() } }.toFloat()
+    Column(verticalArrangement = Arrangement.spacedBy(PosSpacing.lg)) {
+        rows.forEach { row ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(MODULE_ROW_HEIGHT),
+                horizontalArrangement = Arrangement.spacedBy(PosSpacing.lg),
+            ) {
+                row.forEach { route ->
+                    ModuleTile(route = route, onClick = { onNavigate(route) })
+                }
+                val missing = fullWeight - row.sumOf { tileWeight(it).toDouble() }.toFloat()
+                if (missing > 0f) {
+                    Spacer(Modifier.weight(missing))
+                }
+            }
+        }
+    }
+}
+
+internal fun moduleRows(modules: List<ShellRoute>): List<List<ShellRoute>> =
+    if (modules.size > SINGLE_ROW_MAX_MODULES) modules.chunked(TILES_PER_ROW) else listOf(modules)
+
+private fun tileWeight(route: ShellRoute): Float = if (route == ShellRoute.SELL) SELL_WEIGHT else 1f
+
+private const val SINGLE_ROW_MAX_MODULES = 6
+private const val TILES_PER_ROW = 4
+private const val SELL_WEIGHT = 2f
+private val MODULE_ROW_HEIGHT = 200.dp
 
 private data class StripLook(
     val icon: ImageVector,
@@ -142,7 +167,7 @@ private fun RowScope.ModuleTile(route: ShellRoute, onClick: () -> Unit) {
     Card(
         onClick = onClick,
         modifier = Modifier
-            .weight(if (isSell) 2f else 1f)
+            .weight(tileWeight(route))
             .fillMaxHeight(),
         colors = CardDefaults.cardColors(containerColor = container, contentColor = content),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp, pressedElevation = 6.dp),

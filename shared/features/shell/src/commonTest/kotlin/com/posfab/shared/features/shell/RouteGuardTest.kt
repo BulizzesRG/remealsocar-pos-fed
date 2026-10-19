@@ -38,14 +38,15 @@ class RouteGuardTest {
                 ShellRoute.DAILY_SALES,
                 ShellRoute.PEDIDOS,
                 ShellRoute.PRODUCTS,
+                ShellRoute.SURTIDO,
             ),
             RouteGuard.modules(manager),
         )
     }
 
     @Test
-    fun cashier_modules_are_sell_and_cash() {
-        assertEquals(listOf(ShellRoute.SELL, ShellRoute.CASH), RouteGuard.modules(cashier))
+    fun cashier_modules_are_sell_cash_and_surtido() {
+        assertEquals(listOf(ShellRoute.SELL, ShellRoute.CASH, ShellRoute.SURTIDO), RouteGuard.modules(cashier))
     }
 
     @Test
@@ -95,6 +96,31 @@ class RouteGuardTest {
     }
 
     @Test
+    fun surtido_comes_after_products_and_before_help() {
+        val routes = ShellRoute.entries
+        assertEquals(routes.indexOf(ShellRoute.PRODUCTS) + 1, routes.indexOf(ShellRoute.SURTIDO))
+        assertEquals(routes.indexOf(ShellRoute.SURTIDO) + 1, routes.indexOf(ShellRoute.HELP))
+        assertEquals("Surtido", ShellRoute.SURTIDO.title)
+        assertEquals(Permission.SELL, ShellRoute.SURTIDO.permission)
+    }
+
+    @Test
+    fun surtido_is_for_everyone_who_sells() {
+        assertTrue(RouteGuard.canAccess(manager, ShellRoute.SURTIDO))
+        assertTrue(RouteGuard.canAccess(cashier, ShellRoute.SURTIDO))
+        assertFalse(RouteGuard.canAccess(orders, ShellRoute.SURTIDO))
+        assertFalse(RouteGuard.canAccess(stocker, ShellRoute.SURTIDO))
+    }
+
+    @Test
+    fun admin_sees_seven_modules_with_surtido_last() {
+        val admin = session(UserRole.ADMIN, Permission.entries.toSet())
+        val modules = RouteGuard.modules(admin)
+        assertEquals(7, modules.size)
+        assertEquals(ShellRoute.SURTIDO, modules.last())
+    }
+
+    @Test
     fun stocker_is_denied_sell_and_cash() {
         assertFalse(RouteGuard.canAccess(stocker, ShellRoute.SELL))
         assertFalse(RouteGuard.canAccess(stocker, ShellRoute.CASH))
@@ -103,7 +129,7 @@ class RouteGuardTest {
     @Test
     fun allowed_routes_keep_enum_order_and_include_home_and_help() {
         assertEquals(
-            listOf(ShellRoute.HOME, ShellRoute.SELL, ShellRoute.CASH, ShellRoute.HELP),
+            listOf(ShellRoute.HOME, ShellRoute.SELL, ShellRoute.CASH, ShellRoute.SURTIDO, ShellRoute.HELP),
             RouteGuard.allowedRoutes(cashier),
         )
         assertEquals(listOf(ShellRoute.HOME, ShellRoute.HELP), RouteGuard.allowedRoutes(stocker))

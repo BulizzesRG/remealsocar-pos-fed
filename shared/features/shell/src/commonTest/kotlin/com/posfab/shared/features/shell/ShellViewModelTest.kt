@@ -25,6 +25,7 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -167,7 +168,30 @@ class ShellViewModelTest {
     fun state_exposes_modules_for_the_session() = runTest(dispatcher) {
         val vm = makeViewModel(FakeCashRepository(AppResult.Success(null)), cashierPermissions)
 
-        assertEquals(listOf(ShellRoute.SELL, ShellRoute.CASH), vm.state.value.modules)
+        assertEquals(listOf(ShellRoute.SELL, ShellRoute.CASH, ShellRoute.SURTIDO), vm.state.value.modules)
+    }
+
+    @Test
+    fun cashier_can_open_surtido() = runTest(dispatcher) {
+        val vm = makeViewModel(FakeCashRepository(AppResult.Success(null)), cashierPermissions)
+
+        vm.select(ShellRoute.SURTIDO)
+
+        assertEquals(ShellRoute.SURTIDO, vm.state.value.selectedRoute)
+    }
+
+    @Test
+    fun orders_and_stocker_cannot_open_surtido() = runTest(dispatcher) {
+        val orders = makeViewModel(FakeCashRepository(AppResult.Success(null)), ordersPermissions, setOf(UserRole.ORDERS))
+        val stocker = makeViewModel(FakeCashRepository(AppResult.Success(null)), stockerPermissions)
+
+        orders.select(ShellRoute.SURTIDO)
+        stocker.select(ShellRoute.SURTIDO)
+
+        assertEquals(ShellRoute.PEDIDOS, orders.state.value.selectedRoute)
+        assertEquals(ShellRoute.HOME, stocker.state.value.selectedRoute)
+        assertFalse(ShellRoute.SURTIDO in orders.state.value.modules)
+        assertFalse(ShellRoute.SURTIDO in stocker.state.value.modules)
     }
 
     @Test

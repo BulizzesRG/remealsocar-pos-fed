@@ -10,5 +10,6 @@ enum class ShellRoute(val title: String, val permission: Permission?) {
     DAILY_SALES("Ventas del día", Permission.VIEW_SALES),
     PEDIDOS("Pedidos", Permission.MANAGE_ORDERS),
     PRODUCTS("Productos", Permission.MANAGE_PRODUCTS),
+    SURTIDO("Surtido", Permission.SELL),
     HELP("Ayuda", null),
 }
